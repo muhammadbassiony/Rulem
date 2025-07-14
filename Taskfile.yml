@@ -1,0 +1,41 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the rulemig CLI binary
+    cmds:
+      - go build -o rulemig ./cmd/rulemig
+
+  run:
+    desc: Run the rulemig CLI interactively
+    cmds:
+      - go run ./cmd/rulemig
+
+  test:
+    desc: Run all unit tests
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: Run golangci-lint on the codebase
+    cmds:
+      - |
+        if ! command -v golangci-lint >/dev/null 2>&1; then 
+          echo 'golangci-lint not found. Installing...'; 
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; 
+        fi
+        golangci-lint run ./...
+
+  tidy:
+    desc: Clean up go.mod and go.sum
+    cmds:
+      - go mod tidy
+
+  clean:
+    desc: Remove built binaries and temporary files
+    cmds:
+      - rm -f rulemig
+
+  dev:
+    desc: Build, lint, and test in sequence
+    deps: [tidy, lint, test, build]

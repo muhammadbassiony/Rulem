@@ -1,41 +1,67 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"rulemig/internal/config"
+	"rulemig/internal/tui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-// main is the entry point for the rulemig CLI tool.
 func main() {
-	cfgPath := filepath.Join(os.Getenv("HOME"), ".rulemig.yaml")
-	cfg, err := config.Load(cfgPath)
+	// TODO reenable once we have a proper logging setup
+	// // Initialize logging
+	// if len(os.Getenv("DEBUG")) > 0 {
+	// 	f, err := tea.LogToFile("debug.log", "debug")
+	// 	if err != nil {
+	// 		slog.Error("Failed to open log file", "error", err)
+	// 		os.Exit(1)
+	// 	}
+	// 	defer f.Close()
+	// }
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		// Level: slog.LevelDebug,
+		Level: slog.LevelError,
+	}))
+	slog.SetDefault(logger)
+
+	// Check if first run and handle setup
+	if config.IsFirstRun() {
+		if err := runFirstTimeSetup(); err != nil {
+			slog.Error("Setup failed", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	// Load configuration
+	cfg, err := config.Load()
 	if err != nil {
-		fmt.Println("Error loading config:", err)
+		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Current storage directory: %s\n", cfg.StorageDir)
-	fmt.Print("Would you like to set a new storage directory? (y/N): ")
-	reader := bufio.NewReader(os.Stdin)
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	if answer == "y" || answer == "yes" {
-		fmt.Print("Enter new storage directory path: ")
-		newDir, _ := reader.ReadString('\n')
-		newDir = strings.TrimSpace(newDir)
-		if newDir != "" {
-			if err := cfg.SetStorageDir(newDir, cfgPath); err != nil {
-				fmt.Println("Failed to update storage directory:", err)
-				os.Exit(1)
-			}
-			fmt.Println("Storage directory updated to:", newDir)
-		}
-	} else {
-		fmt.Println("Using existing storage directory.")
+	fmt.Println("Configuration loaded successfully.", cfg.StorageDir, cfg.InitTime)
+}
+
+func runFirstTimeSetup() error {
+	fmt.Println("Welcome to rulemig! Let's set up your configuration.")
+
+	setupModel := tui.NewSetupModel()
+	program := tea.NewProgram(setupModel)
+
+	finalModel, err := program.Run()
+	if err != nil {
+		return fmt.Errorf("setup failed: %w", err)
 	}
+
+	// Extract setup results and save config
+	setup := finalModel.(tui.SetupModel)
+	if setup.Cancelled {
+		return fmt.Errorf("setup cancelled by user")
+	}
+
+	return nil
 }

@@ -1,90 +1,45 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
-func TestConfigPaths(t *testing.T) {
-	t.Log("Testing ConfigPaths for different platforms")
+func TestConfigPath(t *testing.T) {
+	t.Log("Testing ConfigPath using go-app-paths")
 
-	// Save original environment
-	originalHome := os.Getenv("HOME")
-	originalXDGConfig := os.Getenv("XDG_CONFIG_HOME")
-
-	defer func() {
-		os.Setenv("HOME", originalHome)
-		if originalXDGConfig != "" {
-			os.Setenv("XDG_CONFIG_HOME", originalXDGConfig)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	}()
-
-	tests := []struct {
-		name           string
-		setupEnv       func()
-		expectPrimary  func() string
-		expectFallback func() string
-	}{
-		{
-			name: "default macOS paths",
-			setupEnv: func() {
-				os.Setenv("HOME", "/Users/test")
-				os.Unsetenv("XDG_CONFIG_HOME")
-			},
-			expectPrimary: func() string {
-				return "/Users/test/.config/rulemig/config.yaml"
-			},
-			expectFallback: func() string {
-				return "/Users/test/.rulemig.yaml"
-			},
-		},
-		{
-			name: "macOS with XDG_CONFIG_HOME",
-			setupEnv: func() {
-				os.Setenv("HOME", "/Users/test")
-				os.Setenv("XDG_CONFIG_HOME", "/custom/config")
-			},
-			expectPrimary: func() string {
-				return "/custom/config/rulemig/config.yaml"
-			},
-			expectFallback: func() string {
-				return "/Users/test/.rulemig.yaml"
-			},
-		},
-		{
-			name: "Linux with XDG_CONFIG_HOME",
-			setupEnv: func() {
-				os.Setenv("HOME", "/home/test")
-				os.Setenv("XDG_CONFIG_HOME", "/custom/config")
-			},
-			expectPrimary: func() string {
-				return "/custom/config/rulemig/config.yaml"
-			},
-			expectFallback: func() string {
-				return "/home/test/.rulemig.yaml"
-			},
-		},
+	// Test that ConfigPaths returns valid paths
+	primary, err := ConfigPath()
+	fmt.Println(primary)
+	if err != nil {
+		t.Fatalf("Failed to get config path: %s", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.setupEnv()
-
-			primary, fallback := ConfigPaths()
-
-			if primary != tt.expectPrimary() {
-				t.Errorf("Expected primary path %s, got %s", tt.expectPrimary(), primary)
-			}
-
-			if fallback != tt.expectFallback() {
-				t.Errorf("Expected fallback path %s, got %s", tt.expectFallback(), fallback)
-			}
-		})
+	// Both paths should be non-empty
+	if primary == "" {
+		t.Error("Primary config path should not be empty")
 	}
+
+	// Path should be absolute or relative
+	if !filepath.IsAbs(primary) && !strings.HasPrefix(primary, ".") {
+		t.Errorf("Primary path should be absolute or relative, got: %s", primary)
+	}
+
+	// The path should contain "rulemig"
+	if !strings.Contains(primary, "rulemig") {
+		t.Errorf("Primary path should contain 'rulemig', got: %s", primary)
+	}
+
+	// Primary should end with config.yaml
+	if !strings.HasSuffix(primary, "config.yaml") {
+		t.Errorf("Primary path should end with 'config.yaml', got: %s", primary)
+	}
+
+	t.Logf("Primary config path: %s", primary)
 }
 
 func TestConfigSaveLoad(t *testing.T) {

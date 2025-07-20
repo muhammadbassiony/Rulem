@@ -3,6 +3,7 @@ module rulemig
 go 1.24.0
 
 require (
+	github.com/adrg/xdg v0.5.3
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.6
 	github.com/charmbracelet/lipgloss v1.1.0

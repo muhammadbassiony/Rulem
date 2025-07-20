@@ -23,8 +23,8 @@ func main() {
 	// 	defer f.Close()
 	// }
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		// Level: slog.LevelDebug,
-		Level: slog.LevelError,
+		Level: slog.LevelDebug,
+		// Level: slog.LevelError,
 	}))
 	slog.SetDefault(logger)
 

@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 tasks:
   build:
@@ -14,15 +14,15 @@ tasks:
   test:
     desc: Run all unit tests
     cmds:
-      - go test ./...
+      - go test --cover ./...
 
   lint:
     desc: Run golangci-lint on the codebase
     cmds:
       - |
-        if ! command -v golangci-lint >/dev/null 2>&1; then 
-          echo 'golangci-lint not found. Installing...'; 
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; 
+        if ! command -v golangci-lint >/dev/null 2>&1; then
+          echo 'golangci-lint not found. Installing...';
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest;
         fi
         golangci-lint run ./...
 

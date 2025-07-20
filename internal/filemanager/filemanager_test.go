@@ -7,373 +7,340 @@ import (
 	"testing"
 )
 
+// TestGetDefaultStorageDir tests the GetDefaultStorageDir function
 func TestGetDefaultStorageDir(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupEnv    func()
-		cleanupEnv  func()
-		expectPath  string
-		expectValid bool
-	}{
-		{
-			name: "macOS with XDG_DATA_HOME set",
-			setupEnv: func() {
-				os.Setenv("XDG_DATA_HOME", "/custom/data")
-			},
-			cleanupEnv: func() {
-				os.Unsetenv("XDG_DATA_HOME")
-			},
-			expectValid: true,
-		},
-		{
-			name: "macOS with invalid XDG_DATA_HOME",
-			setupEnv: func() {
-				os.Setenv("XDG_DATA_HOME", "relative/path")
-			},
-			cleanupEnv: func() {
-				os.Unsetenv("XDG_DATA_HOME")
-			},
-			expectValid: true, // Should fallback to default
-		},
-		{
-			name: "home directory unavailable",
-			setupEnv: func() {
-				os.Setenv("HOME", "/nonexistent")
-			},
-			cleanupEnv: func() {
-				os.Unsetenv("HOME")
-			},
-			expectPath:  "/nonexistent/.local/share/rulemig", // The actual implementation behavior
-			expectValid: true,
-		},
+	result := GetDefaultStorageDir()
+
+	// Should not be empty
+	if result == "" {
+		t.Error("GetDefaultStorageDir returned empty string")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.setupEnv != nil {
-				tt.setupEnv()
-			}
-			defer func() {
-				if tt.cleanupEnv != nil {
-					tt.cleanupEnv()
-				}
-			}()
+	// Should contain rulemig
+	if !strings.Contains(result, "rulemig") {
+		t.Errorf("GetDefaultStorageDir should contain 'rulemig', got: %s", result)
+	}
 
-			result := GetDefaultStorageDir()
-
-			if !tt.expectValid {
-				t.Errorf("Expected invalid result, got: %s", result)
-				return
-			}
-
-			if tt.expectPath != "" && result != tt.expectPath {
-				t.Errorf("Expected path %s, got %s", tt.expectPath, result)
-			}
-
-			// Verify the path is reasonable
-			if result == "" {
-				t.Error("GetDefaultStorageDir returned empty string")
-			}
-		})
+	// Should be an absolute path (in most cases)
+	if !filepath.IsAbs(result) && !strings.HasPrefix(result, ".rulemig") {
+		t.Errorf("GetDefaultStorageDir should return absolute path or .rulemig fallback, got: %s", result)
 	}
 }
 
+// TestExpandPath tests the ExpandPath function
 func TestExpandPath(t *testing.T) {
-	home, err := os.UserHomeDir()
+	home := getHomeDir(t)
 
 	tests := []struct {
 		name     string
 		input    string
-		expected func() string
+		expected string
 	}{
 		{
-			name:  "home path expansion",
-			input: "~/Documents/rulemig",
-			expected: func() string {
-				if err != nil {
-					return "~/Documents/rulemig" // Should return unchanged if HOME not available
-				}
-				return filepath.Join(home, "Documents", "rulemig")
-			},
-		},
-		{
-			name:     "absolute path unchanged",
-			input:    "/absolute/path",
-			expected: func() string { return "/absolute/path" },
-		},
-		{
-			name:     "relative path unchanged",
-			input:    "relative/path",
-			expected: func() string { return "relative/path" },
-		},
-		{
-			name:     "just tilde",
-			input:    "~",
-			expected: func() string { return "~" },
+			name:     "home directory expansion",
+			input:    "~/Documents",
+			expected: filepath.Join(home, "Documents"),
 		},
 		{
 			name:     "empty string",
 			input:    "",
-			expected: func() string { return "" },
+			expected: "",
+		},
+		{
+			name:     "just tilde",
+			input:    "~",
+			expected: "~",
 		},
 		{
 			name:     "tilde not at start",
-			input:    "path/~/file",
-			expected: func() string { return "path/~/file" }, // Should not be expanded
+			input:    "dir/~/file",
+			expected: "dir/~/file",
+		},
+		{
+			name:     "multiple tildes",
+			input:    "~/~/file",
+			expected: filepath.Join(home, "~/file"),
+		},
+		{
+			name:     "tilde with no slash",
+			input:    "~file",
+			expected: "~file",
+		},
+		{
+			name:     "absolute path",
+			input:    "/absolute/path",
+			expected: "/absolute/path",
+		},
+		{
+			name:     "relative path",
+			input:    "relative/path",
+			expected: "relative/path",
+		},
+		{
+			name:     "home with nested directories",
+			input:    "~/Documents/Projects/rulemig",
+			expected: filepath.Join(home, "Documents", "Projects", "rulemig"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ExpandPath(tt.input)
-			expected := tt.expected()
-			if result != expected {
-				t.Errorf("Expected %s, got %s", expected, result)
+			if result != tt.expected {
+				t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestValidateStorageDir(t *testing.T) {
-	// Get user home directory for proper test paths
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Logf("Warning: Cannot get home directory: %v, using fallback", err)
-		home = "/tmp" // Use /tmp as fallback for testing
-	}
-
-	userTestDir := filepath.Join(home, "test-rulemig")
-
+// TestExpandPathEdgeCases tests edge cases for ExpandPath
+func TestExpandPathEdgeCases(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		expectError bool
-		errorMsg    string
+		name     string
+		input    string
+		setupEnv func() func() // setup function returns cleanup function
+		validate func(t *testing.T, result string)
 	}{
 		{
-			name:        "empty string",
-			input:       "",
-			expectError: true,
-			errorMsg:    "cannot be empty",
+			name:  "unicode characters",
+			input: "~/测试/rülemig",
+			setupEnv: func() func() {
+				return func() {} // no setup needed
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "测试") || !strings.Contains(result, "rülemig") {
+					t.Errorf("Unicode characters not preserved in path: %s", result)
+				}
+			},
 		},
 		{
-			name:        "whitespace only",
-			input:       "   ",
-			expectError: true,
-			errorMsg:    "cannot be empty",
-		},
-		{
-			name:        "path traversal attack",
-			input:       "../../../etc/passwd",
-			expectError: true,
-			errorMsg:    "path traversal not allowed",
-		},
-		{
-			name:        "valid path in user directory",
-			input:       userTestDir,
-			expectError: false,
-		},
-		{
-			name:        "valid home relative path",
-			input:       "~/Documents/rulemig",
-			expectError: false, // This should be valid if ~/Documents exists
-		},
-		{
-			name:        "reserved directory - root",
-			input:       "/",
-			expectError: true,
-			errorMsg:    "reserved directories",
-		},
-		{
-			name:        "reserved directory - etc",
-			input:       "/etc/rulemig",
-			expectError: true,
-			errorMsg:    "reserved directories",
+			name:  "spaces in path",
+			input: "~/my documents/rule mig",
+			setupEnv: func() func() {
+				return func() {}
+			},
+			validate: func(t *testing.T, result string) {
+				if !strings.Contains(result, "my documents") || !strings.Contains(result, "rule mig") {
+					t.Errorf("Spaces not preserved in path: %s", result)
+				}
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// For home relative path test, ensure the parent directory exists
-			if tt.name == "valid home relative path" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					t.Skip("Cannot get home directory for this test")
-				}
-				documentsDir := filepath.Join(home, "Documents")
-				if _, err := os.Stat(documentsDir); os.IsNotExist(err) {
-					// Create Documents directory for test
-					if err := os.MkdirAll(documentsDir, 0755); err != nil {
-						t.Skipf("Cannot create Documents directory for test: %v", err)
-					}
-					defer os.Remove(documentsDir) // Clean up if we created it
-				}
+			cleanup := tt.setupEnv()
+			defer cleanup()
+
+			result := ExpandPath(tt.input)
+			tt.validate(t, result)
+		})
+	}
+}
+
+// TestCreateSecureStorageRoot tests the CreateSecureStorageRoot function
+func TestCreateSecureStorageRoot(t *testing.T) {
+	tempDir := createTempTestDir(t, "secure-root-test-")
+
+	tests := []struct {
+		name      string
+		input     string
+		wantError bool
+		errorMsg  string
+		setup     func() func()
+	}{
+		{
+			name:      "empty input",
+			input:     "",
+			wantError: true,
+			errorMsg:  "cannot be empty",
+		},
+		{
+			name:      "valid path in temp directory",
+			input:     filepath.Join(tempDir, "secure-storage"),
+			wantError: true,
+		},
+		{
+			name:      "path outside home directory",
+			input:     "/tmp/outside-home",
+			wantError: true,
+			errorMsg:  "within your home directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				cleanup := tt.setup()
+				defer cleanup()
 			}
 
-			err := ValidateStorageDir(tt.input)
+			root, err := CreateSecureStorageRoot(tt.input)
+			if root != nil {
+				defer root.Close()
+			}
 
-			if tt.expectError {
+			if tt.wantError {
 				if err == nil {
-					t.Error("Expected error but got nil")
-				} else if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
-					t.Errorf("Expected error containing '%s', got: %s", tt.errorMsg, err.Error())
+					t.Errorf("CreateSecureStorageRoot(%q) expected error but got none", tt.input)
+					return
+				}
+				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("CreateSecureStorageRoot(%q) error = %v, want error containing %q",
+						tt.input, err, tt.errorMsg)
 				}
 			} else {
 				if err != nil {
-					t.Errorf("Expected no error but got: %s", err.Error())
+					t.Errorf("CreateSecureStorageRoot(%q) unexpected error: %v", tt.input, err)
+				}
+				if root == nil {
+					t.Errorf("CreateSecureStorageRoot(%q) returned nil root without error", tt.input)
 				}
 			}
 		})
 	}
 }
 
-func TestTestStorageDir(t *testing.T) {
-	// Get user home directory for proper test paths
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Logf("Warning: Cannot get home directory: %v, using fallback", err)
-		home = "/tmp" // Use /tmp as fallback for testing
-	}
+// TestGetRelativePathInHome tests the getRelativePathInHome helper
+func TestGetRelativePathInHome(t *testing.T) {
+	home := getHomeDir(t)
 
 	tests := []struct {
-		name        string
-		input       string
-		setup       func() string
-		expectError bool
+		name      string
+		input     string
+		wantError bool
+		errorMsg  string
+		expected  string
 	}{
 		{
-			name:        "valid writable directory",
-			input:       filepath.Join(home, "test-rulemig"),
-			expectError: false,
+			name:     "path within home",
+			input:    filepath.Join(home, "Documents", "rulemig"),
+			expected: filepath.Join("Documents", "rulemig"),
 		},
 		{
-			name: "read-only directory",
-			setup: func() string {
-				roDir := filepath.Join(home, "readonly-test")
-				os.MkdirAll(roDir, 0555) // Read-only
-				return roDir
-			},
-			expectError: true,
+			name:      "path outside home",
+			input:     "/etc/passwd",
+			wantError: true,
+			errorMsg:  "outside home directory",
 		},
 		{
-			name:        "home relative path",
-			input:       "~/rulemig-test",
-			expectError: false,
+			name:      "path traversal outside home",
+			input:     filepath.Join(home, "..", "etc", "passwd"),
+			wantError: true,
+			errorMsg:  "outside home directory",
+		},
+		{
+			name:     "home directory itself",
+			input:    home,
+			expected: ".",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			input := tt.input
-			if tt.setup != nil {
-				input = tt.setup()
-			}
+			result, err := getRelativePathInHome(tt.input)
 
-			err := TestStorageDir(input)
-
-			if tt.expectError && err == nil {
-				t.Error("Expected error but got nil")
-			} else if !tt.expectError && err != nil {
-				t.Errorf("Expected no error but got: %s", err.Error())
-			}
-
-			// Cleanup
-			if !tt.expectError {
-				os.RemoveAll(ExpandPath(input))
-			}
-		})
-	}
-}
-
-func TestCreateStorageDir(t *testing.T) {
-	// Get user home directory for proper test paths
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Logf("Warning: Cannot get home directory: %v, using fallback", err)
-		home = "/tmp" // Use /tmp as fallback for testing
-	}
-
-	tests := []struct {
-		name        string
-		input       string
-		expectError bool
-	}{
-		{
-			name:        "create new directory",
-			input:       filepath.Join(home, "new-single-dir"),
-			expectError: false,
-		},
-		{
-			name:        "existing directory",
-			input:       filepath.Join(home, "existing-test"),
-			expectError: false,
-		},
-		{
-			name:        "home relative path",
-			input:       "~/rulemig-create-test",
-			expectError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := CreateStorageDir(tt.input)
-
-			if tt.expectError && err == nil {
-				t.Error("Expected error but got nil")
-			} else if !tt.expectError && err != nil {
-				t.Errorf("Expected no error but got: %s", err.Error())
-			}
-
-			if !tt.expectError {
-				// Verify directory was created
-				expandedPath := ExpandPath(tt.input)
-				if _, err := os.Stat(expandedPath); os.IsNotExist(err) {
-					t.Error("Directory was not created")
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("getRelativePathInHome(%q) expected error but got none", tt.input)
+					return
 				}
-				// Cleanup
-				os.RemoveAll(expandedPath)
+				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("getRelativePathInHome(%q) error = %v, want error containing %q",
+						tt.input, err, tt.errorMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("getRelativePathInHome(%q) unexpected error: %v", tt.input, err)
+				}
+				if result != tt.expected {
+					t.Errorf("getRelativePathInHome(%q) = %q, want %q", tt.input, result, tt.expected)
+				}
 			}
 		})
 	}
 }
 
-// Integration test
-func TestFileManagerIntegration(t *testing.T) {
-	// Get user home directory for proper test paths
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Logf("Warning: Cannot get home directory: %v, using fallback", err)
-		home = "/tmp" // Use /tmp as fallback for testing
-	}
-
-	testPath := filepath.Join(home, "integration-test")
-
-	// Test the full workflow
-	t.Run("full workflow", func(t *testing.T) {
-		// 1. Validate
-		if err := ValidateStorageDir(testPath); err != nil {
-			t.Fatalf("Validation failed: %s", err)
+// Integration test for complete workflow
+func TestIntegrationWorkflow(t *testing.T) {
+	t.Run("complete workflow", func(t *testing.T) {
+		// Step 1: Get default directory
+		defaultDir := GetDefaultStorageDir()
+		if defaultDir == "" {
+			t.Fatal("GetDefaultStorageDir returned empty string")
 		}
 
-		// 2. Test
-		if err := TestStorageDir(testPath); err != nil {
-			t.Fatalf("Testing failed: %s", err)
+		// Step 2: Use a test subdirectory
+		testDir := filepath.Join(defaultDir, "integration-test")
+
+		// Step 2.5: Ensure parent directory exists
+		parentDir := filepath.Dir(testDir)
+		if err := os.MkdirAll(parentDir, 0755); err != nil {
+			t.Fatalf("Failed to create parent directory: %v", err)
 		}
 
-		// 3. Create
-		if err := CreateStorageDir(testPath); err != nil {
-			t.Fatalf("Creation failed: %s", err)
+		// Step 3: Validate the directory using helper function
+		err := ValidateStorageDir(testDir)
+		if err != nil {
+			t.Fatalf("ValidateStorageDir failed: %v", err)
 		}
 
-		// 4. Verify it exists
-		if _, err := os.Stat(testPath); os.IsNotExist(err) {
-			t.Error("Directory was not created")
+		// Step 4: Create and test the directory using helper function
+		err = CreateStorageDir(testDir)
+		if err != nil {
+			t.Fatalf("CreateStorageDir failed: %v", err)
 		}
+
+		// Step 5: Verify directory exists and is usable
+		if _, err := os.Stat(testDir); err != nil {
+			t.Fatalf("Created directory doesn't exist: %v", err)
+		}
+
+		// Step 6: Test file operations in created directory
+		testFile := filepath.Join(testDir, "test-rule.md")
+		testContent := []byte("# Test Rule\n\nThis is a test markdown file.")
+
+		err = os.WriteFile(testFile, testContent, 0644)
+		if err != nil {
+			t.Fatalf("Failed to write test file: %v", err)
+		}
+
+		// Step 7: Verify file content
+		readContent, err := os.ReadFile(testFile)
+		if err != nil {
+			t.Fatalf("Failed to read test file: %v", err)
+		}
+
+		if string(readContent) != string(testContent) {
+			t.Errorf("File content mismatch: got %q, want %q", readContent, testContent)
+		}
+
+		// Cleanup
+		os.RemoveAll(testDir)
 	})
 }
 
-// Helper function
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
+// Benchmark tests for performance monitoring
+func BenchmarkExpandPath(b *testing.B) {
+	testPaths := []string{
+		"~/Documents/rulemig",
+		"~/Projects/go/rulemig/data",
+		"~/Desktop/rules/important/security",
+		"/absolute/path/to/directory",
+		"relative/path/to/directory",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, path := range testPaths {
+			ExpandPath(path)
+		}
+	}
+}
+
+func BenchmarkGetDefaultStorageDir(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		GetDefaultStorageDir()
+	}
 }

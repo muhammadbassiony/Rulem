@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"rulemig/internal/filemanager"
-	"runtime"
 	"time"
 
+	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,45 +22,13 @@ type Config struct {
 	InitTime   int64  `yaml:"init_time"` // Unix timestamp of first setup
 }
 
-// ConfigPaths returns the standard config file paths for the current platform
-func ConfigPaths() (primary, fallback string) {
-	slog.Info("Determining config paths for platform:", "os", runtime.GOOS)
-	switch runtime.GOOS {
-	case "darwin": // macOS
-		home, _ := os.UserHomeDir()
-		// Primary: XDG config (modern standard)
-		if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-			primary = filepath.Join(xdgConfig, APP_NAME, "config.yaml")
-		} else {
-			primary = filepath.Join(home, ".config", APP_NAME, "config.yaml")
-		}
-		// Fallback: traditional dotfile
-		fallback = filepath.Join(home, "."+APP_NAME+".yaml")
+// ConfigPath returns the standard config file paths for the current platform
+func ConfigPath() (string, error) {
+	configDir := filepath.Join(xdg.ConfigHome, APP_NAME)
+	configPath := filepath.Join(configDir, "config.yaml")
 
-	case "windows":
-		// Windows uses APPDATA
-		if appData := os.Getenv("APPDATA"); appData != "" {
-			primary = filepath.Join(appData, APP_NAME, "config.yaml")
-		} else {
-			home, _ := os.UserHomeDir()
-			primary = filepath.Join(home, "AppData", "Roaming", APP_NAME, "config.yaml")
-		}
-		// No fallback on Windows
-		fallback = primary
-
-	case "linux":
-	default:
-		home, _ := os.UserHomeDir()
-		// Primary: XDG config (Linux standard)
-		if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-			primary = filepath.Join(xdgConfig, APP_NAME, "config.yaml")
-		} else {
-			primary = filepath.Join(home, ".config", APP_NAME, "config.yaml")
-		}
-		// Fallback: traditional dotfile
-		fallback = filepath.Join(home, "."+APP_NAME+".yaml")
-	}
-	return
+	slog.Info("Determined config paths", "path", configPath)
+	return configPath, nil
 }
 
 // Load loads the config from the standard location
@@ -92,21 +60,18 @@ func LoadFrom(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// FindConfigFile returns the path to an existing config file, or the primary path if none exists
+// FindConfigFile returns the path to an existing config file, and whether it exists.
 func FindConfigFile() (string, bool) {
-	primary, fallback := ConfigPaths()
+	primary, err := ConfigPath()
+	if err != nil {
+		slog.Error("Failed to get config path", "error", err)
+		return "", false
+	}
 
 	// Check primary location first
 	if _, err := os.Stat(primary); err == nil {
 		slog.Info("Config found at primary path:", "path", primary)
 		return primary, true
-	}
-
-	// Check fallback location
-	if fallback != primary {
-		if _, err := os.Stat(fallback); err == nil {
-			return fallback, true
-		}
 	}
 
 	// Return primary path for new config

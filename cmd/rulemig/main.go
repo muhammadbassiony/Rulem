@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"rulemig/internal/config"
-	"rulemig/internal/tui"
+	"rulemig/internal/tui/setupmenu"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -23,8 +23,8 @@ func main() {
 	// 	defer f.Close()
 	// }
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-		// Level: slog.LevelError,
+		// Level: slog.LevelDebug,
+		Level: slog.LevelError,
 	}))
 	slog.SetDefault(logger)
 
@@ -47,10 +47,8 @@ func main() {
 }
 
 func runFirstTimeSetup() error {
-	fmt.Println("Welcome to rulemig! Let's set up your configuration.")
-
-	setupModel := tui.NewSetupModel()
-	program := tea.NewProgram(setupModel)
+	menu := setupmenu.NewSetupModel()
+	program := tea.NewProgram(menu)
 
 	finalModel, err := program.Run()
 	if err != nil {
@@ -58,7 +56,7 @@ func runFirstTimeSetup() error {
 	}
 
 	// Extract setup results and save config
-	setup := finalModel.(tui.SetupModel)
+	setup := finalModel.(setupmenu.SetupModel)
 	if setup.Cancelled {
 		return fmt.Errorf("setup cancelled by user")
 	}

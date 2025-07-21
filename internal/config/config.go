@@ -136,3 +136,23 @@ func (c *Config) SetStorageDir(newDir string) error {
 	c.StorageDir = newDir
 	return c.Save()
 }
+
+// CreateNewConfig initializes a new configuration with the specified storage directory
+func CreateNewConfig(storageDir string) error {
+	// Create the default config
+	cfg := DefaultConfig()
+	cfg.StorageDir = storageDir
+
+	// Ensure storage directory exists
+	if err := filemanager.CreateStorageDir(cfg.StorageDir); err != nil {
+		return fmt.Errorf("failed to create storage directory: %w", err)
+	}
+
+	// Save the config to the standard location
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+
+	slog.Info("Configuration created successfully", "storage_dir", cfg.StorageDir)
+	return nil
+}

@@ -7,9 +7,10 @@ import (
 	"rulemig/internal/config"
 	"rulemig/internal/filemanager"
 
+	"rulemig/internal/tui/styles"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // SetupState represents the current state of the setup process
@@ -33,14 +34,6 @@ type SetupModel struct {
 	width      int
 	height     int
 
-	// UI styling
-	titleStyle      lipgloss.Style
-	subtitleStyle   lipgloss.Style
-	inputStyle      lipgloss.Style
-	errorStyle      lipgloss.Style
-	successStyle    lipgloss.Style
-	normalTextStyle lipgloss.Style
-
 	// Text input component
 	textInput textinput.Model
 }
@@ -59,34 +52,7 @@ func NewSetupModel() SetupModel {
 		Cancelled:  false,
 		width:      80,
 		height:     24,
-
-		titleStyle: lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("205")).
-			MarginBottom(1),
-
-		subtitleStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			MarginBottom(1),
-
-		inputStyle: lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(0, 1),
-
-		errorStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true),
-
-		successStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("46")).
-			Bold(true),
-
-		normalTextStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#fff")).
-			MarginBottom(1),
-
-		textInput: ti,
+		textInput:  ti,
 	}
 }
 
@@ -197,8 +163,8 @@ func (m SetupModel) View() string {
 }
 
 func (m SetupModel) viewWelcome() string {
-	title := m.titleStyle.Render("🔧 Welcome to RuleMig!")
-	subtitle := m.subtitleStyle.Render("Let's set up your configuration.")
+	title := styles.TitleStyle.Render("🔧 Welcome to RuleMig!")
+	subtitle := styles.SubtitleStyle.Render("Let's set up your configuration.")
 
 	content := `This is your first time running RuleMig. We need to configure a few settings to get you started.
 
@@ -211,22 +177,20 @@ Press Enter to continue, or Esc to cancel.`
 }
 
 func (m SetupModel) viewStorageInput() string {
-	title := m.titleStyle.Render("📁 Storage Directory")
-	subtitle := m.subtitleStyle.Render("Where should we store your migration rules?")
-	explanation := m.normalTextStyle.Render("This directory will be used as a central location to save & \norganize your migration rules and configurations.\nChoose a path that is accessible and writable.")
+	title := styles.TitleStyle.Render("📁 Storage Directory")
+	subtitle := styles.SubtitleStyle.Render("Where should we store your migration rules?")
+	explanation := styles.NormalTextStyle.Render("This directory will be used as a central location to save & \norganize your migration rules and configurations.\nChoose a path that is accessible and writable.")
 
 	prompt := "Enter storage directory path:"
-	input := m.inputStyle.Render(m.textInput.View())
+	input := styles.InputStyle.Render(m.textInput.View())
 
-	help := lipgloss.NewStyle().
-		Faint(true).
-		Render("Press Enter to continue • Esc to cancel • Use ~ for home directory")
+	help := styles.HelpStyle.Render("Press Enter to continue • Esc to cancel • Use ~ for home directory")
 
 	content := fmt.Sprintf("%s\n%s\n%s\n\n%s\n%s\n\n%s",
 		title, subtitle, explanation, prompt, input, help)
 
 	if m.err != nil {
-		errorMsg := m.errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		errorMsg := styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", m.err))
 		content = fmt.Sprintf("%s\n\n%s", content, errorMsg)
 	}
 
@@ -234,21 +198,19 @@ func (m SetupModel) viewStorageInput() string {
 }
 
 func (m SetupModel) viewConfirmation() string {
-	title := m.titleStyle.Render("✅ Confirm Configuration")
-	subtitle := m.subtitleStyle.Render("Please review your settings:")
+	title := styles.TitleStyle.Render("✅ Confirm Configuration")
+	subtitle := styles.SubtitleStyle.Render("Please review your settings:")
 
 	settings := fmt.Sprintf("Storage Directory: %s", m.StorageDir)
 
 	prompt := "Is this correct? (Y/n)"
-	help := lipgloss.NewStyle().
-		Faint(true).
-		Render("Press y to confirm • n to go back • Esc to cancel")
+	help := styles.HelpStyle.Render("Press y to confirm • n to go back • Esc to cancel")
 
 	content := fmt.Sprintf("%s\n%s\n\n%s\n\n%s\n\n%s",
 		title, subtitle, settings, prompt, help)
 
 	if m.err != nil {
-		errorMsg := m.errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		errorMsg := styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", m.err))
 		content = fmt.Sprintf("%s\n\n%s", content, errorMsg)
 	}
 
@@ -256,7 +218,7 @@ func (m SetupModel) viewConfirmation() string {
 }
 
 func (m SetupModel) viewComplete() string {
-	title := m.successStyle.Render("🎉 Setup Complete!")
+	title := styles.SuccessStyle.Render("🎉 Setup Complete!")
 	message := "RuleMig has been configured successfully."
 
 	details := fmt.Sprintf("Storage Directory: %s", m.StorageDir)
@@ -266,7 +228,7 @@ func (m SetupModel) viewComplete() string {
 }
 
 func (m SetupModel) viewCancelled() string {
-	return m.errorStyle.Render("Setup cancelled. RuleMig will not be configured.")
+	return styles.ErrorStyle.Render("Setup cancelled. RuleMig will not be configured.")
 }
 
 // Helper methods

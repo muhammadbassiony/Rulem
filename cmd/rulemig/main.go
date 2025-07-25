@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"rulemig/internal/config"
+	"rulemig/internal/tui"
 	"rulemig/internal/tui/setupmenu"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,11 +40,20 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		slog.Error("Error loading config", "error", err)
 		os.Exit(1)
 	}
 
-	fmt.Println("Configuration loaded successfully.", cfg.StorageDir, cfg.InitTime)
+	slog.Info("Configuration loaded successfully.", cfg.StorageDir, cfg.InitTime)
+
+	// Initialize TUI application
+	model := tui.NewMainModel(cfg)
+	program := tea.NewProgram(model, tea.WithAltScreen())
+	if err := program.Start(); err != nil {
+		slog.Error("Error starting TUI program", "error", err)
+		os.Exit(1)
+	}
+
 }
 
 func runFirstTimeSetup() error {

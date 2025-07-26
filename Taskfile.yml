@@ -9,7 +9,7 @@ tasks:
   run:
     desc: Run the rulem CLI interactively
     cmds:
-      - go run ./cmd/rulem
+      - DEBUG=1 go run ./cmd/rulem
 
   test:
     desc: Run all unit tests

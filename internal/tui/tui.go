@@ -2,6 +2,7 @@ package tui
 
 import (
 	"rulem/internal/config"
+	"rulem/internal/logging"
 	"rulem/internal/tui/components"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -62,6 +63,7 @@ func (i item) FilterValue() string { return i.title }
 // MainModel is the root model for the application
 type MainModel struct {
 	config    *config.Config
+	logger    *logging.AppLogger
 	state     AppState
 	prevState AppState // For returning from error states
 
@@ -90,7 +92,7 @@ type MainModel struct {
 	comingSoonFeature string
 }
 
-func NewMainModel(cfg *config.Config) MainModel {
+func NewMainModel(cfg *config.Config, logger *logging.AppLogger) MainModel {
 	// Create menu items with model references
 	items := []list.Item{
 		item{
@@ -142,6 +144,7 @@ func NewMainModel(cfg *config.Config) MainModel {
 
 	return MainModel{
 		config:    cfg,
+		logger:    logger,
 		state:     StateMenu,
 		prevState: StateMenu,
 		menu:      menuList,
@@ -150,11 +153,15 @@ func NewMainModel(cfg *config.Config) MainModel {
 }
 
 func (m MainModel) Init() tea.Cmd {
+	m.logger.Info("MainModel initialized")
 	return nil
 }
 func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
+
+	// Log all messages for debugging
+	m.logger.LogMessage(msg)
 
 	// Update layout first for size changes
 	m.layout, _ = m.layout.Update(msg)
@@ -189,6 +196,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				// Handle menu selection
 				if selectedItem, ok := m.menu.SelectedItem().(item); ok {
+					m.logger.LogUserAction("menu_selection", selectedItem.title)
 					return m.handleMenuSelection(selectedItem)
 				}
 			default:
@@ -202,6 +210,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case StateComingSoon:
 			switch msg.String() {
 			case "esc":
+				m.logger.LogStateTransition("MainModel", "StateComingSoon", "StateMenu")
 				m.state = StateMenu
 				m.comingSoonFeature = ""
 				m.layout = m.layout.ClearError()
@@ -211,6 +220,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case StateError:
 			switch msg.String() {
 			case "esc":
+				m.logger.LogStateTransition("MainModel", "StateError", string(rune(m.prevState)))
 				m.state = m.prevState
 				m.err = nil
 				m.layout = m.layout.ClearError()
@@ -221,6 +231,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc":
 				// Return to menu from feature states
+				m.logger.LogStateTransition("MainModel", "FeatureState", "StateMenu")
 				m.state = StateMenu
 				m.activeModel = nil
 				m.err = nil
@@ -240,6 +251,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case NavigateMsg:
 		// Handle navigation between states
+		m.logger.LogStateTransition("MainModel", string(rune(m.state)), string(rune(msg.State)))
 		m.prevState = m.state
 		m.state = msg.State
 		m.err = nil
@@ -250,6 +262,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ErrorMsg:
 		// Handle error display
+		m.logger.Error("Application error occurred", "error", msg.Err)
 		m.err = msg.Err
 		m.prevState = m.state
 		m.state = StateError
@@ -259,6 +272,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ComingSoonMsg:
 		// Handle coming soon display
+		m.logger.Debug("Showing coming soon for feature", "feature", msg.Feature)
 		m.comingSoonFeature = msg.Feature
 		m.state = StateComingSoon
 		return m, nil

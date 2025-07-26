@@ -6,6 +6,7 @@ import (
 
 	"rulem/internal/config"
 	"rulem/internal/filemanager"
+	"rulem/internal/logging"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/styles"
 
@@ -35,13 +36,14 @@ type SetupModel struct {
 	state      SetupState
 	StorageDir string
 	Cancelled  bool
+	logger     *logging.AppLogger
 
 	// Components - centralized layout management
 	textInput textinput.Model
 	layout    components.LayoutModel
 }
 
-func NewSetupModel() SetupModel {
+func NewSetupModel(logger *logging.AppLogger) SetupModel {
 	ti := textinput.New()
 	ti.Placeholder = filemanager.GetDefaultStorageDir()
 	ti.Focus()
@@ -58,16 +60,21 @@ func NewSetupModel() SetupModel {
 		state:     SetupStateWelcome,
 		textInput: ti,
 		layout:    layout,
+		logger:    logger,
 	}
 }
 
 func (m SetupModel) Init() tea.Cmd {
+	m.logger.Info("Setup model initialized")
 	return textinput.Blink
 }
 
 // Update handles all message types and delegates to state-specific handlers
 func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+
+	// Log all messages for debugging
+	m.logger.LogMessage(msg)
 
 	// TODO move to switch case?
 	// Update layout with window size changes
@@ -137,6 +144,7 @@ func (m SetupModel) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m SetupModel) handleStorageInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
+		m.logger.LogUserAction("storage_input_submit", m.textInput.Value())
 		return m.validateAndProceed()
 	default:
 		return m.updateTextInput(msg)
@@ -146,8 +154,10 @@ func (m SetupModel) handleStorageInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 func (m SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "n", "N":
+		m.logger.LogUserAction("confirmation_reject", "going back to storage input")
 		return m.transitionToStorageInput()
 	case "y", "Y", "enter":
+		m.logger.LogUserAction("confirmation_accept", "creating config")
 		return m, m.createConfig()
 	}
 	return m, nil
@@ -164,11 +174,15 @@ func (m SetupModel) transitionToStorageInput() (tea.Model, tea.Cmd) {
 
 func (m SetupModel) validateAndProceed() (tea.Model, tea.Cmd) {
 	input := strings.TrimSpace(m.textInput.Value())
+	m.logger.Debug("Validating storage directory", "path", input)
+
 	if err := filemanager.ValidateStorageDir(input); err != nil {
+		m.logger.Warn("Storage directory validation failed", "error", err)
 		return m, func() tea.Msg { return setupErrorMsg{err} }
 	}
 
 	m.StorageDir = filemanager.ExpandPath(input)
+	m.logger.LogStateTransition("SetupModel", "SetupStateStorageInput", "SetupStateConfirmation")
 	m.state = SetupStateConfirmation
 	m.layout = m.layout.ClearError()
 	return m, nil
@@ -176,14 +190,18 @@ func (m SetupModel) validateAndProceed() (tea.Model, tea.Cmd) {
 
 func (m SetupModel) createConfig() tea.Cmd {
 	return func() tea.Msg {
+		m.logger.Info("Creating configuration", "storage_dir", m.StorageDir)
 		if err := m.performConfigCreation(); err != nil {
+			m.logger.Error("Configuration creation failed", "error", err)
 			return setupErrorMsg{err}
 		}
+		m.logger.Info("Configuration created successfully")
 		return setupCompleteMsg{}
 	}
 }
 
 func (m SetupModel) handleQuit() (tea.Model, tea.Cmd) {
+	m.logger.Warn("Setup cancelled by user")
 	m.Cancelled = true
 	m.state = SetupStateCancelled
 	return m, tea.Quit

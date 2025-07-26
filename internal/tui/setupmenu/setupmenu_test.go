@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"rulem/internal/filemanager"
+	"rulem/internal/logging"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -25,9 +26,12 @@ func TestNewSetupModel(t *testing.T) {
 		},
 	}
 
+	logger, _ := logging.NewTestLogger()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			model := NewSetupModel()
+
+			model := NewSetupModel(logger)
 
 			assert.Equal(t, tt.want, model.state)
 			assert.False(t, model.Cancelled)
@@ -302,9 +306,11 @@ func TestErrorHandling(t *testing.T) {
 		},
 	}
 
+	logger, _ := logging.NewTestLogger()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			model := NewSetupModel()
+			model := NewSetupModel(logger)
 
 			if tt.errorMsg != nil {
 				errorMessage := setupErrorMsg{err: tt.errorMsg}
@@ -392,7 +398,9 @@ func TestViewRendering(t *testing.T) {
 
 // Helper function to create model in specific state
 func createModelInState(state SetupState, input string) SetupModel {
-	model := NewSetupModel()
+	logger, _ := logging.NewTestLogger()
+
+	model := NewSetupModel(logger)
 	model.state = state
 
 	if input != "" {
@@ -408,7 +416,9 @@ func createModelInState(state SetupState, input string) SetupModel {
 
 // Benchmark tests
 func BenchmarkUpdate(b *testing.B) {
-	model := NewSetupModel()
+	logger, _ := logging.NewTestLogger()
+
+	model := NewSetupModel(logger)
 	keyMsg := tea.KeyMsg{Type: tea.KeyEnter}
 
 	b.ResetTimer()
@@ -418,7 +428,9 @@ func BenchmarkUpdate(b *testing.B) {
 }
 
 func BenchmarkView(b *testing.B) {
-	model := NewSetupModel()
+	logger, _ := logging.NewTestLogger()
+
+	model := NewSetupModel(logger)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

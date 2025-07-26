@@ -2,10 +2,10 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"rulem/internal/filemanager"
+	"rulem/internal/logging"
 	"time"
 
 	"github.com/adrg/xdg"
@@ -27,7 +27,7 @@ func ConfigPath() (string, error) {
 	configDir := filepath.Join(xdg.ConfigHome, APP_NAME)
 	configPath := filepath.Join(configDir, "config.yaml")
 
-	slog.Info("Determined config paths", "path", configPath)
+	logging.Debug("Determined config paths", "path", configPath)
 	return configPath, nil
 }
 
@@ -35,7 +35,7 @@ func ConfigPath() (string, error) {
 // If no config exists, it returns an error indicating first run is needed
 func Load() (*Config, error) {
 	configPath, exists := FindConfigFile()
-	slog.Info("Loading config from:", "path", configPath)
+	logging.Debug("Loading config from", "path", configPath)
 	if !exists {
 		return nil, fmt.Errorf("no configuration found, first-time setup required")
 	}
@@ -64,13 +64,13 @@ func LoadFrom(path string) (*Config, error) {
 func FindConfigFile() (string, bool) {
 	primary, err := ConfigPath()
 	if err != nil {
-		slog.Error("Failed to get config path", "error", err)
+		logging.Error("Failed to get config path", "error", err)
 		return "", false
 	}
 
 	// Check primary location first
 	if _, err := os.Stat(primary); err == nil {
-		slog.Info("Config found at primary path:", "path", primary)
+		logging.Debug("Config found at primary path", "path", primary)
 		return primary, true
 	}
 
@@ -87,7 +87,7 @@ func IsFirstRun() bool {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	path := filemanager.GetDefaultStorageDir()
-	slog.Info("Using default storage directory:", "path", path)
+	logging.Debug("Using default storage directory", "path", path)
 
 	return Config{
 		StorageDir: path,
@@ -153,6 +153,6 @@ func CreateNewConfig(storageDir string) error {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	slog.Info("Configuration created successfully", "storage_dir", cfg.StorageDir)
+	logging.Info("Configuration created successfully", "storage_dir", cfg.StorageDir)
 	return nil
 }

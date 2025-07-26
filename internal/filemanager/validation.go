@@ -2,11 +2,12 @@ package filemanager
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"rulem/internal/logging"
 )
 
 // ValidateStorageDir checks if the provided storage directory path is valid
@@ -77,7 +78,7 @@ func TestWriteToStorageDir(path string) error {
 	// Clean up test file
 	if err := os.Remove(testFile); err != nil {
 		// Log but don't fail - the directory is usable
-		slog.Warn("Warning: could not remove test file", "error", err)
+		logging.Warn("Warning: could not remove test file", "error", err)
 	}
 
 	return nil

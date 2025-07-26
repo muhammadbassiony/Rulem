@@ -183,7 +183,8 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" || msg.String() == "q" {
+
+		if msg.String() == "ctrl+c" {
 			// Handle global quit commands
 			m.state = StateQuitting
 			return m, tea.Quit
@@ -193,11 +194,29 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case StateMenu:
 			switch msg.String() {
+			case "q":
+				// Handle quit only when not filtering
+				if m.menu.FilterState() != list.Filtering {
+					m.state = StateQuitting
+					return m, tea.Quit
+				}
+				// When filtering, pass "q" to the menu for filtering
+				m.menu, cmd = m.menu.Update(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case "enter":
-				// Handle menu selection
-				if selectedItem, ok := m.menu.SelectedItem().(item); ok {
-					m.logger.LogUserAction("menu_selection", selectedItem.title)
-					return m.handleMenuSelection(selectedItem)
+				// Handle menu selection only when not filtering
+				if m.menu.FilterState() != list.Filtering {
+					if selectedItem, ok := m.menu.SelectedItem().(item); ok {
+						m.logger.LogUserAction("menu_selection", selectedItem.title)
+						return m.handleMenuSelection(selectedItem)
+					}
+				}
+				// When filtering, pass enter to the menu
+				m.menu, cmd = m.menu.Update(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
 				}
 			default:
 				// Update the menu list for navigation/filtering
@@ -246,6 +265,16 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						cmds = append(cmds, modelCmd)
 					}
 				}
+			}
+		}
+
+	case list.FilterMatchesMsg:
+		// update the menu with filter matches for menu state only
+		switch m.state {
+		case StateMenu:
+			m.menu, cmd = m.menu.Update(msg)
+			if cmd != nil {
+				return m, nil
 			}
 		}
 

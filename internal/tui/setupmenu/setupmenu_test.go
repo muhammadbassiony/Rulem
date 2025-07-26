@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"rulemig/internal/filemanager"
+	"rulem/internal/filemanager"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -172,13 +172,13 @@ func TestInputValidation(t *testing.T) {
 	}{
 		{
 			name:          "valid_absolute_path",
-			input:         "/tmp/rulemig",
+			input:         "/tmp/rulem",
 			shouldError:   false,
 			expectedState: SetupStateConfirmation,
 		},
 		{
 			name:          "valid_home_path",
-			input:         "~/rulemig",
+			input:         "~/rulem",
 			shouldError:   false,
 			expectedState: SetupStateConfirmation,
 		},
@@ -339,7 +339,7 @@ func TestViewRendering(t *testing.T) {
 		{
 			name:          "welcome_view",
 			state:         SetupStateWelcome,
-			expectedTitle: "🔧 Welcome to RuleMig!",
+			expectedTitle: "🔧 Welcome to Rulem!",
 			expectedHelp:  "Press Enter to continue, or Esc to cancel",
 		},
 		{

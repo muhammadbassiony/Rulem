@@ -1,4 +1,4 @@
-module rulemig
+module rulem
 
 go 1.24.0
 

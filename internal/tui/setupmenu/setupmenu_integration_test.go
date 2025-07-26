@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"rulemig/internal/filemanager"
+	"rulem/internal/filemanager"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
@@ -28,7 +28,7 @@ func TestSuccessfulSetup(t *testing.T) {
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen
-	waitForString(t, testmodel, "Welcome to RuleMig")
+	waitForString(t, testmodel, "Welcome to Rulem")
 
 	// Step 2: Go to storage input
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
@@ -57,7 +57,7 @@ func TestCancelledAtWelcome(t *testing.T) {
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen
-	waitForString(t, testmodel, "Welcome to RuleMig")
+	waitForString(t, testmodel, "Welcome to Rulem")
 
 	// Step 2: Cancel with Escape
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEscape})
@@ -71,7 +71,7 @@ func TestCancelledAtStorageInput(t *testing.T) {
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen
-	waitForString(t, testmodel, "Welcome to RuleMig")
+	waitForString(t, testmodel, "Welcome to Rulem")
 
 	// Step 2: Go to storage input
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
@@ -99,7 +99,7 @@ func TestBackAndForthNavigation(t *testing.T) {
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen
-	waitForString(t, testmodel, "Welcome to RuleMig")
+	waitForString(t, testmodel, "Welcome to Rulem")
 
 	// Step 2: Go to storage input
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})

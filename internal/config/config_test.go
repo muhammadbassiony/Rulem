@@ -29,9 +29,9 @@ func TestConfigPath(t *testing.T) {
 		t.Errorf("Primary path should be absolute or relative, got: %s", primary)
 	}
 
-	// The path should contain "rulemig"
-	if !strings.Contains(primary, "rulemig") {
-		t.Errorf("Primary path should contain 'rulemig', got: %s", primary)
+	// The path should contain "rulem"
+	if !strings.Contains(primary, "rulem") {
+		t.Errorf("Primary path should contain 'rulem', got: %s", primary)
 	}
 
 	// Primary should end with config.yaml

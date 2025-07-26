@@ -1,6 +1,6 @@
-# rulemig: AI Assistant Instruction Migrator CLI
+# rulem: AI Assistant Instruction Manager CLI
 
-rulemig is a command-line tool for migrating, managing, and validating AI assistant instruction files across different editors and platforms. It provides a robust TUI (Terminal User Interface) for browsing, editing, and moving instruction files between Copilot, Cursor, Claude, Gemini-CLI, Opencode, and more.
+rulem is a command-line tool for managing and organizing rule files on your machine. It provides a robust TUI (Terminal User Interface) for browsing, editing, and moving rule files between different environments and formats with ease.
 
 ## Features
 
@@ -22,9 +22,9 @@ rulemig is a command-line tool for migrating, managing, and validating AI assist
 
 ### Build from Source
 ```sh
-git clone https://github.com/yourusername/rulemig.git
-cd rulemig
-go build -o rulemig ./cmd/rulemig
+git clone https://github.com/yourusername/rulem.git
+cd rulem
+go build -o rulem ./cmd/rulem
 ```
 
 ### Run Tests
@@ -35,7 +35,7 @@ go test ./...
 ## Usage
 
 ```sh
-./rulemig
+./rulem
 ```
 
 - Use arrow keys to navigate the file viewer
@@ -47,8 +47,8 @@ go test ./...
 
 ## Configuration
 
-- Configuration is stored in YAML (default: `~/.config/rulemig/config.yaml`)
-- Set or update storage locations for instruction files
+- Configuration is stored in YAML (default: `~/.config/rulem/config.yaml`)
+- Set or update storage locations for rule files
 - Supports both default and custom locations for each assistant
 
 ## Supported AI Assistants
@@ -74,7 +74,7 @@ All commands below are run from the project root:
 
 | Command                | Description                                 |
 |------------------------|---------------------------------------------|
-| `task build`           | Build the rulemig CLI binary                |
+| `task build`           | Build the rulem CLI binary                  |
 | `task run`             | Run the CLI interactively                   |
 | `task test`            | Run all unit tests                          |
 | `task lint`            | Lint the codebase with golangci-lint        |

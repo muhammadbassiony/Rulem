@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"rulemig/internal/config"
-	"rulemig/internal/filemanager"
-	"rulemig/internal/tui/components"
-	"rulemig/internal/tui/styles"
+	"rulem/internal/config"
+	"rulem/internal/filemanager"
+	"rulem/internal/tui/components"
+	"rulem/internal/tui/styles"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -225,12 +225,12 @@ func (m SetupModel) View() string {
 // View methods now use the centralized layout
 func (m SetupModel) viewWelcome() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
-		Title:    "🔧 Welcome to RuleMig!",
+		Title:    "🔧 Welcome to Rulem!",
 		Subtitle: "Let's set up your configuration.",
 		HelpText: "Press Enter to continue, or Esc to cancel",
 	})
 
-	content := `This is your first time running RuleMig. We need to configure a few settings to get you started.
+	content := `This is your first time running Rulem. We need to configure a few settings to get you started.
 
 We'll need to set up:
 • Storage directory for your migration rules
@@ -274,7 +274,7 @@ func (m SetupModel) viewConfirmation() string {
 func (m SetupModel) viewComplete() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "🎉 Setup Complete!",
-		Subtitle: "RuleMig has been configured successfully.",
+		Subtitle: "Rulem has been configured successfully.",
 		HelpText: "", // No help text needed for final state
 	})
 
@@ -282,7 +282,7 @@ func (m SetupModel) viewComplete() string {
 
 Storage Directory: %s
 
-You can now start using RuleMig to manage your migration rules. The application will store all your rules and configurations in the directory you specified.`, m.StorageDir)
+You can now start using rulem to manage your migration rules. The application will store all your rules and configurations in the directory you specified.`, m.StorageDir)
 
 	return m.layout.Render(content)
 }
@@ -290,11 +290,11 @@ You can now start using RuleMig to manage your migration rules. The application 
 func (m SetupModel) viewCancelled() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "❌ Setup Cancelled",
-		Subtitle: "RuleMig will not be configured.",
+		Subtitle: "Rulem will not be configured.",
 		HelpText: "",
 	})
 
-	content := `Setup was cancelled. RuleMig has not been configured and will need to be set up before you can use it.`
+	content := `Setup was cancelled. Rulem has not been configured and will need to be set up before you can use it.`
 
 	return m.layout.Render(content)
 }

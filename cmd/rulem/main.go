@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"os"
 
-	"rulemig/internal/config"
-	"rulemig/internal/tui"
-	"rulemig/internal/tui/setupmenu"
+	"rulem/internal/config"
+	"rulem/internal/tui"
+	"rulem/internal/tui/setupmenu"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

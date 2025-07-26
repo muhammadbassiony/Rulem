@@ -69,7 +69,7 @@ func TestWriteToStorageDir(path string) error {
 	}
 
 	// Test write permissions
-	testFile := filepath.Join(expandedPath, ".rulemig-test")
+	testFile := filepath.Join(expandedPath, ".rulem-test")
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		return fmt.Errorf("no write permission in directory: %w", err)
 	}

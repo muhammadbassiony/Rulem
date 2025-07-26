@@ -1,7 +1,7 @@
 package components
 
 import (
-	"rulemig/internal/tui/styles"
+	"rulem/internal/tui/styles"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"

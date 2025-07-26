@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"rulemig/internal/config"
-	"rulemig/internal/tui/components"
+	"rulem/internal/config"
+	"rulem/internal/tui/components"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -119,7 +119,7 @@ func NewMainModel(cfg *config.Config) MainModel {
 		},
 		item{
 			title:       "⚙️  Update settings",
-			description: "Change the configuration of RuleMig, such as storage directory.",
+			description: "Change the configuration of Rulem, such as storage directory.",
 			state:       StateSettings,
 			model:       nil, // Will be initialized when needed
 		},
@@ -352,7 +352,7 @@ func (m MainModel) View() string {
 		m.layout = m.layout.SetConfig(components.LayoutConfig{
 			Title: "👋 Goodbye!",
 		})
-		return m.layout.Render("Thank you for using RuleMig!")
+		return m.layout.Render("Thank you for using Rulem!")
 	}
 
 	// Configure layout based on current state
@@ -375,7 +375,7 @@ func (m MainModel) View() string {
 
 func (m MainModel) viewMenu() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
-		Title:    "🔧 RuleMig - Rule Migration Tool",
+		Title:    "🔧 Rulem - Rule Migration Tool",
 		Subtitle: "Manage and organize your migration rules efficiently",
 		HelpText: "↑/↓ to navigate • Enter to select • / to filter • q to quit",
 	})

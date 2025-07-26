@@ -11,7 +11,7 @@ import (
 
 // GetDefaultStorageDir returns default storage in user's data directory
 func GetDefaultStorageDir() string {
-	return filepath.Join(xdg.DataHome, "rulemig")
+	return filepath.Join(xdg.DataHome, "rulem")
 }
 
 // ExpandPath is a utility function that expands a path that starts with "~/" to the user's home directory.
@@ -52,7 +52,7 @@ func CreateSecureStorageRoot(userPath string) (*os.Root, error) {
 	}
 
 	// Test write permissions
-	testFile := filepath.Join(relPath, ".rulemig-test")
+	testFile := filepath.Join(relPath, ".rulem-test")
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		return nil, fmt.Errorf("directory is not writable: %w", err)
 	}

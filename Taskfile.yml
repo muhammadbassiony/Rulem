@@ -2,14 +2,14 @@ version: "3"
 
 tasks:
   build:
-    desc: Build the rulemig CLI binary
+    desc: Build the rulem CLI binary
     cmds:
-      - go build -o rulemig ./cmd/rulemig
+      - go build -o rulem ./cmd/rulem
 
   run:
-    desc: Run the rulemig CLI interactively
+    desc: Run the rulem CLI interactively
     cmds:
-      - go run ./cmd/rulemig
+      - go run ./cmd/rulem
 
   test:
     desc: Run all unit tests
@@ -34,7 +34,7 @@ tasks:
   clean:
     desc: Remove built binaries and temporary files
     cmds:
-      - rm -f rulemig
+      - rm -f rulem
 
   dev:
     desc: Build, lint, and test in sequence

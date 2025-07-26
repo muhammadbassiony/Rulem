@@ -1,12 +1,12 @@
-# Architecture Overview: rulemig
+# Architecture Overview: rulem
 
-This document describes the architecture, design decisions, and extensibility model for the rulemig CLI tool.
+This document describes the architecture, design decisions, and extensibility model for the rulem CLI tool.
 
 ## 1. High-Level Architecture
 
-rulemig is organized as a modular Go application with a clear separation of concerns:
+rulem is organized as a modular Go application with a clear separation of concerns:
 
-- **cmd/rulemig/**: CLI entry point, argument parsing, and main loop
+- **cmd/rulem/**: CLI entry point, argument parsing, and main loop
 - **internal/config/**: Configuration management (YAML/JSON), storage location logic
 - **internal/ui/**: Terminal UI (TUI) components using Bubble Tea and Lipgloss
 - **internal/core/**: Core migration, symlink, and assistant mapping logic
@@ -14,12 +14,12 @@ rulemig is organized as a modular Go application with a clear separation of conc
 
 ## 2. Key Components
 
-### CLI Entry Point (`cmd/rulemig/main.go`)
+### CLI Entry Point (`cmd/rulem/main.go`)
 - Handles startup, config loading, and user prompts
 - Orchestrates UI and core logic
 
 ### Configuration (`internal/config/config.go`)
-- Loads and saves YAML config (default: `~/.config/rulemig/config.yaml`)
+- Loads and saves YAML config (default: `~/.config/rulem/config.yaml`)
 - Manages storage locations for each assistant
 - Provides update and validation methods
 

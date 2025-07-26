@@ -2,7 +2,7 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
-// Centralized Lip Gloss styles for TUI components in RuleMig.
+// Centralized Lip Gloss styles for TUI components in Rulem.
 // All colors are specified using hex codes.
 
 var (

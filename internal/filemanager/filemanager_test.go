@@ -16,14 +16,14 @@ func TestGetDefaultStorageDir(t *testing.T) {
 		t.Error("GetDefaultStorageDir returned empty string")
 	}
 
-	// Should contain rulemig
-	if !strings.Contains(result, "rulemig") {
-		t.Errorf("GetDefaultStorageDir should contain 'rulemig', got: %s", result)
+	// Should contain rulem
+	if !strings.Contains(result, "rulem") {
+		t.Errorf("GetDefaultStorageDir should contain 'rulem', got: %s", result)
 	}
 
 	// Should be an absolute path (in most cases)
-	if !filepath.IsAbs(result) && !strings.HasPrefix(result, ".rulemig") {
-		t.Errorf("GetDefaultStorageDir should return absolute path or .rulemig fallback, got: %s", result)
+	if !filepath.IsAbs(result) && !strings.HasPrefix(result, ".rulem") {
+		t.Errorf("GetDefaultStorageDir should return absolute path or .rulem fallback, got: %s", result)
 	}
 }
 
@@ -78,8 +78,8 @@ func TestExpandPath(t *testing.T) {
 		},
 		{
 			name:     "home with nested directories",
-			input:    "~/Documents/Projects/rulemig",
-			expected: filepath.Join(home, "Documents", "Projects", "rulemig"),
+			input:    "~/Documents/Projects/rulem",
+			expected: filepath.Join(home, "Documents", "Projects", "rulem"),
 		},
 	}
 
@@ -214,8 +214,8 @@ func TestGetRelativePathInHome(t *testing.T) {
 	}{
 		{
 			name:     "path within home",
-			input:    filepath.Join(home, "Documents", "rulemig"),
-			expected: filepath.Join("Documents", "rulemig"),
+			input:    filepath.Join(home, "Documents", "rulem"),
+			expected: filepath.Join("Documents", "rulem"),
 		},
 		{
 			name:      "path outside home",
@@ -323,8 +323,8 @@ func TestIntegrationWorkflow(t *testing.T) {
 // Benchmark tests for performance monitoring
 func BenchmarkExpandPath(b *testing.B) {
 	testPaths := []string{
-		"~/Documents/rulemig",
-		"~/Projects/go/rulemig/data",
+		"~/Documents/rulem",
+		"~/Projects/go/rulem/data",
 		"~/Desktop/rules/important/security",
 		"/absolute/path/to/directory",
 		"relative/path/to/directory",

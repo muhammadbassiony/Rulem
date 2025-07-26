@@ -100,7 +100,7 @@ func TestValidateStorageDir(t *testing.T) {
 		},
 		{
 			name:      "valid home relative path",
-			input:     "~/Documents/rulemig",
+			input:     "~/Documents/rulem",
 			wantError: false,
 		},
 		{
@@ -134,13 +134,13 @@ func TestValidateStorageDir(t *testing.T) {
 		},
 		{
 			name:      "actual system directory",
-			input:     "/usr/bin/rulemig",
+			input:     "/usr/bin/rulem",
 			wantError: true,
 			errorMsg:  "parent directory resolves to reserved location",
 		},
 		{
 			name:      "system temp directory",
-			input:     filepath.Join(os.TempDir(), "rulemig-test"),
+			input:     filepath.Join(os.TempDir(), "rulem-test"),
 			wantError: false,
 		},
 	}
@@ -156,13 +156,13 @@ func TestValidateStorageDir(t *testing.T) {
 		}{
 			{
 				name:      "windows system directory",
-				input:     "C:\\Windows\\System32\\rulemig",
+				input:     "C:\\Windows\\System32\\rulem",
 				wantError: true,
 				errorMsg:  "system or reserved directories",
 			},
 			{
 				name:      "windows program files",
-				input:     "C:\\Program Files\\rulemig",
+				input:     "C:\\Program Files\\rulem",
 				wantError: true,
 				errorMsg:  "system or reserved directories",
 			},
@@ -177,13 +177,13 @@ func TestValidateStorageDir(t *testing.T) {
 		}{
 			{
 				name:      "unix system directory",
-				input:     "/etc/rulemig",
+				input:     "/etc/rulem",
 				wantError: true,
 				errorMsg:  "parent directory resolves to reserved location",
 			},
 			{
 				name:      "unix bin directory",
-				input:     "/bin/rulemig",
+				input:     "/bin/rulem",
 				wantError: true,
 				errorMsg:  "parent directory resolves to reserved location",
 			},

@@ -5,18 +5,18 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"rulemig/internal/filemanager"
+	"rulem/internal/filemanager"
 	"time"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )
 
-const APP_NAME = "rulemig"
+const APP_NAME = "rulem" // application name used for config directory
 
-// Config holds user configuration for rulemig.
+// Config holds user configuration for rulem.
 type Config struct {
-	// StorageDir is the directory where instruction files are stored.
+	// StorageDir is the directory where rulem stores its rule files.
 	StorageDir string `yaml:"storage_dir"`
 	Version    string `yaml:"version"`   // Track config version
 	InitTime   int64  `yaml:"init_time"` // Unix timestamp of first setup

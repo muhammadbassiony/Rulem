@@ -17,7 +17,14 @@ import (
 // TestSuccessfulSetup tests the entire successful setup workflow
 func TestSuccessfulSetup(t *testing.T) {
 	// Create a temporary directory for testing valid paths
-	tempDir, err := os.MkdirTemp("", "setupmenu-complete-test-")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("Failed to get home dir: %v", err)
+	}
+	tempDir, err := os.MkdirTemp(homeDir, "setupmenu-complete-test-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -93,7 +100,14 @@ func TestCancelledAtStorageInput(t *testing.T) {
 // TestBackAndForthNavigation tests going back and forth between states
 func TestBackAndForthNavigation(t *testing.T) {
 	// Create temporary directories for testing
-	tempDir, err := os.MkdirTemp("", "setupmenu-navigation-test-")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("Failed to get home dir: %v", err)
+	}
+	tempDir, err := os.MkdirTemp(homeDir, "setupmenu-complete-test-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}

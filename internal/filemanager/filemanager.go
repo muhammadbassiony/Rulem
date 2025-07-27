@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"rulem/internal/logging"
 	"strings"
 
 	"github.com/adrg/xdg"
@@ -46,15 +47,33 @@ func CreateSecureStorageRoot(userPath string) (*os.Root, error) {
 		return nil, fmt.Errorf("path must be within your home directory: %w", err)
 	}
 
-	// Create the directory within the home root (safe)
-	if err := homeRoot.Mkdir(relPath, 0755); err != nil {
-		return nil, fmt.Errorf("cannot create directory: %w", err)
+	// Check if directory already exists
+	if stat, err := homeRoot.Stat(relPath); err == nil {
+		// Directory exists, check if it's actually a directory
+		if !stat.IsDir() {
+			logging.Error("Path exists but is not a directory", "relPath", relPath)
+			return nil, fmt.Errorf("path exists but is not a directory: %s", relPath)
+		}
+		logging.Debug("Directory already exists", "relPath", relPath)
+	} else {
+		// Directory doesn't exist, create it
+		if err := homeRoot.Mkdir(relPath, 0755); err != nil {
+			logging.Error("Failed to create directory", "relPath", relPath, "error", err)
+			return nil, fmt.Errorf("cannot create directory: %w", err)
+		}
 	}
+	logging.Debug("Directory created successfully", "relPath", relPath)
 
 	// Test write permissions
 	testFile := filepath.Join(relPath, ".rulem-test")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+	logging.Debug("Testing write permissions", "testFile", testFile)
+	if f, err := homeRoot.OpenFile(testFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err != nil {
+		logging.Error("Failed to create test file for write permissions", "testFile", testFile, "error", err)
 		return nil, fmt.Errorf("directory is not writable: %w", err)
+	} else {
+		f.Write([]byte("test"))
+		f.Close()
+		logging.Debug("Write permission test successful")
 	}
 	homeRoot.Remove(testFile) // Cleanup
 
@@ -70,6 +89,7 @@ func CreateSecureStorageRoot(userPath string) (*os.Root, error) {
 // createHomeRoot creates a root confined to the user's home directory
 func createHomeRoot() (*os.Root, error) {
 	homeDir := xdg.Home
+	logging.Info("Created home root", "homeDir", homeDir)
 	if homeDir == "" {
 		return nil, fmt.Errorf("cannot determine home directory")
 	}
@@ -87,9 +107,11 @@ func getRelativePathInHome(targetPath string) (string, error) {
 	// Clean both paths to handle . and .. properly
 	cleanHome := filepath.Clean(homeDir)
 	cleanTarget := filepath.Clean(targetPath)
+	logging.Debug("Get relative path in home. Cleaned paths: ", "home", cleanHome, "target", cleanTarget)
 
 	// Check if target is within home
 	relPath, err := filepath.Rel(cleanHome, cleanTarget)
+	logging.Debug("Is path in home dir? ", "relPath", relPath, "err", err)
 	if err != nil {
 		return "", fmt.Errorf("invalid path: %w", err)
 	}

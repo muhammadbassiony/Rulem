@@ -4,6 +4,7 @@ import (
 	"rulem/internal/config"
 	"rulem/internal/logging"
 	"rulem/internal/tui/components"
+	saverulesmodel "rulem/internal/tui/saverulesmodel"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,8 +45,6 @@ type (
 // MenuItemModel interface for menu item models
 type MenuItemModel interface {
 	tea.Model
-	GetTitle() string
-	GetDescription() string
 }
 
 // Enhanced item struct with model reference
@@ -53,7 +52,6 @@ type item struct {
 	title       string
 	description string
 	state       AppState
-	model       MenuItemModel // Reference to the model for this menu item
 }
 
 func (i item) Title() string       { return i.title }
@@ -99,31 +97,26 @@ func NewMainModel(cfg *config.Config, logger *logging.AppLogger) MainModel {
 			title:       "💾  Save rules file",
 			description: "Save a rules file from current directory to the central rules repository",
 			state:       StateSaveRules,
-			model:       nil, // Will be initialized when needed
 		},
 		item{
 			title:       "📄  Import rules (Copy)",
 			description: "Import a rule file from the central rules repository, to the current directory.\nThis will copy the file to the current directory. \nAny changes made to the file in the current directory will NOT be reflected in the central rules repository.",
 			state:       StateImportCopy,
-			model:       nil, // Will be initialized when needed
 		},
 		item{
 			title:       "🔗  Import rules (Link)",
 			description: "Import a rule file from the central rules repository, to the current directory.\nThis will create a symlink to the file in the current directory. \nAny changes made to the file in the current directory WILL be reflected in the central rules repository, and vice versa.",
 			state:       StateImportLink,
-			model:       nil, // Will be initialized when needed
 		},
 		item{
 			title:       "⬇️  Fetch rules from Github",
 			description: "Download a new rules file from a Github repository or gist.\nThis will fetch the file and save it to the central rules repository.",
 			state:       StateFetchGithub,
-			model:       nil, // Will be initialized when needed
 		},
 		item{
 			title:       "⚙️  Update settings",
 			description: "Change the configuration of Rulem, such as storage directory.",
 			state:       StateSettings,
-			model:       nil, // Will be initialized when needed
 		},
 	}
 
@@ -175,8 +168,9 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Propagate size to active model if present
 		if m.activeModel != nil {
-			if updatedModel, modelCmd := m.activeModel.Update(msg); modelCmd != nil {
-				m.activeModel = updatedModel.(MenuItemModel)
+			updatedModel, modelCmd := m.activeModel.Update(msg)
+			m.activeModel = updatedModel.(MenuItemModel)
+			if modelCmd != nil {
 				cmds = append(cmds, modelCmd)
 			}
 		}
@@ -260,8 +254,9 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				// Delegate to active model
 				if m.activeModel != nil {
-					if updatedModel, modelCmd := m.activeModel.Update(msg); modelCmd != nil {
-						m.activeModel = updatedModel.(MenuItemModel)
+					updatedModel, modelCmd := m.activeModel.Update(msg)
+					m.activeModel = updatedModel.(MenuItemModel)
+					if modelCmd != nil {
 						cmds = append(cmds, modelCmd)
 					}
 				}
@@ -310,26 +305,15 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle any unrecognized message types
 		// Delegate to active model if present
 		if m.activeModel != nil {
-			if updatedModel, modelCmd := m.activeModel.Update(msg); modelCmd != nil {
-				m.activeModel = updatedModel.(MenuItemModel)
+			updatedModel, modelCmd := m.activeModel.Update(msg)
+			m.activeModel = updatedModel.(MenuItemModel)
+			if modelCmd != nil {
 				cmds = append(cmds, modelCmd)
 			}
 		}
 	}
 
 	return m, tea.Batch(cmds...)
-}
-
-// handleNavigation processes navigation messages
-func (m MainModel) handleNavigation(msg NavigateMsg) (tea.Model, tea.Cmd) {
-	m.prevState = m.state
-	m.state = msg.State
-	m.err = nil
-	m.loading = false
-	m.comingSoonFeature = ""
-	m.layout = m.layout.ClearError()
-
-	return m, nil
 }
 
 // handleMenuSelection processes menu item selections using model-based approach
@@ -344,7 +328,11 @@ func (m MainModel) handleMenuSelection(selectedItem item) (tea.Model, tea.Cmd) {
 
 	// Set the active model and navigate to its state
 	m.activeModel = model
-	return m, NavigateTo(selectedItem.state)
+
+	// Call the model's Init() method to start any commands
+	modelInitCmd := model.Init()
+
+	return m, tea.Batch(NavigateTo(selectedItem.state), modelInitCmd)
 }
 
 // getOrInitializeModel returns the model for a given state, initializing it if needed
@@ -359,8 +347,7 @@ func (m *MainModel) getOrInitializeModel(state AppState) MenuItemModel {
 
 	case StateSaveRules:
 		if m.saveRulesModel == nil {
-			// TODO: Initialize save rules model when implemented
-			// m.saveRulesModel = NewSaveRulesModel(m.config)
+			m.saveRulesModel = saverulesmodel.NewSaveRulesModel(m.config, m.logger)
 		}
 		return m.saveRulesModel
 
@@ -448,7 +435,7 @@ func (m MainModel) viewComingSoon() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "🚧 Coming Soon",
 		Subtitle: "This feature is under development",
-		HelpText: "Press Esc to return to menu • q to quit",
+		HelpText: "Press Esc to return to menu • Ctrl+C to quit",
 	})
 
 	content := "This feature is not yet implemented but will be available in a future version."

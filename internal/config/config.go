@@ -45,6 +45,7 @@ func Load() (*Config, error) {
 
 // LoadFrom loads config from a specific path
 func LoadFrom(path string) (*Config, error) {
+	logging.Info("Reading config file from: ", "path", path)
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open config file: %w", err)
@@ -52,6 +53,7 @@ func LoadFrom(path string) (*Config, error) {
 	defer f.Close()
 
 	var cfg Config
+	logging.Info("Decoding config file")
 	dec := yaml.NewDecoder(f)
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
@@ -144,9 +146,11 @@ func CreateNewConfig(storageDir string) error {
 	cfg.StorageDir = storageDir
 
 	// Ensure storage directory exists
-	if err := filemanager.CreateStorageDir(cfg.StorageDir); err != nil {
+	root, err := filemanager.CreateSecureStorageRoot(cfg.StorageDir)
+	if err != nil {
 		return fmt.Errorf("failed to create storage directory: %w", err)
 	}
+	defer root.Close()
 
 	// Save the config to the standard location
 	if err := cfg.Save(); err != nil {

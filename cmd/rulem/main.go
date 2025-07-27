@@ -23,10 +23,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	appLogger.Debug("First run setup completed successfully.")
 
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
+		appLogger.Error("Error loading config", "error", err)
+		os.Exit(1)
+	}
+	if cfg == nil {
 		appLogger.Error("Error loading config", "error", err)
 		os.Exit(1)
 	}
@@ -45,7 +50,7 @@ func main() {
 
 func runFirstTimeSetup(logger *logging.AppLogger) error {
 	menu := setupmenu.NewSetupModel(logger)
-	program := tea.NewProgram(menu)
+	program := tea.NewProgram(menu, tea.WithAltScreen())
 
 	finalModel, err := program.Run()
 	if err != nil {

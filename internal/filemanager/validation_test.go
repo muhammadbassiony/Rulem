@@ -25,17 +25,6 @@ func createTempTestDir(t *testing.T, prefix string) string {
 	return dir
 }
 
-// createSymlink creates a symbolic link for testing
-func createSymlink(t *testing.T, oldname, newname string) {
-	t.Helper()
-	if err := os.Symlink(oldname, newname); err != nil {
-		if runtime.GOOS == "windows" {
-			t.Skipf("symlink creation failed on Windows: %v", err)
-		}
-		t.Fatalf("failed to create symlink: %v", err)
-	}
-}
-
 // makeReadOnly makes a directory read-only
 func makeReadOnly(t *testing.T, path string) {
 	t.Helper()
@@ -564,7 +553,7 @@ func TestSymlinkSecurity(t *testing.T) {
 			name: "symlink to system directory",
 			setup: func() string {
 				linkPath := filepath.Join(tempDir, "evil-link")
-				createSymlink(t, "/etc", linkPath)
+				CreateSymlink(t, "/etc", linkPath)
 				return linkPath
 			},
 		},
@@ -574,8 +563,8 @@ func TestSymlinkSecurity(t *testing.T) {
 				// Create chain: link1 -> link2 -> /etc
 				link1 := filepath.Join(tempDir, "link1")
 				link2 := filepath.Join(tempDir, "link2")
-				createSymlink(t, "/etc", link2)
-				createSymlink(t, link2, link1)
+				CreateSymlink(t, "/etc", link2)
+				CreateSymlink(t, link2, link1)
 				return link1
 			},
 		},

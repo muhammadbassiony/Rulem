@@ -35,4 +35,7 @@ var (
 	HelpStyle = lipgloss.NewStyle().
 			Faint(true).
 			Foreground(lipgloss.Color("#a8a8a8"))
+
+	SpinnerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#5fd7ff"))
 )

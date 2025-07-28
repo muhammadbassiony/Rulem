@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,48 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/log"
 )
+
+// TestMain provides setup and teardown for the entire test suite
+func TestMain(m *testing.M) {
+	// Store original values
+	originalDebugEnv := os.Getenv("DEBUG")
+	originalDefaultLogger := defaultLogger
+
+	// Run tests
+	code := m.Run()
+
+	// Clean up any log files that might have been created
+	cleanupLogFiles()
+
+	// Restore original state
+	if originalDebugEnv == "" {
+		os.Unsetenv("DEBUG")
+	} else {
+		os.Setenv("DEBUG", originalDebugEnv)
+	}
+	defaultLogger = originalDefaultLogger
+
+	os.Exit(code)
+}
+
+// cleanupLogFiles removes any rulem.log files created during testing
+func cleanupLogFiles() {
+	// Check current directory
+	if _, err := os.Stat("rulem.log"); err == nil {
+		os.Remove("rulem.log")
+	}
+
+	// Check any subdirectories that might have been working directories
+	filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.Name() == "rulem.log" {
+			os.Remove(path)
+		}
+		return nil
+	})
+}
 
 func TestDebug_DisabledInProduction(t *testing.T) {
 	var buf bytes.Buffer

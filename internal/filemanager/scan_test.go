@@ -5,65 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 )
-
-// Test helper functions
-
-// createTempDirStructure creates a temporary directory with specified structure
-func createTempDirStructure(t *testing.T, structure map[string]string) string {
-	t.Helper()
-
-	tempDir, err := os.MkdirTemp("", "scan_test_")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-
-	for path, content := range structure {
-		fullPath := filepath.Join(tempDir, path)
-
-		// Create parent directories
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			t.Fatalf("Failed to create parent dirs for %s: %v", path, err)
-		}
-
-		// Create file or directory
-		if strings.HasSuffix(path, "/") {
-			// It's a directory
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
-				t.Fatalf("Failed to create directory %s: %v", path, err)
-			}
-		} else {
-			// It's a file
-			if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-				t.Fatalf("Failed to create file %s: %v", path, err)
-			}
-		}
-	}
-
-	return tempDir
-}
-
-// changeToDir changes to a directory and returns a cleanup function
-func changeToDir(t *testing.T, dir string) func() {
-	t.Helper()
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Failed to change to directory %s: %v", dir, err)
-	}
-
-	return func() {
-		if err := os.Chdir(originalDir); err != nil {
-			t.Errorf("Failed to restore original directory: %v", err)
-		}
-	}
-}
 
 // Unit Tests
 
@@ -262,7 +206,7 @@ func TestScanDirRecursive(t *testing.T) {
 		// Create symlink loop: real_dir -> loop_link -> real_dir
 		realDir := filepath.Join(tempDir, "real_dir")
 		loopLink := filepath.Join(tempDir, "real_dir", "loop_link")
-		CreateSymlink(t, realDir, loopLink)
+		createTestSymlink(t, realDir, loopLink)
 
 		root, err := os.OpenRoot(tempDir)
 		if err != nil {
@@ -520,12 +464,12 @@ func TestScanSymlinkHandling(t *testing.T) {
 	// Create symlink to directory
 	realDir := filepath.Join(tempDir, "real")
 	linkDir := filepath.Join(tempDir, "link_to_real")
-	CreateSymlink(t, realDir, linkDir)
+	createTestSymlink(t, realDir, linkDir)
 
 	// Create symlink to file
 	targetFile := filepath.Join(tempDir, "target", "doc.md")
 	linkFile := filepath.Join(tempDir, "link_to_doc.md")
-	CreateSymlink(t, targetFile, linkFile)
+	createTestSymlink(t, targetFile, linkFile)
 
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()

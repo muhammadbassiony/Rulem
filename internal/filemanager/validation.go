@@ -289,11 +289,11 @@ func validateSymlinkSecurity(path string) error {
 	return nil
 }
 
-// // isSymlink checks if a path is a symbolic link
-// func isSymlink(path string) (bool, error) {
-// 	info, err := os.Lstat(path)
-// 	if err != nil {
-// 		return false, err
-// 	}
-// 	return info.Mode()&os.ModeSymlink != 0, nil
-// }
+// IsSymlink checks if a path is a symbolic link
+func IsSymlink(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	return info.Mode()&os.ModeSymlink != 0, nil
+}

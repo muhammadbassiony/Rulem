@@ -4,65 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
-
-// Test helper functions for helpers_test.go
-
-// createTempTestDir creates a temporary directory for testing
-func createTempTestDir(t *testing.T, prefix string) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", prefix)
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(dir)
-	})
-	return dir
-}
-
-// makeReadOnly makes a directory read-only
-func makeReadOnly(t *testing.T, path string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		// Windows: Remove write permission
-		if err := os.Chmod(path, 0555); err != nil {
-			t.Fatalf("failed to make directory read-only: %v", err)
-		}
-	} else {
-		// Unix: Remove write permission
-		if err := os.Chmod(path, 0555); err != nil {
-			t.Fatalf("failed to make directory read-only: %v", err)
-		}
-	}
-}
-
-// restoreWritePermissions restores write permissions
-func restoreWritePermissions(t *testing.T, path string) {
-	t.Helper()
-	if err := os.Chmod(path, 0755); err != nil {
-		t.Logf("warning: failed to restore write permissions: %v", err)
-	}
-}
-
-// getHomeDir gets the user's home directory for testing
-func getHomeDir(t *testing.T) string {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("failed to get home directory: %v", err)
-	}
-	return home
-}
-
-// isWindows returns true if running on Windows
-func isWindows() bool {
-	return runtime.GOOS == "windows"
-}
 
 // TestValidateStorageDir tests the ValidateStorageDir function
 func TestValidateStorageDir(t *testing.T) {
@@ -553,7 +498,7 @@ func TestSymlinkSecurity(t *testing.T) {
 			name: "symlink to system directory",
 			setup: func() string {
 				linkPath := filepath.Join(tempDir, "evil-link")
-				CreateSymlink(t, "/etc", linkPath)
+				createTestSymlink(t, "/etc", linkPath)
 				return linkPath
 			},
 		},
@@ -563,8 +508,8 @@ func TestSymlinkSecurity(t *testing.T) {
 				// Create chain: link1 -> link2 -> /etc
 				link1 := filepath.Join(tempDir, "link1")
 				link2 := filepath.Join(tempDir, "link2")
-				CreateSymlink(t, "/etc", link2)
-				CreateSymlink(t, link2, link1)
+				createTestSymlink(t, "/etc", link2)
+				createTestSymlink(t, link2, link1)
 				return link1
 			},
 		},

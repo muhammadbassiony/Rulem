@@ -27,7 +27,7 @@ func NewDefaultDirScanner(root *os.Root, opts *ScanOptions) *DirScanner {
 		opts = &ScanOptions{
 			SkipUnreadableDirs: true,
 			MaxDepth:           20,
-			IncludeHidden:      false,
+			IncludeHidden:      true,
 		}
 	}
 

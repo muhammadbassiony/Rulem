@@ -4,6 +4,7 @@ import (
 	"rulem/internal/config"
 	"rulem/internal/logging"
 	"rulem/internal/tui/components"
+	"rulem/internal/tui/helpers"
 	saverulesmodel "rulem/internal/tui/saverulesmodel"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -299,6 +300,16 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logger.Debug("Showing coming soon for feature", "feature", msg.Feature)
 		m.comingSoonFeature = msg.Feature
 		m.state = StateComingSoon
+		return m, nil
+
+	case helpers.NavigateToMainMenuMsg:
+		// Handle navigation back to main menu from any submodel
+		m.logger.LogStateTransition("MainModel", "FeatureState", "StateMenu")
+		m.state = StateMenu
+		m.activeModel = nil
+		m.err = nil
+		m.comingSoonFeature = ""
+		m.layout = m.layout.ClearError()
 		return m, nil
 
 	default:

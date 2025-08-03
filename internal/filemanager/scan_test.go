@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
 )
@@ -144,7 +143,7 @@ func TestScanCurrDirectory(t *testing.T) {
 	// Check each expected file is found
 	fileSet := make(map[string]bool)
 	for _, file := range files {
-		fileSet[file] = true
+		fileSet[file.Path] = true
 	}
 
 	for _, expectedFile := range expected {
@@ -189,7 +188,7 @@ func TestScanDirRecursive(t *testing.T) {
 			t.Errorf("Expected 1 file within depth limit, got %d: %v", len(scanner.files), scanner.files)
 		}
 
-		if scanner.files[0] != "level1/shallow.md" {
+		if scanner.files[0].Path != "level1/shallow.md" {
 			t.Errorf("Expected to find level1/shallow.md, got %v", scanner.files)
 		}
 	})
@@ -263,9 +262,13 @@ func TestScanDirRecursive(t *testing.T) {
 			t.Errorf("Expected %d files, got %d: %v", len(expectedFiles), len(scanner.files), scanner.files)
 		}
 
+		fileSet := make(map[string]bool)
+		for _, file := range scanner.files {
+			fileSet[file.Path] = true
+		}
+
 		for _, expected := range expectedFiles {
-			found := slices.Contains(scanner.files, expected)
-			if found {
+			if fileSet[expected] {
 				t.Logf("Found expected file: %s", expected)
 			} else {
 				t.Errorf("Expected file %q not found in results", expected)
@@ -323,7 +326,7 @@ func TestScanRealFilesystem(t *testing.T) {
 	// Verify all expected files are found
 	fileSet := make(map[string]bool)
 	for _, file := range files {
-		fileSet[file] = true
+		fileSet[file.Path] = true
 	}
 
 	for _, expected := range expectedFiles {
@@ -412,6 +415,17 @@ func TestScanWithUnreadableDirectories(t *testing.T) {
 	if len(files) != len(expected) {
 		t.Errorf("Expected %d files, got %d: %v", len(expected), len(files), files)
 	}
+
+	fileSet := make(map[string]bool)
+	for _, file := range files {
+		fileSet[file.Path] = true
+	}
+
+	for _, expectedFile := range expected {
+		if !fileSet[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
 }
 
 // Security Tests (simplified)
@@ -449,6 +463,17 @@ func TestScanSecurityBoundaries(t *testing.T) {
 	if len(scanner.files) != 2 {
 		t.Errorf("Expected 2 files within boundaries, got %d", len(scanner.files))
 	}
+
+	expected := []string{"allowed/file.md", "test.md"}
+	fileSet := make(map[string]bool)
+	for _, file := range scanner.files {
+		fileSet[file.Path] = true
+	}
+	for _, expectedFile := range expected {
+		if !fileSet[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
 }
 
 func TestScanSymlinkHandling(t *testing.T) {
@@ -484,5 +509,17 @@ func TestScanSymlinkHandling(t *testing.T) {
 
 	if len(files) < expectedMinimum {
 		t.Errorf("Expected at least %d files, got %d: %v", expectedMinimum, len(files), files)
+	}
+
+	expected := []string{"normal.md", "real/file.md"}
+
+	fileSet := make(map[string]bool)
+	for _, file := range files {
+		fileSet[file.Path] = true
+	}
+	for _, expectedFile := range expected {
+		if !fileSet[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
 	}
 }

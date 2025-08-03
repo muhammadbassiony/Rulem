@@ -30,7 +30,7 @@ const (
 // Custom messages for async operations
 type (
 	FileScanCompleteMsg struct {
-		Files []string
+		Files []filemanager.FileItem
 	}
 
 	FileScanErrorMsg struct {
@@ -53,15 +53,6 @@ type (
 	}
 )
 
-// List item for file selection
-type fileItem struct {
-	filename string
-}
-
-func (i fileItem) Title() string       { return i.filename }
-func (i fileItem) Description() string { return " " }
-func (i fileItem) FilterValue() string { return i.filename }
-
 type SaveRulesModel struct {
 	logger *logging.AppLogger
 	state  SaveFileModelState
@@ -75,7 +66,7 @@ type SaveRulesModel struct {
 	nameInput textinput.Model
 
 	// Data
-	markdownFiles    []string
+	markdownFiles    []filemanager.FileItem
 	selectedFile     string
 	newFileName      string
 	destinationPath  string
@@ -132,7 +123,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		spinner:          s,
 		fileList:         fileList,
 		nameInput:        nameInput,
-		markdownFiles:    []string{},
+		markdownFiles:    []filemanager.FileItem{},
 		selectedFile:     "",
 		newFileName:      "",
 		destinationPath:  "",
@@ -189,7 +180,7 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Populate file list
 		items := make([]list.Item, len(msg.Files))
 		for i, file := range msg.Files {
-			items[i] = fileItem{filename: file}
+			items[i] = filemanager.FileItem{Name: file.Name, Path: file.Path}
 		}
 		m.fileList.SetItems(items)
 
@@ -249,13 +240,13 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				// When enter is pressed when not filtering, then select the file
 				if m.fileList.FilterState() != list.Filtering {
-					if selectedItem, ok := m.fileList.SelectedItem().(fileItem); ok {
-						m.selectedFile = selectedItem.filename
+					if selectedItem, ok := m.fileList.SelectedItem().(filemanager.FileItem); ok {
+						m.selectedFile = selectedItem.Name
 						m.logger.Debug("File selected", "file", m.selectedFile)
 
 						// Auto-populate the filename input with the selected filename
-						m.newFileName = selectedItem.filename
-						m.nameInput.SetValue(selectedItem.filename)
+						m.newFileName = selectedItem.Name
+						m.nameInput.SetValue(selectedItem.Name)
 						m.nameInput.Focus()
 
 						m.state = StateFileNameInput

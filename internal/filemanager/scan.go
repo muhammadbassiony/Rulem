@@ -18,7 +18,7 @@ type ScanOptions struct {
 type DirScanner struct {
 	root    *os.Root
 	opts    *ScanOptions
-	files   []string
+	files   []FileItem
 	visited map[string]bool
 }
 
@@ -34,14 +34,14 @@ func NewDefaultDirScanner(root *os.Root, opts *ScanOptions) *DirScanner {
 	return &DirScanner{
 		root:    root,
 		opts:    opts,
-		files:   []string{},
+		files:   []FileItem{},
 		visited: make(map[string]bool),
 	}
 }
 
 // ScanCurrDirectory recursively scans the CWD, and all its children
-// for all md files and returns a list of their paths
-func ScanCurrDirectory() ([]string, error) {
+// for all md files and returns a list of FileItem
+func ScanCurrDirectory() ([]FileItem, error) {
 	// get CWD
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -77,7 +77,6 @@ func (d *DirScanner) scanDirRecursive(relativePath string, depth int) error {
 
 	// Use clean relative path for loop detection
 	cleanPath := filepath.Clean(relativePath)
-	logging.Debug("ABOUT TO SCAN BITCHES", "fir", cleanPath)
 	if d.visited[cleanPath] {
 		logging.Debug("Directory already visited, skipping", "dir", relativePath)
 		return nil // Skip already visited directory (symlink loop)
@@ -121,7 +120,10 @@ func (d *DirScanner) scanDirRecursive(relativePath string, depth int) error {
 		} else {
 			// Check if it's a markdown file
 			if isMarkdownFile(entry.Name()) {
-				d.files = append(d.files, entryPath)
+				d.files = append(d.files, FileItem{
+					Name: entry.Name(),
+					Path: entryPath,
+				})
 			}
 		}
 	}

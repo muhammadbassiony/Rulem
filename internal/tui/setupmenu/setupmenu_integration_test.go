@@ -14,6 +14,25 @@ import (
 	"github.com/charmbracelet/x/exp/teatest"
 )
 
+func TestMain(m *testing.M) {
+	// Create a temporary config directory
+	tempConfigDir, err := os.MkdirTemp("", "setupmenu-test-config-")
+	if err != nil {
+		panic("Failed to create temp config dir: " + err.Error())
+	}
+	orig := os.Getenv("XDG_CONFIG_HOME")
+	os.Setenv("XDG_CONFIG_HOME", tempConfigDir)
+
+	// Run tests
+	code := m.Run()
+
+	// Restore environment and cleanup
+	os.Setenv("XDG_CONFIG_HOME", orig)
+	os.RemoveAll(tempConfigDir)
+
+	os.Exit(code)
+}
+
 // TestSuccessfulSetup tests the entire successful setup workflow
 func TestSuccessfulSetup(t *testing.T) {
 	// Create a temporary directory for testing valid paths

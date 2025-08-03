@@ -84,6 +84,10 @@ type MainModel struct {
 	// Layout for consistent UI
 	layout components.LayoutModel
 
+	// Window dimensions for creating submodels
+	windowWidth  int
+	windowHeight int
+
 	// UI state
 	err               error
 	loading           bool
@@ -163,6 +167,10 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Single comprehensive switch statement handling all message types and states
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// Store window dimensions for creating submodels
+		m.windowWidth = msg.Width
+		m.windowHeight = msg.Height
+
 		// Handle window resize
 		v := 14 // footer margins
 		m.menu.SetSize(msg.Width-4, msg.Height-v)
@@ -340,10 +348,30 @@ func (m MainModel) handleMenuSelection(selectedItem item) (tea.Model, tea.Cmd) {
 	// Set the active model and navigate to its state
 	m.activeModel = model
 
+	var cmds []tea.Cmd
 	// Call the model's Init() method to start any commands
 	modelInitCmd := model.Init()
+	if modelInitCmd != nil {
+		cmds = append(cmds, modelInitCmd)
+	}
 
-	return m, tea.Batch(NavigateTo(selectedItem.state), modelInitCmd)
+	// Send window size if layout has dimensions
+	if m.layout.ContentWidth() > 0 && m.layout.ContentHeight() > 0 {
+		windowMsg := tea.WindowSizeMsg{Width: m.layout.ContentWidth(), Height: m.layout.ContentHeight()}
+		updatedModel, windowCmd := model.Update(windowMsg)
+		m.activeModel = updatedModel.(MenuItemModel)
+		if windowCmd != nil {
+			cmds = append(cmds, windowCmd)
+		}
+	}
+
+	cmds = append(cmds, NavigateTo(selectedItem.state))
+	return m, tea.Batch(cmds...)
+}
+
+// GetUIContext creates a UI context with current dimensions and app state
+func (m MainModel) GetUIContext() helpers.UIContext {
+	return helpers.NewUIContext(m.windowWidth, m.windowHeight, m.config, m.logger)
 }
 
 // getOrInitializeModel returns the model for a given state, initializing it if needed
@@ -352,34 +380,39 @@ func (m *MainModel) getOrInitializeModel(state AppState) MenuItemModel {
 	case StateSettings:
 		if m.settingsModel == nil {
 			// TODO: Initialize settings model when implemented
-			// m.settingsModel = NewSettingsModel(m.config)
+			// ctx := m.GetUIContext()
+			// m.settingsModel = NewSettingsModel(ctx)
 		}
 		return m.settingsModel
 
 	case StateSaveRules:
 		if m.saveRulesModel == nil {
-			m.saveRulesModel = saverulesmodel.NewSaveRulesModel(m.config, m.logger)
+			ctx := m.GetUIContext()
+			m.saveRulesModel = saverulesmodel.NewSaveRulesModel(ctx)
 		}
 		return m.saveRulesModel
 
 	case StateImportCopy:
 		if m.importCopyModel == nil {
 			// TODO: Initialize import copy model when implemented
-			// m.importCopyModel = NewImportCopyModel(m.config)
+			// ctx := m.GetUIContext()
+			// m.importCopyModel = NewImportCopyModel(ctx)
 		}
 		return m.importCopyModel
 
 	case StateImportLink:
 		if m.importLinkModel == nil {
 			// TODO: Initialize import link model when implemented
-			// m.importLinkModel = NewImportLinkModel(m.config)
+			// ctx := m.GetUIContext()
+			// m.importLinkModel = NewImportLinkModel(ctx)
 		}
 		return m.importLinkModel
 
 	case StateFetchGithub:
 		if m.fetchGithubModel == nil {
 			// TODO: Initialize fetch github model when implemented
-			// m.fetchGithubModel = NewFetchGithubModel(m.config)
+			// ctx := m.GetUIContext()
+			// m.fetchGithubModel = NewFetchGithubModel(ctx)
 		}
 		return m.fetchGithubModel
 

@@ -161,3 +161,8 @@ func (fm *FileManager) atomicCopy(srcPath, destPath string) error {
 	copySuccess = true
 	return nil
 }
+
+// GetStorageDir returns the storage directory path
+func (fm *FileManager) GetStorageDir() string {
+	return fm.storageDir
+}

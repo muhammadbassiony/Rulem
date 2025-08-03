@@ -2,7 +2,6 @@ package saverulesmodel
 
 import (
 	"fmt"
-	"rulem/internal/config"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/tui/components"
@@ -64,7 +63,6 @@ func (i fileItem) Description() string { return " " }
 func (i fileItem) FilterValue() string { return i.filename }
 
 type SaveRulesModel struct {
-	config *config.Config
 	logger *logging.AppLogger
 	state  SaveFileModelState
 
@@ -88,13 +86,19 @@ type SaveRulesModel struct {
 	fileManager *filemanager.FileManager
 }
 
-func NewSaveRulesModel(cfg *config.Config, logger *logging.AppLogger) SaveRulesModel {
+func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	// Create layout
 	layout := components.NewLayout(components.LayoutConfig{
 		MarginX:  2,
 		MarginY:  1,
-		MaxWidth: 0,
+		MaxWidth: 100,
 	})
+
+	// Initialize layout with current dimensions if available
+	if ctx.HasValidDimensions() {
+		windowMsg := tea.WindowSizeMsg{Width: ctx.Width, Height: ctx.Height}
+		layout, _ = layout.Update(windowMsg)
+	}
 
 	// Initialize spinner
 	s := spinner.New()
@@ -102,7 +106,7 @@ func NewSaveRulesModel(cfg *config.Config, logger *logging.AppLogger) SaveRulesM
 	s.Spinner = spinner.Pulse
 
 	// Initialize file list
-	fileList := list.New([]list.Item{}, list.NewDefaultDelegate(), 100, 20)
+	fileList := list.New([]list.Item{}, list.NewDefaultDelegate(), 80, 20)
 	fileList.Title = ""
 	fileList.SetShowTitle(false)
 	fileList.SetShowStatusBar(false)
@@ -116,15 +120,13 @@ func NewSaveRulesModel(cfg *config.Config, logger *logging.AppLogger) SaveRulesM
 	nameInput.Width = 50
 
 	// Initialize FileManager
-	fm, err := filemanager.NewFileManager(cfg.StorageDir, logger)
+	fm, err := filemanager.NewFileManager(ctx.Config.StorageDir, ctx.Logger)
 	if err != nil {
-		logger.Error("Failed to initialize FileManager", "error", err)
-		// We'll handle this in the first view
+		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
 	}
 
 	return SaveRulesModel{
-		config:           cfg,
-		logger:           logger,
+		logger:           ctx.Logger,
 		state:            StateLoading,
 		layout:           layout,
 		spinner:          s,
@@ -168,9 +170,12 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Update list size
-		listWidth := msg.Width - 6   // Account for margins and borders
-		listHeight := msg.Height - 8 // Leave room for title, help, etc.
+		// Update layout first so it has current dimensions
+		m.layout, _ = m.layout.Update(msg)
+
+		// Use layout's utility functions for consistent sizing
+		listWidth := m.layout.ContentWidth()
+		listHeight := m.layout.ContentHeight()
 		m.fileList.SetSize(listWidth, listHeight)
 		return m, nil
 
@@ -190,8 +195,10 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Ensure the list has reasonable dimensions if not set yet
 		if m.fileList.Width() == 0 || m.fileList.Height() == 0 {
-			// Set default dimensions - these will be updated by WindowSizeMsg later
-			m.fileList.SetSize(100, 20)
+			// Use layout's utility functions for proper dimensions
+			listWidth := m.layout.ContentWidth()
+			listHeight := m.layout.ContentHeight()
+			m.fileList.SetSize(listWidth, listHeight)
 		}
 
 		// Update the list after setting items
@@ -440,7 +447,7 @@ func (m SaveRulesModel) viewFileNameInput() string {
 		HelpText: "Enter filename (or keep default) • Enter to continue • Esc to go back",
 	})
 
-	content := fmt.Sprintf("File will be saved to: %s\n\n", m.config.StorageDir)
+	content := fmt.Sprintf("File will be saved to: %s\n\n", m.fileManager.GetStorageDir())
 	content += "Filename:\n"
 	content += m.nameInput.View()
 	content += "\n\n"
@@ -458,7 +465,7 @@ func (m SaveRulesModel) viewConfirmation() string {
 
 	content := fmt.Sprintf("A file named '%s' already exists in the storage directory.\n\n", m.newFileName)
 	content += "Do you want to overwrite it?\n\n"
-	content += "Storage directory: " + m.config.StorageDir
+	content += "Storage directory: " + m.fileManager.GetStorageDir()
 
 	return m.layout.Render(content)
 }

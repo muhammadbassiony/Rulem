@@ -158,8 +158,10 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 
-	// Log all messages for debugging
-	m.logger.LogMessage(msg)
+	// log only strategic events
+	if wm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.logger.Debug("window resize", "width", wm.Width, "height", wm.Height)
+	}
 
 	// Update layout first for size changes
 	m.layout, _ = m.layout.Update(msg)

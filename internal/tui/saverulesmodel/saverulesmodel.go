@@ -2,14 +2,15 @@ package saverulesmodel
 
 import (
 	"fmt"
+	"strings"
+
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/tui/components"
+	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
-	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,16 +19,16 @@ import (
 type SaveFileModelState int
 
 const (
-	StateLoading SaveFileModelState = iota
-	StateFileSelection
-	StateFileNameInput
-	StateConfirmation
-	StateSaving
-	StateSuccess
-	StateError
+	StateLoading       SaveFileModelState = iota // Scanning filesystem for markdown files
+	StateFileSelection                           // Showing file picker with preview
+	StateFileNameInput                           // Allowing user to override destination filename
+	StateConfirmation                            // Confirming overwrite scenario
+	StateSaving                                  // Performing save
+	StateSuccess                                 // Save completed
+	StateError                                   // Any error state
 )
 
-// Custom messages for async operations
+// Custom messages (internal domain-specific) for async operations and transitions.
 type (
 	FileScanCompleteMsg struct {
 		Files []filemanager.FileItem
@@ -57,19 +58,21 @@ type SaveRulesModel struct {
 	logger *logging.AppLogger
 	state  SaveFileModelState
 
-	// Layout for consistent UI
+	// Layout (used for all states except the file selection which delegates to FilePicker's own layout)
 	layout  components.LayoutModel
 	spinner spinner.Model
 
-	// UI Components
-	fileList  list.Model
+	// Filepicker instance
+	filePicker *filepicker.FilePicker
+
+	// Filename input (optional rename)
 	nameInput textinput.Model
 
 	// Data
 	markdownFiles    []filemanager.FileItem
-	selectedFile     string
-	newFileName      string
-	destinationPath  string
+	selectedFile     filemanager.FileItem
+	newFileName      string // user-entered / confirmed destination filename
+	destinationPath  string // resulting storage path
 	err              error
 	isOverwriteError bool
 
@@ -78,39 +81,27 @@ type SaveRulesModel struct {
 }
 
 func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
-	// Create layout
 	layout := components.NewLayout(components.LayoutConfig{
 		MarginX:  2,
 		MarginY:  1,
 		MaxWidth: 100,
 	})
 
-	// Initialize layout with current dimensions if available
 	if ctx.HasValidDimensions() {
 		windowMsg := tea.WindowSizeMsg{Width: ctx.Width, Height: ctx.Height}
 		layout, _ = layout.Update(windowMsg)
 	}
 
-	// Initialize spinner
 	s := spinner.New()
 	s.Style = styles.SpinnerStyle
 	s.Spinner = spinner.Pulse
 
-	// Initialize file list
-	fileList := list.New([]list.Item{}, list.NewDefaultDelegate(), 80, 20)
-	fileList.Title = ""
-	fileList.SetShowTitle(false)
-	fileList.SetShowStatusBar(false)
-	fileList.SetFilteringEnabled(true)
-	fileList.SetShowHelp(false)
-
-	// Initialize text input for filename
+	// Filename input configuration
 	nameInput := textinput.New()
 	nameInput.Placeholder = "Enter new filename (optional)"
 	nameInput.CharLimit = 255
 	nameInput.Width = 50
 
-	// Initialize FileManager
 	fm, err := filemanager.NewFileManager(ctx.Config.StorageDir, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
@@ -121,10 +112,10 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		state:            StateLoading,
 		layout:           layout,
 		spinner:          s,
-		fileList:         fileList,
+		filePicker:       nil, // created after scan
 		nameInput:        nameInput,
 		markdownFiles:    []filemanager.FileItem{},
-		selectedFile:     "",
+		selectedFile:     filemanager.FileItem{},
 		newFileName:      "",
 		destinationPath:  "",
 		err:              nil,
@@ -133,6 +124,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	}
 }
 
+// Init starts asynchronous scanning for markdown files.
 func (m SaveRulesModel) Init() tea.Cmd {
 	if m.fileManager == nil {
 		return func() tea.Msg {
@@ -142,84 +134,92 @@ func (m SaveRulesModel) Init() tea.Cmd {
 			}
 		}
 	}
-
 	return tea.Batch(
 		m.scanForFilesCmd(),
-		m.spinner.Tick, // Start spinner
+		m.spinner.Tick,
 	)
 }
 
 func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Log all messages for debugging
-	m.logger.LogMessage(msg)
 
-	// Update layout first for size changes
+	// Update layout
 	m.layout, _ = m.layout.Update(msg)
 
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 
-	switch msg := msg.(type) {
+	switch message := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Update layout first so it has current dimensions
-		m.layout, _ = m.layout.Update(msg)
+		// Propagate window sizing to FilePicker if it exists & we are in selection state.
+		if m.filePicker != nil {
+			updated, fpCmd := m.filePicker.Update(message)
+			if fpCmd != nil {
+				cmds = append(cmds, fpCmd)
+			}
 
-		// Use layout's utility functions for consistent sizing
-		listWidth := m.layout.ContentWidth()
-		listHeight := m.layout.ContentHeight()
-		m.fileList.SetSize(listWidth, listHeight)
-		return m, nil
+			if fp, ok := updated.(*filepicker.FilePicker); ok {
+				m.filePicker = fp
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case FileScanCompleteMsg:
-		// Handle successful file scan
-		m.logger.Debug("Save rules model - File scan completed", "files", msg.Files)
-		m.markdownFiles = msg.Files
+		m.logger.Debug("Save rules model - File scan completed", "files_count", len(message.Files))
+		m.markdownFiles = message.Files
 		m.state = StateFileSelection
 		m.err = nil
 
-		// Populate file list
-		items := make([]list.Item, len(msg.Files))
-		for i, file := range msg.Files {
-			items[i] = filemanager.FileItem{Name: file.Name, Path: file.Path}
+		// Build FilePicker once files are available
+		ctx := helpers.NewUIContext(m.layout.ContentWidth(), m.layout.ContentHeight(), nil, m.logger)
+		fp := filepicker.NewFilePicker(
+			"💾 Save Rules File",
+			"Select a markdown file to save to your central rules repository (press Enter). \nUse / to filter, arrows to navigate, g to toggle formatting.",
+			m.markdownFiles,
+			ctx,
+		)
+		m.filePicker = &fp
+
+		// Initialize FilePicker (schedule initial preview if any)
+		fpInit := m.filePicker.Init()
+		if fpInit != nil {
+			cmds = append(cmds, fpInit)
 		}
-		m.fileList.SetItems(items)
-
-		// Ensure the list has reasonable dimensions if not set yet
-		if m.fileList.Width() == 0 || m.fileList.Height() == 0 {
-			// Use layout's utility functions for proper dimensions
-			listWidth := m.layout.ContentWidth()
-			listHeight := m.layout.ContentHeight()
-			m.fileList.SetSize(listWidth, listHeight)
-		}
-
-		// Update the list after setting items
-		var listCmd tea.Cmd
-		m.fileList, listCmd = m.fileList.Update(msg)
-
-		return m, listCmd
+		return m, tea.Batch(cmds...)
 
 	case FileScanErrorMsg:
-		// Handle file scan error
-		m.logger.Error("Save rules model - File scan failed", "error", msg.Err)
-		m.err = msg.Err
+		m.logger.Error("Save rules model - File scan failed", "error", message.Err)
+		m.err = message.Err
 		m.state = StateError
 		m.isOverwriteError = false
 		return m, nil
 
+	case filepicker.FileSelectedMsg:
+		// File chosen in picker; transition to filename entry
+		m.logger.Debug("Save rules model - File selected from picker", "path", message.File.Path)
+		m.selectedFile = message.File
+		m.newFileName = message.File.Name
+
+		// Prepare name change input
+		m.nameInput.SetValue(m.newFileName)
+		m.nameInput.Focus()
+		m.state = StateFileNameInput
+		return m, textinput.Blink
+
 	case SaveFileCompleteMsg:
-		// Handle successful save
-		m.logger.Info("File saved successfully", "dest", msg.DestPath)
-		m.destinationPath = msg.DestPath
+		m.logger.Info("File saved successfully", "dest", message.DestPath)
+		m.destinationPath = message.DestPath
 		m.state = StateSuccess
 		m.err = nil
 		return m, nil
 
 	case SaveFileErrorMsg:
-		// Handle save error
-		m.logger.Error("File save failed", "error", msg.Err, "isOverwrite", msg.IsOverwriteError)
-		m.err = msg.Err
-		m.isOverwriteError = msg.IsOverwriteError
-		if msg.IsOverwriteError {
+		m.logger.Error("File save failed", "error", message.Err, "isOverwrite", message.IsOverwriteError)
+		m.err = message.Err
+		m.isOverwriteError = message.IsOverwriteError
+		// If it's an overwrite error, we need to confirm with the user
+		// whether they want to proceed with overwriting the existing file.
+		// So we return to the confirmation state.
+		if message.IsOverwriteError {
 			m.state = StateConfirmation
 		} else {
 			m.state = StateError
@@ -228,7 +228,7 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		if m.state == StateLoading || m.state == StateSaving {
-			m.spinner, cmd = m.spinner.Update(msg)
+			m.spinner, cmd = m.spinner.Update(message)
 			return m, cmd
 		}
 		return m, nil
@@ -236,89 +236,58 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch m.state {
 		case StateFileSelection:
-			switch msg.String() {
-			case "enter":
-				// When enter is pressed when not filtering, then select the file
-				if m.fileList.FilterState() != list.Filtering {
-					if selectedItem, ok := m.fileList.SelectedItem().(filemanager.FileItem); ok {
-						m.selectedFile = selectedItem.Name
-						m.logger.Debug("File selected", "file", m.selectedFile)
-
-						// Auto-populate the filename input with the selected filename
-						m.newFileName = selectedItem.Name
-						m.nameInput.SetValue(selectedItem.Name)
-						m.nameInput.Focus()
-
-						m.state = StateFileNameInput
-						return m, textinput.Blink
-					}
-				}
-
-				// When filtering, pass enter to the list
-				m.fileList, cmd = m.fileList.Update(msg)
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			default:
-				// Update the file list for navigation/filtering
-				m.fileList, cmd = m.fileList.Update(msg)
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+			// Intercept 'q' to avoid quitting entire application; instead navigate back.
+			if message.String() == "q" {
+				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			}
 
-		case StateFileNameInput:
-			switch msg.String() {
-			case "enter":
-				// Proceed with save operation
-				m.newFileName = strings.TrimSpace(m.nameInput.Value())
-				if m.newFileName == "" {
-					m.newFileName = m.selectedFile // Use original filename if empty
+			// Delegate everything else to FilePicker (except Esc which parent MainModel handles)
+			if m.filePicker != nil {
+				updated, fpCmd := m.filePicker.Update(message)
+				if fpCmd != nil {
+					cmds = append(cmds, fpCmd)
 				}
+				if fp, ok := updated.(*filepicker.FilePicker); ok {
+					m.filePicker = fp
+				}
+			}
+			return m, tea.Batch(cmds...)
 
+		case StateFileNameInput:
+			switch message.String() {
+			case "enter":
+				m.commitOrDefaultFilename()
 				m.nameInput.Blur()
 				m.state = StateSaving
-
-				var newFileNamePtr *string
-				if m.newFileName != m.selectedFile {
-					newFileNamePtr = &m.newFileName
-				}
-
+				newNamePtr := m.optionalNewNamePtr()
 				return m, tea.Batch(
-					m.saveFileCmd(m.selectedFile, newFileNamePtr, false), // First try without overwrite
+					m.saveFileCmd(m.selectedFile.Path, newNamePtr, false),
 					m.spinner.Tick,
 				)
 			case "esc":
-				// Go back to file selection
+				// Parent handles leaving feature; we revert to selection for consistency
 				m.nameInput.Blur()
 				m.state = StateFileSelection
 				return m, nil
 			default:
-				// Update text input
-				m.nameInput, cmd = m.nameInput.Update(msg)
+				m.nameInput, cmd = m.nameInput.Update(message)
 				m.newFileName = m.nameInput.Value()
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+				return m, tea.Batch(cmds...)
 			}
 
 		case StateConfirmation:
-			switch msg.String() {
+			switch message.String() {
 			case "y":
-				// User confirmed overwrite
 				m.state = StateSaving
-
-				var newFileNamePtr *string
-				if m.newFileName != m.selectedFile {
-					newFileNamePtr = &m.newFileName
-				}
-
+				newNamePtr := m.optionalNewNamePtr()
 				return m, tea.Batch(
-					m.saveFileCmd(m.selectedFile, newFileNamePtr, true), // Try with overwrite
+					m.saveFileCmd(m.selectedFile.Path, newNamePtr, true),
 					m.spinner.Tick,
 				)
 			case "n", "esc":
-				// User cancelled overwrite, go back to filename input
 				m.nameInput.Focus()
 				m.state = StateFileNameInput
 				m.err = nil
@@ -327,36 +296,31 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case StateError:
-			switch msg.String() {
+			switch message.String() {
 			case "r":
 				if m.isOverwriteError {
-					// Retry with different filename
 					m.nameInput.Focus()
 					m.state = StateFileNameInput
 					m.err = nil
 					m.isOverwriteError = false
 					return m, textinput.Blink
-				} else {
-					// Retry scanning
-					m.state = StateLoading
-					m.err = nil
-					return m, tea.Batch(
-						m.scanForFilesCmd(),
-						m.spinner.Tick,
-					)
 				}
+				// Re-scan
+				m.state = StateLoading
+				m.err = nil
+				return m, tea.Batch(
+					m.scanForFilesCmd(),
+					m.spinner.Tick,
+				)
 			}
 
 		case StateSuccess:
-			switch msg.String() {
+			switch message.String() {
 			case "m":
-				// Return to main menu - use command approach
-				return m, func() tea.Msg {
-					return helpers.NavigateToMainMenuMsg{}
-				}
+				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			case "a":
-				// Save another file - go back to file selection
-				m.selectedFile = ""
+				// Reset only selection-related state; keep loaded file list to avoid re-scan
+				m.selectedFile = filemanager.FileItem{}
 				m.newFileName = ""
 				m.destinationPath = ""
 				m.nameInput.SetValue("")
@@ -366,17 +330,14 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	default:
-		// Handle other message types
-		switch m.state {
-		case StateFileSelection:
-			m.fileList, cmd = m.fileList.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
+		// Delegate unhandled messages in selection state to FilePicker
+		if m.state == StateFileSelection && m.filePicker != nil {
+			updated, fpCmd := m.filePicker.Update(msg)
+			if fpCmd != nil {
+				cmds = append(cmds, fpCmd)
 			}
-		case StateFileNameInput:
-			m.nameInput, cmd = m.nameInput.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
+			if fp, ok := updated.(*filepicker.FilePicker); ok {
+				m.filePicker = fp
 			}
 		}
 	}
@@ -389,7 +350,11 @@ func (m SaveRulesModel) View() string {
 	case StateLoading:
 		return m.viewLoading()
 	case StateFileSelection:
-		return m.viewFileSelection()
+		// FilePicker renders its own header/layout styling
+		if m.filePicker == nil {
+			return m.layout.Render("Initializing file picker...")
+		}
+		return m.filePicker.View()
 	case StateFileNameInput:
 		return m.viewFileNameInput()
 	case StateConfirmation:
@@ -400,10 +365,12 @@ func (m SaveRulesModel) View() string {
 		return m.viewSuccess()
 	case StateError:
 		return m.viewError()
-	default:
-		return "Unknown state"
 	}
+
+	return m.viewError()
 }
+
+// VIEWS
 
 func (m SaveRulesModel) viewLoading() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
@@ -411,30 +378,14 @@ func (m SaveRulesModel) viewLoading() string {
 		Subtitle: "Scanning for markdown files...",
 		HelpText: "Please wait while we scan your directory",
 	})
-
 	content := fmt.Sprintf("\n %s %s\n\n", m.spinner.View(), styles.SpinnerStyle.Render("Scanning..."))
-
 	return m.layout.Render(content)
-}
-
-func (m SaveRulesModel) viewFileSelection() string {
-	m.layout = m.layout.SetConfig(components.LayoutConfig{
-		Title:    "💾 Save Rules File",
-		Subtitle: "Select a markdown file to save",
-		HelpText: "↑/↓ to navigate • Enter to select • / to filter • Esc to go back",
-	})
-
-	if len(m.markdownFiles) == 0 {
-		return m.layout.Render("No markdown files found in current directory")
-	}
-
-	return m.layout.Render(m.fileList.View())
 }
 
 func (m SaveRulesModel) viewFileNameInput() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "💾 Save Rules File",
-		Subtitle: fmt.Sprintf("Selected: %s", m.selectedFile),
+		Subtitle: fmt.Sprintf("Selected: %s", m.selectedFile.Name),
 		HelpText: "Enter filename (or keep default) • Enter to continue • Esc to go back",
 	})
 
@@ -457,7 +408,6 @@ func (m SaveRulesModel) viewConfirmation() string {
 	content := fmt.Sprintf("A file named '%s' already exists in the storage directory.\n\n", m.newFileName)
 	content += "Do you want to overwrite it?\n\n"
 	content += "Storage directory: " + m.fileManager.GetStorageDir()
-
 	return m.layout.Render(content)
 }
 
@@ -467,10 +417,8 @@ func (m SaveRulesModel) viewSaving() string {
 		Subtitle: "Saving file...",
 		HelpText: "Please wait while we copy your file",
 	})
-
-	content := fmt.Sprintf("Copying '%s' to storage directory...\n\n", m.selectedFile)
+	content := fmt.Sprintf("Copying '%s' to storage directory...\n\n", m.selectedFile.Name)
 	content += fmt.Sprintf("%s %s", m.spinner.View(), styles.SpinnerStyle.Render("Saving..."))
-
 	return m.layout.Render(content)
 }
 
@@ -478,14 +426,12 @@ func (m SaveRulesModel) viewSuccess() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "💾 Save Rules File - Success",
 		Subtitle: "File saved successfully!",
-		HelpText: "m to return to main menu • a to save another file • Esc to go back",
+		HelpText: "m to return to main menu • a to save another file",
 	})
-
 	content := "✅ File saved successfully!\n\n"
-	content += fmt.Sprintf("Source: %s\n", m.selectedFile)
+	content += fmt.Sprintf("Source: %s\n", m.selectedFile.Path)
 	content += fmt.Sprintf("Destination: %s\n\n", m.destinationPath)
 	content += "The file has been copied to your rules storage directory."
-
 	return m.layout.Render(content)
 }
 
@@ -493,20 +439,36 @@ func (m SaveRulesModel) viewError() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "💾 Save Rules File - Error",
 		Subtitle: "Operation failed",
-		HelpText: "r to retry • Esc to go back",
+		HelpText: "r to retry (Esc to go back via main app)",
 	})
-
 	errorText := "An error occurred"
 	if m.err != nil {
 		errorText = m.err.Error()
 	}
-
 	return m.layout.Render(errorText)
+}
+
+// HELPERS
+
+// commitOrDefaultFilename ensures m.newFileName is populated (fallback to original selected file name).
+func (m *SaveRulesModel) commitOrDefaultFilename() {
+	m.newFileName = strings.TrimSpace(m.nameInput.Value())
+	if m.newFileName == "" {
+		m.newFileName = m.selectedFile.Name
+	}
+}
+
+// optionalNewNamePtr returns a pointer only if user changed the name (so FileManager can preserve original otherwise).
+func (m *SaveRulesModel) optionalNewNamePtr() *string {
+	if m.newFileName != "" && m.newFileName != m.selectedFile.Name {
+		return &m.newFileName
+	}
+	return nil
 }
 
 // COMMANDS
 
-// Command to scan for files asynchronously
+// scanForFilesCmd asynchronously scans current directory tree for markdown files.
 func (m SaveRulesModel) scanForFilesCmd() tea.Cmd {
 	m.logger.Debug("File scan started")
 	return func() tea.Msg {
@@ -514,15 +476,15 @@ func (m SaveRulesModel) scanForFilesCmd() tea.Cmd {
 		if err != nil {
 			return FileScanErrorMsg{Err: err}
 		}
-		if len(files) == 0 {
-			return FileScanErrorMsg{Err: fmt.Errorf("no markdown files found in current directory")}
-		}
-		m.logger.Debug("File scan completed", "files", files)
+		// // TODO why is this an error? should handle as an empty list? - handle in filepicker by adding an empty state?
+		// if len(files) == 0 {
+		// 	return FileScanErrorMsg{Err: fmt.Errorf("no markdown files found in current directory")}
+		// }
 		return FileScanCompleteMsg{Files: files}
 	}
 }
 
-// Command to save file asynchronously
+// saveFileCmd copies the selected file into the storage directory (with optional rename + overwrite).
 func (m SaveRulesModel) saveFileCmd(filePath string, newFileName *string, overwrite bool) tea.Cmd {
 	m.logger.Debug("Starting file save operation", "file", filePath, "newName", newFileName, "overwrite", overwrite)
 	return func() tea.Msg {
@@ -535,14 +497,12 @@ func (m SaveRulesModel) saveFileCmd(filePath string, newFileName *string, overwr
 
 		destPath, err := m.fileManager.CopyFileToStorage(filePath, newFileName, overwrite)
 		if err != nil {
-			// Check if this is an overwrite error
 			isOverwriteError := strings.Contains(err.Error(), "already exists")
 			return SaveFileErrorMsg{
 				Err:              err,
 				IsOverwriteError: isOverwriteError,
 			}
 		}
-
 		return SaveFileCompleteMsg{DestPath: destPath}
 	}
 }

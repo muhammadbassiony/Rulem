@@ -112,7 +112,7 @@ type (
 
 	// To be sent from the file picker to the main program when a file is selected
 	FileSelectedMsg struct {
-		Path string
+		File filemanager.FileItem
 	}
 
 	// internal: sent after a debounce period to trigger preview
@@ -530,7 +530,7 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if ok {
 				fp.logger.Debug("File selected via Enter", "path", selectedItem.Path)
 				return fp, func() tea.Msg {
-					return FileSelectedMsg{Path: selectedItem.Path}
+					return FileSelectedMsg{File: selectedItem}
 				}
 			}
 

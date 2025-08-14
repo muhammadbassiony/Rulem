@@ -7,31 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 )
-
-func TestMain(m *testing.M) {
-	// Create a temporary config directory
-	tempConfigDir, err := os.MkdirTemp("", "setupmenu-test-config-")
-	if err != nil {
-		panic("Failed to create temp config dir: " + err.Error())
-	}
-	orig := os.Getenv("XDG_CONFIG_HOME")
-	os.Setenv("XDG_CONFIG_HOME", tempConfigDir)
-
-	// Run tests
-	code := m.Run()
-
-	// Restore environment and cleanup
-	os.Setenv("XDG_CONFIG_HOME", orig)
-	os.RemoveAll(tempConfigDir)
-
-	os.Exit(code)
-}
 
 // TestSuccessfulSetup tests the entire successful setup workflow
 func TestSuccessfulSetup(t *testing.T) {
@@ -64,10 +44,7 @@ func TestSuccessfulSetup(t *testing.T) {
 	waitForString(t, testmodel, "Storage Directory")
 
 	// Step 3: Clear existing text and enter new path
-	defaultPath := filemanager.GetDefaultStorageDir()
-	for i := 0; i < len(defaultPath); i++ {
-		testmodel.Send(tea.KeyMsg{Type: tea.KeyBackspace})
-	}
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyCtrlU}) // Clear line (Unix shortcut)
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(validTestPath)})
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -148,10 +125,7 @@ func TestBackAndForthNavigation(t *testing.T) {
 	waitForString(t, testmodel, "Storage Directory")
 
 	// Step 3: Enter first path
-	defaultPath := filemanager.GetDefaultStorageDir()
-	for i := 0; i < len(defaultPath); i++ {
-		testmodel.Send(tea.KeyMsg{Type: tea.KeyBackspace})
-	}
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyCtrlU}) // Clear line (Unix shortcut)
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(firstPath)})
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -163,10 +137,7 @@ func TestBackAndForthNavigation(t *testing.T) {
 	waitForString(t, testmodel, "Storage Directory")
 
 	// Step 6: Clear and enter final path
-	// Clear the first path
-	for i := 0; i < len(firstPath); i++ {
-		testmodel.Send(tea.KeyMsg{Type: tea.KeyBackspace})
-	}
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyCtrlU}) // Clear line (Unix shortcut)
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(finalPath)})
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
 

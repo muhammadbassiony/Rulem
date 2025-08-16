@@ -9,6 +9,7 @@ import (
 
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/tui/helpers"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -26,18 +27,19 @@ func TestNewSetupModel(t *testing.T) {
 		},
 	}
 
-	logger, _ := logging.NewTestLogger()
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			logger, _ := logging.NewTestLogger()
+			ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-			model := NewSetupModel(logger)
+			model := NewSetupModel(ctx)
 
 			assert.Equal(t, tt.want, model.state)
 			assert.False(t, model.Cancelled)
 			assert.Empty(t, model.StorageDir)
 			assert.Equal(t, filemanager.GetDefaultStorageDir(), model.textInput.Placeholder)
 			assert.True(t, model.textInput.Focused())
+			assert.Equal(t, ctx.Logger, model.logger)
 		})
 	}
 }
@@ -146,14 +148,14 @@ func TestStateTransitions(t *testing.T) {
 			}
 
 			updatedModel, cmd := model.Update(keyMsg)
-			setupModel := updatedModel.(SetupModel)
+			setupModel := updatedModel.(*SetupModel)
 
 			// If a command is returned, execute it and update the model
 			if cmd != nil {
 				msg := cmd()
-				setupModel = updatedModel.(SetupModel)
+				setupModel = updatedModel.(*SetupModel)
 				updatedModel, _ = setupModel.Update(msg)
-				setupModel = updatedModel.(SetupModel)
+				setupModel = updatedModel.(*SetupModel)
 			}
 
 			assert.Equal(t, tt.expectedState, setupModel.state)
@@ -206,7 +208,7 @@ func TestInputValidation(t *testing.T) {
 
 			keyMsg := tea.KeyMsg{Type: tea.KeyEnter}
 			updatedModel, cmd := model.Update(keyMsg)
-			setupModel := updatedModel.(SetupModel)
+			setupModel := updatedModel.(*SetupModel)
 
 			if tt.shouldError {
 				// Should return a command that sends error message
@@ -275,7 +277,7 @@ func TestTextInputBehavior(t *testing.T) {
 				}
 
 				updatedModel, _ := model.Update(keyMsg)
-				model = updatedModel.(SetupModel)
+				model = updatedModel.(*SetupModel)
 			}
 
 			assert.Equal(t, tt.expectedValue, model.textInput.Value())
@@ -310,12 +312,13 @@ func TestErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			model := NewSetupModel(logger)
+			ctx := helpers.NewUIContext(100, 30, nil, logger)
+			model := NewSetupModel(ctx)
 
 			if tt.errorMsg != nil {
 				errorMessage := setupErrorMsg{err: tt.errorMsg}
 				updatedModel, _ := model.Update(errorMessage)
-				model = updatedModel.(SetupModel)
+				model = updatedModel.(*SetupModel)
 
 				assert.Equal(t, tt.errorMsg, model.layout.GetError())
 			}
@@ -323,7 +326,7 @@ func TestErrorHandling(t *testing.T) {
 			if !tt.expectsError {
 				completeMsg := setupCompleteMsg{}
 				updatedModel, _ := model.Update(completeMsg)
-				model = updatedModel.(SetupModel)
+				model = updatedModel.(*SetupModel)
 
 				assert.Nil(t, model.layout.GetError())
 				assert.Equal(t, SetupStateComplete, model.state)
@@ -397,10 +400,11 @@ func TestViewRendering(t *testing.T) {
 }
 
 // Helper function to create model in specific state
-func createModelInState(state SetupState, input string) SetupModel {
+func createModelInState(state SetupState, input string) *SetupModel {
 	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-	model := NewSetupModel(logger)
+	model := NewSetupModel(ctx)
 	model.state = state
 
 	if input != "" {
@@ -417,8 +421,9 @@ func createModelInState(state SetupState, input string) SetupModel {
 // Benchmark tests
 func BenchmarkUpdate(b *testing.B) {
 	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-	model := NewSetupModel(logger)
+	model := NewSetupModel(ctx)
 	keyMsg := tea.KeyMsg{Type: tea.KeyEnter}
 
 	b.ResetTimer()
@@ -429,8 +434,9 @@ func BenchmarkUpdate(b *testing.B) {
 
 func BenchmarkView(b *testing.B) {
 	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-	model := NewSetupModel(logger)
+	model := NewSetupModel(ctx)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

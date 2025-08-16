@@ -8,6 +8,7 @@ import (
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/tui/components"
+	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -43,7 +44,7 @@ type SetupModel struct {
 	layout    components.LayoutModel
 }
 
-func NewSetupModel(logger *logging.AppLogger) SetupModel {
+func NewSetupModel(ctx helpers.UIContext) *SetupModel {
 	ti := textinput.New()
 	ti.Placeholder = filemanager.GetDefaultStorageDir()
 	ti.Focus()
@@ -56,21 +57,28 @@ func NewSetupModel(logger *logging.AppLogger) SetupModel {
 		MaxWidth: 100,
 	})
 
-	return SetupModel{
+	// Apply window sizing if available
+	if ctx.HasValidDimensions() {
+		windowMsg := tea.WindowSizeMsg{Width: ctx.Width, Height: ctx.Height}
+		layout, _ = layout.Update(windowMsg)
+		ti.Width = layout.InputWidth()
+	}
+
+	return &SetupModel{
 		state:     SetupStateWelcome,
 		textInput: ti,
 		layout:    layout,
-		logger:    logger,
+		logger:    ctx.Logger,
 	}
 }
 
-func (m SetupModel) Init() tea.Cmd {
+func (m *SetupModel) Init() tea.Cmd {
 	m.logger.Info("Setup model initialized")
 	return textinput.Blink
 }
 
 // Update handles all message types and delegates to state-specific handlers
-func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	// Log all messages for debugging
@@ -82,7 +90,8 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Update text input width responsively
+		// Update layout and text input width responsively
+		m.layout, _ = m.layout.Update(msg)
 		m.textInput.Width = m.layout.InputWidth()
 		return m, nil
 
@@ -103,7 +112,7 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // Text input updates
-func (m SetupModel) updateTextInput(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *SetupModel) updateTextInput(msg tea.Msg) (*SetupModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
 	// Clear error on input change
@@ -114,7 +123,7 @@ func (m SetupModel) updateTextInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // Key press delegation
-func (m SetupModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *SetupModel) handleKeyPress(msg tea.KeyMsg) (*SetupModel, tea.Cmd) {
 	// Global quit commands
 	if m.isQuitKey(msg) {
 		return m.handleQuit()
@@ -133,7 +142,7 @@ func (m SetupModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // State-specific key handlers
-func (m SetupModel) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *SetupModel) handleWelcomeKeys(msg tea.KeyMsg) (*SetupModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter", " ":
 		return m.transitionToStorageInput()
@@ -141,7 +150,7 @@ func (m SetupModel) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m SetupModel) handleStorageInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *SetupModel) handleStorageInputKeys(msg tea.KeyMsg) (*SetupModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.logger.LogUserAction("storage_input_submit", m.textInput.Value())
@@ -151,7 +160,7 @@ func (m SetupModel) handleStorageInputKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	}
 }
 
-func (m SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (*SetupModel, tea.Cmd) {
 	switch msg.String() {
 	case "n", "N":
 		m.logger.LogUserAction("confirmation_reject", "going back to storage input")
@@ -159,12 +168,14 @@ func (m SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	case "y", "Y", "enter":
 		m.logger.LogUserAction("confirmation_accept", "creating config")
 		return m, m.createConfig()
+	case "q", "esc":
+		return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 	}
 	return m, nil
 }
 
 // State transition helpers
-func (m SetupModel) transitionToStorageInput() (tea.Model, tea.Cmd) {
+func (m *SetupModel) transitionToStorageInput() (*SetupModel, tea.Cmd) {
 	m.state = SetupStateStorageInput
 	m.textInput.SetValue(filemanager.GetDefaultStorageDir())
 	m.textInput.Focus()
@@ -172,7 +183,7 @@ func (m SetupModel) transitionToStorageInput() (tea.Model, tea.Cmd) {
 	return m, textinput.Blink
 }
 
-func (m SetupModel) validateAndProceed() (tea.Model, tea.Cmd) {
+func (m *SetupModel) validateAndProceed() (*SetupModel, tea.Cmd) {
 	input := strings.TrimSpace(m.textInput.Value())
 	m.logger.Debug("Validating storage directory", "path", input)
 
@@ -188,7 +199,7 @@ func (m SetupModel) validateAndProceed() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m SetupModel) createConfig() tea.Cmd {
+func (m *SetupModel) createConfig() tea.Cmd {
 	return func() tea.Msg {
 		m.logger.Info("Creating configuration", "storage_dir", m.StorageDir)
 		if err := m.performConfigCreation(); err != nil {
@@ -200,20 +211,20 @@ func (m SetupModel) createConfig() tea.Cmd {
 	}
 }
 
-func (m SetupModel) handleQuit() (tea.Model, tea.Cmd) {
+func (m *SetupModel) handleQuit() (*SetupModel, tea.Cmd) {
 	m.logger.Warn("Setup cancelled by user")
 	m.Cancelled = true
 	m.state = SetupStateCancelled
-	return m, tea.Quit
+	return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 }
 
 // Utility functions
-func (m SetupModel) isQuitKey(msg tea.KeyMsg) bool {
+func (m *SetupModel) isQuitKey(msg tea.KeyMsg) bool {
 	return msg.String() == "ctrl+c" || msg.String() == "q" || msg.String() == "esc"
 }
 
 // TODO implement in config pkg
-func (m SetupModel) performConfigCreation() error {
+func (m *SetupModel) performConfigCreation() error {
 
 	if err := config.CreateNewConfig(m.StorageDir); err != nil {
 		return fmt.Errorf("failed to create configuration: %w", err)
@@ -222,7 +233,7 @@ func (m SetupModel) performConfigCreation() error {
 }
 
 // View renders the current state using the centralized layout
-func (m SetupModel) View() string {
+func (m *SetupModel) View() string {
 	// Ensure layout is configured for current state
 
 	switch m.state {
@@ -241,7 +252,7 @@ func (m SetupModel) View() string {
 }
 
 // View methods now use the centralized layout
-func (m SetupModel) viewWelcome() string {
+func (m *SetupModel) viewWelcome() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "🔧 Welcome to Rulem!",
 		Subtitle: "Let's set up your configuration.",
@@ -258,7 +269,7 @@ This directory will be used as a central location to save and organize your migr
 	return m.layout.Render(content)
 }
 
-func (m SetupModel) viewStorageInput() string {
+func (m *SetupModel) viewStorageInput() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "📁 Storage Directory",
 		Subtitle: "Where should we store your migration rules?",
@@ -275,11 +286,11 @@ func (m SetupModel) viewStorageInput() string {
 	return m.layout.Render(content)
 }
 
-func (m SetupModel) viewConfirmation() string {
+func (m *SetupModel) viewConfirmation() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "✅ Confirm Configuration",
 		Subtitle: "Please review your settings:",
-		HelpText: "Press y to confirm • n to go back • Esc to cancel",
+		HelpText: "Press y to confirm • n to go back • q/Esc to cancel",
 	})
 
 	settings := fmt.Sprintf("Storage Directory: %s", m.StorageDir)
@@ -289,11 +300,11 @@ func (m SetupModel) viewConfirmation() string {
 	return m.layout.Render(content)
 }
 
-func (m SetupModel) viewComplete() string {
+func (m *SetupModel) viewComplete() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "🎉 Setup Complete!",
 		Subtitle: "Rulem has been configured successfully.",
-		HelpText: "", // No help text needed for final state
+		HelpText: "Press any key to continue",
 	})
 
 	content := fmt.Sprintf(`Configuration saved successfully!
@@ -305,11 +316,11 @@ You can now start using rulem to manage your migration rules. The application wi
 	return m.layout.Render(content)
 }
 
-func (m SetupModel) viewCancelled() string {
+func (m *SetupModel) viewCancelled() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "❌ Setup Cancelled",
 		Subtitle: "Rulem will not be configured.",
-		HelpText: "",
+		HelpText: "Press any key to continue",
 	})
 
 	content := `Setup was cancelled. Rulem has not been configured and will need to be set up before you can use it.`

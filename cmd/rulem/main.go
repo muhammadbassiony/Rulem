@@ -7,6 +7,7 @@ import (
 	"rulem/internal/config"
 	"rulem/internal/logging"
 	"rulem/internal/tui"
+	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/setupmenu"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -49,7 +50,8 @@ func main() {
 }
 
 func runFirstTimeSetup(logger *logging.AppLogger) error {
-	menu := setupmenu.NewSetupModel(logger)
+	ctx := helpers.NewUIContext(0, 0, nil, logger) // Dimensions will be set by tea program
+	menu := setupmenu.NewSetupModel(ctx)
 	program := tea.NewProgram(menu, tea.WithAltScreen())
 
 	finalModel, err := program.Run()
@@ -58,7 +60,7 @@ func runFirstTimeSetup(logger *logging.AppLogger) error {
 	}
 
 	// Extract setup results and save config
-	setup := finalModel.(setupmenu.SetupModel)
+	setup := finalModel.(*setupmenu.SetupModel)
 	if setup.Cancelled {
 		return fmt.Errorf("setup cancelled by user")
 	}

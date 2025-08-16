@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"rulem/internal/logging"
+	"rulem/internal/tui/helpers"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
@@ -32,8 +33,9 @@ func TestSuccessfulSetup(t *testing.T) {
 	validTestPath := filepath.Join(tempDir, "complete-test-storage")
 
 	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-	model := NewSetupModel(logger)
+	model := NewSetupModel(ctx)
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen
@@ -60,8 +62,9 @@ func TestSuccessfulSetup(t *testing.T) {
 // TestCancelledAtWelcome tests cancellation at welcome screen
 func TestCancelledAtWelcome(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-	model := NewSetupModel(logger)
+	model := NewSetupModel(ctx)
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen
@@ -76,8 +79,9 @@ func TestCancelledAtWelcome(t *testing.T) {
 // TestCancelledAtStorageInput tests cancellation at storage input
 func TestCancelledAtStorageInput(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-	model := NewSetupModel(logger)
+	model := NewSetupModel(ctx)
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen
@@ -113,8 +117,9 @@ func TestBackAndForthNavigation(t *testing.T) {
 	finalPath := filepath.Join(tempDir, "final-path")
 
 	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
-	model := NewSetupModel(logger)
+	model := NewSetupModel(ctx)
 	testmodel := teatest.NewTestModel(t, model)
 
 	// Step 1: Welcome screen

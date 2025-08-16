@@ -80,6 +80,7 @@ func NewAppLogger() *AppLogger {
 			ReportTimestamp: true,
 			TimeFormat:      time.Kitchen,
 			Prefix:          "Rulem",
+			CallerOffset:    1, // Skip wrapper function calls
 		})
 		logger.SetLevel(log.DebugLevel)
 
@@ -91,6 +92,7 @@ func NewAppLogger() *AppLogger {
 			ReportTimestamp: true,
 			TimeFormat:      time.RFC3339,
 			Prefix:          "Rulem",
+			CallerOffset:    1, // Skip wrapper function calls
 		})
 		logger.SetLevel(log.WarnLevel)
 	}
@@ -179,6 +181,7 @@ func NewTestLogger() (*AppLogger, *bytes.Buffer) {
 		ReportTimestamp: false, // Easier to test without timestamps
 		ReportCaller:    false,
 		Prefix:          "Test",
+		CallerOffset:    1, // Skip wrapper function calls
 	})
 	logger.SetLevel(log.DebugLevel)
 

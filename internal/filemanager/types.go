@@ -8,5 +8,4 @@ type FileItem struct {
 
 func (i FileItem) Title() string       { return i.Name }
 func (i FileItem) Description() string { return " " }
-
 func (i FileItem) FilterValue() string { return i.Name + " " + i.Path }

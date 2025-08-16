@@ -12,6 +12,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TUI Messages for async operations
+type LoadConfigMsg struct {
+	Config *Config
+	Error  error
+}
+
+type SaveConfigMsg struct {
+	Error error
+}
+
 const APP_NAME = "rulem" // application name used for config directory
 
 // Config holds user configuration for rulem.
@@ -137,6 +147,36 @@ func (c *Config) SaveTo(path string) error {
 func (c *Config) SetStorageDir(newDir string) error {
 	c.StorageDir = newDir
 	return c.Save()
+}
+
+// LoadConfig loads configuration and returns a message for TUI
+func LoadConfig() (*Config, error) {
+	return Load()
+}
+
+// SaveConfig saves configuration for TUI operations
+func SaveConfig(cfg *Config) error {
+	return cfg.Save()
+}
+
+// UpdateStorageDir updates the storage directory, ensures it exists, and saves the config
+func UpdateStorageDir(cfg *Config, newStorageDir string) error {
+	cfg.StorageDir = newStorageDir
+
+	// Ensure storage directory exists
+	root, err := filemanager.CreateSecureStorageRoot(cfg.StorageDir)
+	if err != nil {
+		return fmt.Errorf("failed to create storage directory: %w", err)
+	}
+	defer root.Close()
+
+	// Save the config
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+
+	logging.Info("Configuration updated successfully", "storage_dir", cfg.StorageDir)
+	return nil
 }
 
 // CreateNewConfig initializes a new configuration with the specified storage directory

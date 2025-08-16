@@ -33,7 +33,14 @@ type Config struct {
 }
 
 // ConfigPath returns the standard config file paths for the current platform
+// Can be overridden with RULEM_CONFIG_PATH environment variable for testing
 func ConfigPath() (string, error) {
+	// Check for test override first
+	if testPath := os.Getenv("RULEM_CONFIG_PATH"); testPath != "" {
+		logging.Debug("Using test config path from environment", "path", testPath)
+		return testPath, nil
+	}
+
 	configDir := filepath.Join(xdg.ConfigHome, APP_NAME)
 	configPath := filepath.Join(configDir, "config.yaml")
 

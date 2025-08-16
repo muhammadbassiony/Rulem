@@ -16,21 +16,13 @@ import (
 
 // TestSuccessfulSetup tests the entire successful setup workflow
 func TestSuccessfulSetup(t *testing.T) {
-	// Create a temporary directory for testing valid paths
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("Failed to get home dir: %v", err)
-	}
-	tempDir, err := os.MkdirTemp(homeDir, "setupmenu-complete-test-")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	// Set up test config path to prevent overwriting real config
+	testConfigPath, cleanup := SetTestConfigPath(t)
+	defer cleanup()
 
-	validTestPath := filepath.Join(tempDir, "complete-test-storage")
+	// Create temporary storage directory for testing
+	tempStorageDir := CreateTempStorageDir(t, "setupmenu-complete-test-*")
+	validTestPath := filepath.Join(tempStorageDir, "complete-test-storage")
 
 	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(100, 30, nil, logger)
@@ -57,10 +49,23 @@ func TestSuccessfulSetup(t *testing.T) {
 	// Step 5: Setup complete
 	waitForString(t, testmodel, "Setup Complete")
 
+	// Verify that config was created in test location, not real location
+	if !fileExists(testConfigPath) {
+		t.Error("Test config file should have been created")
+	}
+
+	// Verify that storage directory was created
+	if !fileExists(validTestPath) {
+		t.Error("Storage directory should have been created")
+	}
 }
 
 // TestCancelledAtWelcome tests cancellation at welcome screen
 func TestCancelledAtWelcome(t *testing.T) {
+	// Set up test config path to prevent overwriting real config
+	testConfigPath, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
 	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
@@ -74,10 +79,18 @@ func TestCancelledAtWelcome(t *testing.T) {
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEscape})
 	waitForString(t, testmodel, "Setup Cancelled")
 
+	// Verify no config was created
+	if fileExists(testConfigPath) {
+		t.Error("Test config file should not have been created when cancelled")
+	}
 }
 
 // TestCancelledAtStorageInput tests cancellation at storage input
 func TestCancelledAtStorageInput(t *testing.T) {
+	// Set up test config path to prevent overwriting real config
+	testConfigPath, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
 	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(100, 30, nil, logger)
 
@@ -95,26 +108,22 @@ func TestCancelledAtStorageInput(t *testing.T) {
 	testmodel.Send(tea.KeyMsg{Type: tea.KeyEscape})
 	waitForString(t, testmodel, "Setup Cancelled")
 
+	// Verify no config was created
+	if fileExists(testConfigPath) {
+		t.Error("Test config file should not have been created when cancelled")
+	}
 }
 
 // TestBackAndForthNavigation tests going back and forth between states
 func TestBackAndForthNavigation(t *testing.T) {
-	// Create temporary directories for testing
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("Failed to get home dir: %v", err)
-	}
-	tempDir, err := os.MkdirTemp(homeDir, "setupmenu-complete-test-")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	// Set up test config path to prevent overwriting real config
+	testConfigPath, cleanup := SetTestConfigPath(t)
+	defer cleanup()
 
-	firstPath := filepath.Join(tempDir, "first-path")
-	finalPath := filepath.Join(tempDir, "final-path")
+	// Create temporary directories for testing
+	tempStorageDir := CreateTempStorageDir(t, "setupmenu-navigation-test-*")
+	firstPath := filepath.Join(tempStorageDir, "first-path")
+	finalPath := filepath.Join(tempStorageDir, "final-path")
 
 	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(100, 30, nil, logger)
@@ -153,6 +162,61 @@ func TestBackAndForthNavigation(t *testing.T) {
 	// Step 8: Setup complete
 	waitForString(t, testmodel, "Setup Complete")
 
+	// Verify that config was created with final path
+	if !fileExists(testConfigPath) {
+		t.Error("Test config file should have been created")
+	}
+
+	// Verify that final storage directory was created
+	if !fileExists(finalPath) {
+		t.Error("Final storage directory should have been created")
+	}
+}
+
+// TestInvalidStoragePath tests handling of invalid storage paths
+func TestInvalidStoragePath(t *testing.T) {
+	// Set up test config path to prevent overwriting real config
+	testConfigPath, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
+	logger, _ := logging.NewTestLogger()
+	ctx := helpers.NewUIContext(100, 30, nil, logger)
+
+	model := NewSetupModel(ctx)
+	testmodel := teatest.NewTestModel(t, model)
+
+	// Step 1: Welcome screen
+	waitForString(t, testmodel, "Welcome to Rulem")
+
+	// Step 2: Go to storage input
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForString(t, testmodel, "Storage Directory")
+
+	// Step 3: Enter invalid path (empty string)
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyCtrlU}) // Clear line
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Step 4: Should show error message
+	waitForString(t, testmodel, "Error: storage directory cannot be empty")
+
+	// Step 5: Enter valid path to recover
+	tempStorageDir := CreateTempStorageDir(t, "setupmenu-recovery-test-*")
+	validPath := filepath.Join(tempStorageDir, "valid-path")
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyCtrlU}) // Clear line
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(validPath)})
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Step 6: Should proceed to confirmation
+	waitForString(t, testmodel, "Confirm Configuration")
+	testmodel.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+
+	// Step 7: Setup complete
+	waitForString(t, testmodel, "Setup Complete")
+
+	// Verify config was created
+	if !fileExists(testConfigPath) {
+		t.Error("Test config file should have been created")
+	}
 }
 
 // Helper function to wait for a specific string in the output
@@ -166,4 +230,10 @@ func waitForString(t *testing.T, tm *teatest.TestModel, s string) {
 		teatest.WithCheckInterval(time.Millisecond*100),
 		teatest.WithDuration(time.Second*3),
 	)
+}
+
+// Helper function to check if a file exists
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

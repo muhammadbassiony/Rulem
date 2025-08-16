@@ -141,6 +141,51 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestConfigPathEnvironmentOverride(t *testing.T) {
+	t.Log("Testing ConfigPath environment variable override")
+
+	// Save original environment
+	originalPath := os.Getenv("RULEM_CONFIG_PATH")
+	defer func() {
+		if originalPath == "" {
+			os.Unsetenv("RULEM_CONFIG_PATH")
+		} else {
+			os.Setenv("RULEM_CONFIG_PATH", originalPath)
+		}
+	}()
+
+	// Test with environment variable set
+	testPath := "/tmp/test-rulem-config.yaml"
+	err := os.Setenv("RULEM_CONFIG_PATH", testPath)
+	if err != nil {
+		t.Fatalf("Failed to set environment variable: %v", err)
+	}
+
+	configPath, err := ConfigPath()
+	if err != nil {
+		t.Fatalf("Failed to get config path: %v", err)
+	}
+
+	if configPath != testPath {
+		t.Errorf("Expected config path %s, got %s", testPath, configPath)
+	}
+
+	// Test with environment variable unset
+	os.Unsetenv("RULEM_CONFIG_PATH")
+	configPath, err = ConfigPath()
+	if err != nil {
+		t.Fatalf("Failed to get config path: %v", err)
+	}
+
+	if configPath == testPath {
+		t.Error("Config path should not match test path when environment variable is unset")
+	}
+
+	if !strings.Contains(configPath, "rulem") {
+		t.Errorf("Config path should contain 'rulem', got: %s", configPath)
+	}
+}
+
 // Error handling tests
 func TestConfigErrorHandling(t *testing.T) {
 	t.Run("load non-existent file", func(t *testing.T) {

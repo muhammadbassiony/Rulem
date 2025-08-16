@@ -236,12 +236,12 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch m.state {
 		case StateFileSelection:
-			// Intercept 'q' to avoid quitting entire application; instead navigate back.
-			if message.String() == "q" {
+			// Intercept 'q' and 'esc' to return to main menu instead of quitting
+			if message.String() == "q" || message.String() == "esc" {
 				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			}
 
-			// Delegate everything else to FilePicker (except Esc which parent MainModel handles)
+			// Delegate everything else to FilePicker
 			if m.filePicker != nil {
 				updated, fpCmd := m.filePicker.Update(message)
 				if fpCmd != nil {
@@ -265,10 +265,8 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.spinner.Tick,
 				)
 			case "esc":
-				// Parent handles leaving feature; we revert to selection for consistency
-				m.nameInput.Blur()
-				m.state = StateFileSelection
-				return m, nil
+				// Return to main menu instead of reverting to selection
+				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			default:
 				m.nameInput, cmd = m.nameInput.Update(message)
 				m.newFileName = m.nameInput.Value()
@@ -287,12 +285,15 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.saveFileCmd(m.selectedFile.Path, newNamePtr, true),
 					m.spinner.Tick,
 				)
-			case "n", "esc":
+			case "n":
 				m.nameInput.Focus()
 				m.state = StateFileNameInput
 				m.err = nil
 				m.isOverwriteError = false
 				return m, textinput.Blink
+			case "esc":
+				// Return to main menu
+				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			}
 
 		case StateError:
@@ -312,6 +313,9 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scanForFilesCmd(),
 					m.spinner.Tick,
 				)
+			case "esc":
+				// Return to main menu
+				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			}
 
 		case StateSuccess:
@@ -439,7 +443,7 @@ func (m SaveRulesModel) viewError() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "💾 Save Rules File - Error",
 		Subtitle: "Operation failed",
-		HelpText: "r to retry (Esc to go back via main app)",
+		HelpText: "r to retry • Esc to return to main menu",
 	})
 	errorText := "An error occurred"
 	if m.err != nil {

@@ -6,6 +6,7 @@ import (
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
 	saverulesmodel "rulem/internal/tui/saverulesmodel"
+	settingsmenu "rulem/internal/tui/settingsmenu"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -69,16 +70,7 @@ type MainModel struct {
 	// Main menu list
 	menu list.Model
 
-	// Sub-models for different screens - initialized lazily
-	settingsModel    MenuItemModel
-	migrationModel   MenuItemModel
-	saveRulesModel   MenuItemModel
-	importCopyModel  MenuItemModel
-	importLinkModel  MenuItemModel
-	fetchGithubModel MenuItemModel
-	helpModel        MenuItemModel
-
-	// Current active model
+	// Current active model (always fresh, no caching)
 	activeModel MenuItemModel
 
 	// Layout for consistent UI
@@ -95,7 +87,7 @@ type MainModel struct {
 	comingSoonFeature string
 }
 
-func NewMainModel(cfg *config.Config, logger *logging.AppLogger) MainModel {
+func NewMainModel(cfg *config.Config, logger *logging.AppLogger) *MainModel {
 	// Create menu items with model references
 	items := []list.Item{
 		item{
@@ -120,7 +112,7 @@ func NewMainModel(cfg *config.Config, logger *logging.AppLogger) MainModel {
 		},
 		item{
 			title:       "⚙️  Update settings",
-			description: "Change the configuration of Rulem, such as storage directory.",
+			description: "Modify your Rulem configuration settings, such as storage directory.",
 			state:       StateSettings,
 		},
 	}
@@ -140,7 +132,7 @@ func NewMainModel(cfg *config.Config, logger *logging.AppLogger) MainModel {
 		MaxWidth: 100,
 	})
 
-	return MainModel{
+	return &MainModel{
 		config:    cfg,
 		logger:    logger,
 		state:     StateMenu,
@@ -150,11 +142,11 @@ func NewMainModel(cfg *config.Config, logger *logging.AppLogger) MainModel {
 	}
 }
 
-func (m MainModel) Init() tea.Cmd {
+func (m *MainModel) Init() tea.Cmd {
 	m.logger.Info("MainModel initialized")
 	return nil
 }
-func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 
@@ -173,17 +165,21 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windowWidth = msg.Width
 		m.windowHeight = msg.Height
 
-		// Handle window resize
-		v := 14 // footer margins
-		m.menu.SetSize(msg.Width-4, msg.Height-v)
+		// Handle window resize with validation
+		if msg.Width > 0 && msg.Height > 0 {
+			v := 14 // footer margins
+			m.menu.SetSize(msg.Width-4, msg.Height-v)
 
-		// Propagate size to active model if present
-		if m.activeModel != nil {
-			updatedModel, modelCmd := m.activeModel.Update(msg)
-			m.activeModel = updatedModel.(MenuItemModel)
-			if modelCmd != nil {
-				cmds = append(cmds, modelCmd)
+			// Propagate size to active model if present
+			if m.activeModel != nil {
+				updatedModel, modelCmd := m.activeModel.Update(msg)
+				m.activeModel = updatedModel.(MenuItemModel)
+				if modelCmd != nil {
+					cmds = append(cmds, modelCmd)
+				}
 			}
+		} else {
+			m.logger.Warn("Invalid window dimensions received", "width", msg.Width, "height", msg.Height)
 		}
 		return m, tea.Batch(cmds...)
 
@@ -252,24 +248,12 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case StateSettings, StateSaveRules, StateImportCopy, StateImportLink, StateFetchGithub:
-			switch msg.String() {
-			case "esc":
-				// Return to menu from feature states
-				m.logger.LogStateTransition("MainModel", "FeatureState", "StateMenu")
-				m.state = StateMenu
-				m.activeModel = nil
-				m.err = nil
-				m.comingSoonFeature = ""
-				m.layout = m.layout.ClearError()
-				return m, nil
-			default:
-				// Delegate to active model
-				if m.activeModel != nil {
-					updatedModel, modelCmd := m.activeModel.Update(msg)
-					m.activeModel = updatedModel.(MenuItemModel)
-					if modelCmd != nil {
-						cmds = append(cmds, modelCmd)
-					}
+			// Delegate all messages to active model - they handle their own navigation
+			if m.activeModel != nil {
+				updatedModel, modelCmd := m.activeModel.Update(msg)
+				m.activeModel = updatedModel.(MenuItemModel)
+				if modelCmd != nil {
+					cmds = append(cmds, modelCmd)
 				}
 			}
 		}
@@ -315,21 +299,21 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case helpers.NavigateToMainMenuMsg:
 		// Handle navigation back to main menu from any submodel
 		m.logger.LogStateTransition("MainModel", "FeatureState", "StateMenu")
-		m.state = StateMenu
-		m.activeModel = nil
-		m.err = nil
-		m.comingSoonFeature = ""
-		m.layout = m.layout.ClearError()
-		return m, nil
+		return m.returnToMenu(), nil
 
 	default:
 		// Handle any unrecognized message types
 		// Delegate to active model if present
 		if m.activeModel != nil {
 			updatedModel, modelCmd := m.activeModel.Update(msg)
-			m.activeModel = updatedModel.(MenuItemModel)
-			if modelCmd != nil {
-				cmds = append(cmds, modelCmd)
+			if menuModel, ok := updatedModel.(MenuItemModel); ok {
+				m.activeModel = menuModel
+				if modelCmd != nil {
+					cmds = append(cmds, modelCmd)
+				}
+			} else {
+				m.logger.Error("Active model returned invalid type, returning to menu")
+				return m.returnToMenu(), nil
 			}
 		}
 	}
@@ -338,7 +322,7 @@ func (m MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleMenuSelection processes menu item selections using model-based approach
-func (m MainModel) handleMenuSelection(selectedItem item) (tea.Model, tea.Cmd) {
+func (m *MainModel) handleMenuSelection(selectedItem item) (tea.Model, tea.Cmd) {
 	// Get or initialize the model for this menu item
 	model := m.getOrInitializeModel(selectedItem.state)
 
@@ -372,58 +356,54 @@ func (m MainModel) handleMenuSelection(selectedItem item) (tea.Model, tea.Cmd) {
 }
 
 // GetUIContext creates a UI context with current dimensions and app state
-func (m MainModel) GetUIContext() helpers.UIContext {
+func (m *MainModel) GetUIContext() helpers.UIContext {
 	return helpers.NewUIContext(m.windowWidth, m.windowHeight, m.config, m.logger)
 }
 
-// getOrInitializeModel returns the model for a given state, initializing it if needed
+// getOrInitializeModel always creates a fresh model to ensure up-to-date settings
 func (m *MainModel) getOrInitializeModel(state AppState) MenuItemModel {
+	// Validate that we have valid dimensions before creating models
+	if !m.hasValidDimensions() {
+		m.logger.Warn("Cannot initialize model without valid window dimensions", "state", state)
+		return nil
+	}
+
+	ctx := m.GetUIContext()
+
 	switch state {
 	case StateSettings:
-		if m.settingsModel == nil {
-			// TODO: Initialize settings model when implemented
-			// ctx := m.GetUIContext()
-			// m.settingsModel = NewSettingsModel(ctx)
-		}
-		return m.settingsModel
+		m.logger.Debug("Creating fresh settings model")
+		return settingsmenu.NewSettingsModel(ctx)
 
 	case StateSaveRules:
-		if m.saveRulesModel == nil {
-			ctx := m.GetUIContext()
-			m.saveRulesModel = saverulesmodel.NewSaveRulesModel(ctx)
-		}
-		return m.saveRulesModel
+		m.logger.Debug("Creating fresh save rules model")
+		return saverulesmodel.NewSaveRulesModel(ctx)
 
 	case StateImportCopy:
-		if m.importCopyModel == nil {
-			// TODO: Initialize import copy model when implemented
-			// ctx := m.GetUIContext()
-			// m.importCopyModel = NewImportCopyModel(ctx)
-		}
-		return m.importCopyModel
+		// TODO: Initialize import copy model when implemented
+		// return NewImportCopyModel(ctx)
+		m.logger.Debug("Import copy model not yet implemented")
+		return nil
 
 	case StateImportLink:
-		if m.importLinkModel == nil {
-			// TODO: Initialize import link model when implemented
-			// ctx := m.GetUIContext()
-			// m.importLinkModel = NewImportLinkModel(ctx)
-		}
-		return m.importLinkModel
+		// TODO: Initialize import link model when implemented
+		// return NewImportLinkModel(ctx)
+		m.logger.Debug("Import link model not yet implemented")
+		return nil
 
 	case StateFetchGithub:
-		if m.fetchGithubModel == nil {
-			// TODO: Initialize fetch github model when implemented
-			// ctx := m.GetUIContext()
-			// m.fetchGithubModel = NewFetchGithubModel(ctx)
-		}
-		return m.fetchGithubModel
+		// TODO: Initialize fetch github model when implemented
+		// return NewFetchGithubModel(ctx)
+		m.logger.Debug("Fetch GitHub model not yet implemented")
+		return nil
 
 	default:
+		m.logger.Warn("Unknown state requested for model initialization", "state", state)
 		return nil
 	}
 }
 
-func (m MainModel) View() string {
+func (m *MainModel) View() string {
 	if m.state == StateQuitting {
 		m.layout = m.layout.SetConfig(components.LayoutConfig{
 			Title: "👋 Goodbye!",
@@ -449,11 +429,11 @@ func (m MainModel) View() string {
 	}
 }
 
-func (m MainModel) viewMenu() string {
+func (m *MainModel) viewMenu() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "🔧 Rulem - Rule Migration Tool",
 		Subtitle: "Manage and organize your migration rules efficiently",
-		HelpText: "↑/↓ to navigate • Enter to select • / to filter • q to quit",
+		HelpText: "↑/↓ to navigate • Enter to select • / to filter • q to quit • Ctrl+C to force quit",
 	})
 
 	// Get the menu content
@@ -462,11 +442,26 @@ func (m MainModel) viewMenu() string {
 	return m.layout.Render(menuContent)
 }
 
-func (m MainModel) viewError() string {
+// hasValidDimensions checks if window dimensions are valid for model creation
+func (m *MainModel) hasValidDimensions() bool {
+	return m.windowWidth > 0 && m.windowHeight > 0
+}
+
+// returnToMenu safely returns to the main menu and cleans up state
+func (m *MainModel) returnToMenu() tea.Model {
+	m.state = StateMenu
+	m.activeModel = nil
+	m.err = nil
+	m.comingSoonFeature = ""
+	m.layout = m.layout.ClearError()
+	return m
+}
+
+func (m *MainModel) viewError() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "❌ Error",
 		Subtitle: "Something went wrong",
-		HelpText: "Press Esc to return • q to quit",
+		HelpText: "Press Esc to return • Ctrl+C to quit",
 	})
 
 	errorContent := ""
@@ -477,7 +472,7 @@ func (m MainModel) viewError() string {
 	return m.layout.Render(errorContent)
 }
 
-func (m MainModel) viewComingSoon() string {
+func (m *MainModel) viewComingSoon() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "🚧 Coming Soon",
 		Subtitle: "This feature is under development",
@@ -498,12 +493,6 @@ func NavigateTo(state AppState) tea.Cmd {
 		return NavigateMsg{State: state}
 	}
 }
-
-// func ShowError(err error) tea.Cmd {
-// 	return func() tea.Msg {
-// 		return ErrorMsg{Err: err}
-// 	}
-// }
 
 func ShowComingSoon(feature string) tea.Cmd {
 	return func() tea.Msg {

@@ -10,6 +10,7 @@ import (
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
+	"rulem/pkg/fileops"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -251,12 +252,12 @@ func (m *SettingsModel) validateAndProceed() (*SettingsModel, tea.Cmd) {
 	input := strings.TrimSpace(m.textInput.Value())
 	m.logger.Debug("Validating storage directory", "path", input)
 
-	if err := filemanager.ValidateStorageDir(input); err != nil {
+	if err := fileops.ValidateStoragePath(input); err != nil {
 		m.logger.Warn("Storage directory validation failed", "error", err)
 		return m, func() tea.Msg { return settingsErrorMsg{err} }
 	}
 
-	m.StorageDir = filemanager.ExpandPath(input)
+	m.StorageDir = fileops.ExpandPath(input)
 
 	// If no changes, go directly back to menu
 	if !m.hasChanges {
@@ -389,3 +390,5 @@ func (m *SettingsModel) viewError() string {
 
 	return m.layout.Render(content)
 }
+
+// TODO when the settings menu updates the config, we need to refresh it in the main model

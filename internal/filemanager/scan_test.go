@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
-// Unit Tests
+// Integration Tests - tests for domain-specific logic that uses fileops
 
 func TestIsMarkdownFile(t *testing.T) {
 	tests := []struct {
@@ -50,68 +51,20 @@ func TestIsMarkdownFile(t *testing.T) {
 	}
 }
 
-func TestShouldSkipDirectory(t *testing.T) {
-	tests := []struct {
-		name          string
-		dirName       string
-		includeHidden bool
-		expected      bool
-	}{
-		// Special directories (never skip)
-		{"current directory", ".", false, false},
-		{"current directory with hidden", ".", true, false},
-		{"parent directory", "..", false, false},
-		{"parent directory with hidden", "..", true, false},
-
-		// Hidden directories
-		{"hidden dir exclude", ".hidden", false, true},
-		{"hidden dir include", ".hidden", true, false},
-		{"git dir exclude", ".git", false, true},
-		{"git dir include", ".git", true, true}, // Still skip .git even with includeHidden
-
-		// Common skip directories
-		{"node_modules", "node_modules", false, true},
-		{"node_modules with hidden", "node_modules", true, true},
-		{"vendor", "vendor", false, true},
-		{"target", "target", false, true},
-		{"build", "build", false, true},
-		{".next", ".next", false, true},
-
-		// Normal directories
-		{"src", "src", false, false},
-		{"docs", "docs", false, false},
-		{"my_project", "my_project", true, false},
-
-		// Edge cases
-		{"empty string", "", false, false},
-		{"node_modules_backup", "node_modules_backup", false, false},
-		{"my_vendor", "my_vendor", false, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := shouldSkipDirectory(tt.dirName, tt.includeHidden)
-			if result != tt.expected {
-				t.Errorf("shouldSkipDirectory(%q, %v) = %v, want %v",
-					tt.dirName, tt.includeHidden, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestScanCurrDirectory(t *testing.T) {
-	// Create test directory structure
+func TestScanCurrDirectory_Integration(t *testing.T) {
+	// Integration test for ScanCurrDirectory - tests the complete workflow
+	// including fileops integration and markdown file filtering
 	structure := map[string]string{
-		"README.md":     "# Test",
-		"docs.markdown": "## Docs",
-		"src/main.go":   "package main",
-		"src/README.md": "# Source",
-		"tests/test.md": "# Tests",
-		"script.js":     "console.log('hello')",
-		"config.json":   "{}",
-		".gitignore":    "*.log",
-		"node_modules/": "",
-		"vendor/":       "",
+		"README.md":                   "# Test",
+		"docs.markdown":               "## Docs",
+		"src/main.go":                 "package main",
+		"src/README.md":               "# Source",
+		"tests/test.md":               "# Tests",
+		"script.js":                   "console.log('hello')",
+		"config.json":                 "{}",
+		".gitignore":                  "*.log",
+		"node_modules/package/doc.md": "# Package docs", // Should be skipped
+		"vendor/lib/README.md":        "# Vendor lib",   // Should be skipped
 	}
 
 	tempDir := createTempDirStructure(t, structure)
@@ -127,7 +80,7 @@ func TestScanCurrDirectory(t *testing.T) {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
 
-	// Expected files (relative paths)
+	// Expected files (relative paths) - should exclude node_modules and vendor
 	expected := []string{
 		"README.md",
 		"docs.markdown",
@@ -151,136 +104,19 @@ func TestScanCurrDirectory(t *testing.T) {
 			t.Errorf("Expected file %q not found in results", expectedFile)
 		}
 	}
+
+	// Verify that skipped directories are not included
+	for _, file := range files {
+		if strings.HasPrefix(file.Path, "node_modules") || strings.HasPrefix(file.Path, "vendor") {
+			t.Errorf("Found file in skipped directory: %s", file.Path)
+		}
+	}
 }
 
-func TestScanDirRecursive(t *testing.T) {
-	t.Run("depth limits", func(t *testing.T) {
-		// Create deep directory structure
-		structure := map[string]string{
-			"level1/level2/level3/level4/level5/deep.md": "# Deep file",
-			"level1/shallow.md":                          "# Shallow file",
-		}
+// Integration Tests for ScanCurrDirectory workflow
 
-		tempDir := createTempDirStructure(t, structure)
-		defer os.RemoveAll(tempDir)
-
-		root, err := os.OpenRoot(tempDir)
-		if err != nil {
-			t.Fatalf("Failed to open root: %v", err)
-		}
-		defer root.Close()
-
-		// Test with max depth 3
-		opts := &ScanOptions{
-			MaxDepth:           3,
-			SkipUnreadableDirs: true,
-			IncludeHidden:      false,
-		}
-
-		scanner := NewDefaultDirScanner(root, opts)
-		err = scanner.scanDirRecursive(".", 1)
-		if err != nil {
-			t.Fatalf("scanDirRecursive failed: %v", err)
-		}
-
-		// Should find shallow.md but not deep.md
-		if len(scanner.files) != 1 {
-			t.Errorf("Expected 1 file within depth limit, got %d: %v", len(scanner.files), scanner.files)
-		}
-
-		if scanner.files[0].Path != "level1/shallow.md" {
-			t.Errorf("Expected to find level1/shallow.md, got %v", scanner.files)
-		}
-	})
-
-	t.Run("symlink loop detection", func(t *testing.T) {
-		structure := map[string]string{
-			"real_dir/file.md": "# Real file",
-			"normal.md":        "# Normal file",
-		}
-
-		tempDir := createTempDirStructure(t, structure)
-		defer os.RemoveAll(tempDir)
-
-		// Create symlink loop: real_dir -> loop_link -> real_dir
-		realDir := filepath.Join(tempDir, "real_dir")
-		loopLink := filepath.Join(tempDir, "real_dir", "loop_link")
-		createTestSymlink(t, realDir, loopLink)
-
-		root, err := os.OpenRoot(tempDir)
-		if err != nil {
-			t.Fatalf("Failed to open root: %v", err)
-		}
-		defer root.Close()
-
-		scanner := NewDefaultDirScanner(root, nil)
-		err = scanner.scanDirRecursive(".", 1)
-		if err != nil {
-			t.Fatalf("scanDirRecursive failed: %v", err)
-		}
-
-		// Should handle loop gracefully and find both files
-		if len(scanner.files) < 2 {
-			t.Errorf("Expected at least 2 files, got %d: %v", len(scanner.files), scanner.files)
-		}
-	})
-
-	t.Run("directory skipping", func(t *testing.T) {
-		structure := map[string]string{
-			"src/main.md":         "# Main",
-			".git/config":         "git config",
-			".git/hooks/pre.md":   "# Git hook",
-			"node_modules/pkg.md": "# Package",
-			".hidden/secret.md":   "# Secret",
-			"normal/file.md":      "# Normal",
-		}
-
-		tempDir := createTempDirStructure(t, structure)
-		defer os.RemoveAll(tempDir)
-
-		root, err := os.OpenRoot(tempDir)
-		if err != nil {
-			t.Fatalf("Failed to open root: %v", err)
-		}
-		defer root.Close()
-
-		opts := &ScanOptions{
-			IncludeHidden: false,
-			MaxDepth:      10,
-		}
-
-		scanner := NewDefaultDirScanner(root, opts)
-		err = scanner.scanDirRecursive(".", 1)
-		if err != nil {
-			t.Fatalf("scanDirRecursive failed: %v", err)
-		}
-
-		// Should only find src/main.md and normal/file.md
-		expectedFiles := []string{"src/main.md", "normal/file.md"}
-
-		if len(scanner.files) != len(expectedFiles) {
-			t.Errorf("Expected %d files, got %d: %v", len(expectedFiles), len(scanner.files), scanner.files)
-		}
-
-		fileSet := make(map[string]bool)
-		for _, file := range scanner.files {
-			fileSet[file.Path] = true
-		}
-
-		for _, expected := range expectedFiles {
-			if fileSet[expected] {
-				t.Logf("Found expected file: %s", expected)
-			} else {
-				t.Errorf("Expected file %q not found in results", expected)
-			}
-		}
-	})
-}
-
-// Integration Tests
-
-func TestScanRealFilesystem(t *testing.T) {
-	// Create a realistic project structure
+func TestScanCurrDirectory_RealisticProject(t *testing.T) {
+	// Integration test with realistic project structure
 	structure := map[string]string{
 		"README.md":                   "# Project",
 		"CHANGELOG.md":                "# Changes",
@@ -291,10 +127,10 @@ func TestScanRealFilesystem(t *testing.T) {
 		"tests/integration/test.md":   "# Integration tests",
 		"scripts/build.sh":            "#!/bin/bash",
 		".git/config":                 "git config",
-		"node_modules/package/doc.md": "# Package docs",
-		"vendor/lib/README.md":        "# Vendor lib",
+		"node_modules/package/doc.md": "# Package docs", // Should be skipped
+		"vendor/lib/README.md":        "# Vendor lib",   // Should be skipped
 		".vscode/settings.json":       "{}",
-		"build/output.txt":            "build output",
+		"build/output.txt":            "build output", // Should be skipped
 		"temp/cache.tmp":              "cache",
 	}
 
@@ -309,7 +145,7 @@ func TestScanRealFilesystem(t *testing.T) {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
 
-	// Should find markdown files but skip hidden/build directories
+	// Should find markdown files but skip node_modules/vendor/build directories
 	expectedFiles := []string{
 		"README.md",
 		"CHANGELOG.md",
@@ -336,8 +172,8 @@ func TestScanRealFilesystem(t *testing.T) {
 	}
 }
 
-func TestScanPerformance(t *testing.T) {
-	// Create structure with moderate number of files
+func TestScanCurrDirectory_Performance(t *testing.T) {
+	// Integration test for performance with larger file sets
 	structure := make(map[string]string)
 
 	// Create 100 markdown files across 10 directories
@@ -381,9 +217,8 @@ func TestScanPerformance(t *testing.T) {
 	t.Logf("Scanned %d files in %v", len(files), duration)
 }
 
-// Error Handling Tests
-
-func TestScanWithUnreadableDirectories(t *testing.T) {
+func TestScanCurrDirectory_ErrorHandling(t *testing.T) {
+	// Integration test for error handling with unreadable directories
 	structure := map[string]string{
 		"readable/file.md":     "# Readable",
 		"unreadable/secret.md": "# Secret",
@@ -428,55 +263,8 @@ func TestScanWithUnreadableDirectories(t *testing.T) {
 	}
 }
 
-// Security Tests (simplified)
-
-func TestScanSecurityBoundaries(t *testing.T) {
-	structure := map[string]string{
-		"allowed/file.md": "# Allowed",
-		"test.md":         "# Test",
-	}
-
-	tempDir := createTempDirStructure(t, structure)
-	defer os.RemoveAll(tempDir)
-
-	root, err := os.OpenRoot(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to open root: %v", err)
-	}
-	defer root.Close()
-
-	scanner := NewDefaultDirScanner(root, nil)
-
-	// Should not be able to access paths outside the root
-	err = scanner.scanDirRecursive("../", 1)
-	if err == nil {
-		// This might succeed but should not find files outside tempDir
-		// The security is enforced by os.Root, not our code
-	}
-
-	// Scan within boundaries should work
-	err = scanner.scanDirRecursive(".", 1)
-	if err != nil {
-		t.Errorf("Failed to scan within boundaries: %v", err)
-	}
-
-	if len(scanner.files) != 2 {
-		t.Errorf("Expected 2 files within boundaries, got %d", len(scanner.files))
-	}
-
-	expected := []string{"allowed/file.md", "test.md"}
-	fileSet := make(map[string]bool)
-	for _, file := range scanner.files {
-		fileSet[file.Path] = true
-	}
-	for _, expectedFile := range expected {
-		if !fileSet[expectedFile] {
-			t.Errorf("Expected file %q not found in results", expectedFile)
-		}
-	}
-}
-
-func TestScanSymlinkHandling(t *testing.T) {
+func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
+	// Integration test for symlink handling behavior
 	structure := map[string]string{
 		"real/file.md":  "# Real file",
 		"target/doc.md": "# Target doc",

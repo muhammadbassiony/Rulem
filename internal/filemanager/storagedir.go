@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"rulem/internal/logging"
+	"rulem/pkg/fileops"
 	"strings"
 
 	"github.com/adrg/xdg"
@@ -15,16 +16,6 @@ func GetDefaultStorageDir() string {
 	return filepath.Join(xdg.DataHome, "rulem")
 }
 
-// ExpandPath is a utility function that expands a path that starts with "~/" to the user's home directory.
-func ExpandPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[2:])
-		}
-	}
-	return path
-}
-
 // CreateSecureStorageRoot creates a storage root confined to user's home directory
 func CreateSecureStorageRoot(userPath string) (*os.Root, error) {
 	if strings.TrimSpace(userPath) == "" {
@@ -32,7 +23,7 @@ func CreateSecureStorageRoot(userPath string) (*os.Root, error) {
 	}
 
 	// Expand the user path
-	expandedPath := ExpandPath(userPath)
+	expandedPath := fileops.ExpandPath(userPath)
 
 	// SECURITY: Ensure path is within user's home directory
 	homeRoot, err := createHomeRoot()
@@ -42,7 +33,7 @@ func CreateSecureStorageRoot(userPath string) (*os.Root, error) {
 	defer homeRoot.Close() // We'll create a new root for the specific path
 
 	// Check if the path is within home by trying to resolve it relative to home
-	relPath, err := getRelativePathInHome(expandedPath)
+	relPath, err := fileops.ValidatePathInHome(expandedPath)
 	if err != nil {
 		return nil, fmt.Errorf("path must be within your home directory: %w", err)
 	}
@@ -95,31 +86,4 @@ func createHomeRoot() (*os.Root, error) {
 	}
 
 	return os.OpenRoot(homeDir)
-}
-
-// getRelativePathInHome checks if path is within home and returns relative path
-func getRelativePathInHome(targetPath string) (string, error) {
-	homeDir := xdg.Home
-	if homeDir == "" {
-		return "", fmt.Errorf("cannot determine home directory")
-	}
-
-	// Clean both paths to handle . and .. properly
-	cleanHome := filepath.Clean(homeDir)
-	cleanTarget := filepath.Clean(targetPath)
-	logging.Debug("Get relative path in home. Cleaned paths: ", "home", cleanHome, "target", cleanTarget)
-
-	// Check if target is within home
-	relPath, err := filepath.Rel(cleanHome, cleanTarget)
-	logging.Debug("Is path in home dir? ", "relPath", relPath, "err", err)
-	if err != nil {
-		return "", fmt.Errorf("invalid path: %w", err)
-	}
-
-	// If relative path starts with .. then it's outside home
-	if strings.HasPrefix(relPath, "..") {
-		return "", fmt.Errorf("path is outside home directory")
-	}
-
-	return relPath, nil
 }

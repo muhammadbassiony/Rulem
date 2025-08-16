@@ -2,11 +2,10 @@ package filemanager
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"rulem/internal/logging"
-	"strings"
+	"rulem/pkg/fileops"
 )
 
 type FileManager struct {
@@ -28,7 +27,7 @@ type FileManager struct {
 // Security: Validates storage directory path to prevent path traversal and access to system directories.
 func NewFileManager(storageDir string, logger *logging.AppLogger) (*FileManager, error) {
 	// Validate the storage directory path
-	if err := ValidateStorageDir(storageDir); err != nil {
+	if err := fileops.ValidateStoragePath(storageDir); err != nil {
 		return nil, fmt.Errorf("Invalid storage directory: %w", err)
 	}
 
@@ -72,37 +71,32 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 		return "", fmt.Errorf("invalid source path: %w", err)
 	}
 
-	// Check if source file exists and is accessible
-	srcInfo, err := os.Stat(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("source file does not exist: %s", srcPath)
+	// Validate source file access using fileops
+	if err := fileops.ValidateFileAccess(absPath, false); err != nil {
+		return "", fmt.Errorf("source file validation failed: %w", err)
+	}
+
+	// Security: validate symlinks using allowlist approach
+	// Only validate if the path is actually a symlink
+	if isLink, err := fileops.IsSymlink(absPath); err == nil && isLink {
+		// Create allowlist of safe source locations
+		allowedPaths := []string{fm.storageDir}
+		if cwd, err := os.Getwd(); err == nil {
+			allowedPaths = append(allowedPaths, cwd)
 		}
-		return "", fmt.Errorf("cannot access source file: %w", err)
-	}
 
-	// Ensure source is a regular file, not a directory
-	if srcInfo.IsDir() {
-		return "", fmt.Errorf("source is a directory, not a file: %s", srcPath)
-	}
-
-	// Security: validate symlinks
-	if err := validateSymlinkSecurity(absPath); err != nil {
-		return "", fmt.Errorf("symlink security check failed: %w", err)
+		if err := fileops.ValidateSymlinkSecurity(absPath, allowedPaths); err != nil {
+			return "", fmt.Errorf("symlink security check failed: %w", err)
+		}
 	}
 
 	// Determine safe destination filename
 	var fileName string
 	if newFileName != nil {
-		// Security: prevent path traversal in filename
-		cleanName := filepath.Base(*newFileName)
-		if strings.Contains(*newFileName, "..") ||
-			strings.ContainsAny(*newFileName, `/\`) ||
-			cleanName != *newFileName {
-			return "", fmt.Errorf("invalid filename: contains path separators or traversal attempts")
-		}
-		if cleanName == "" || cleanName == "." || cleanName == ".." {
-			return "", fmt.Errorf("invalid filename: %q", *newFileName)
+		// Security: sanitize filename using fileops
+		cleanName, err := fileops.SanitizeFilename(*newFileName)
+		if err != nil {
+			return "", fmt.Errorf("invalid filename: %w", err)
 		}
 		fileName = cleanName
 	} else {
@@ -121,12 +115,12 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 	}
 
 	// Verify we can write to storage directory
-	if err := TestWriteToStorageDir(fm.storageDir); err != nil {
+	if err := fileops.ValidateDirectoryWritable(fm.storageDir); err != nil {
 		return "", fmt.Errorf("storage directory is not writable: %w", err)
 	}
 
 	// Perform atomic copy
-	if err := fm.atomicCopy(absPath, destPath); err != nil {
+	if err := fileops.AtomicCopy(absPath, destPath); err != nil {
 		return "", fmt.Errorf("failed to copy file: %w", err)
 	}
 
@@ -175,7 +169,7 @@ func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, 
 
 	// Ensure destination directory exists
 	destDir := filepath.Dir(absDestPath)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := fileops.EnsureDirectoryExists(destDir); err != nil {
 		return "", fmt.Errorf("cannot create destination directory: %w", err)
 	}
 
@@ -188,7 +182,7 @@ func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, 
 	}
 
 	// Perform atomic copy
-	if err := fm.atomicCopy(storagePath, absDestPath); err != nil {
+	if err := fileops.AtomicCopy(storagePath, absDestPath); err != nil {
 		return "", fmt.Errorf("failed to copy file from storage: %w", err)
 	}
 
@@ -238,7 +232,7 @@ func (fm *FileManager) CreateSymlinkFromStorage(storagePath string, destPath str
 
 	// Ensure destination directory exists
 	destDir := filepath.Dir(absDestPath)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := fileops.EnsureDirectoryExists(destDir); err != nil {
 		return "", fmt.Errorf("cannot create destination directory: %w", err)
 	}
 
@@ -253,81 +247,13 @@ func (fm *FileManager) CreateSymlinkFromStorage(storagePath string, destPath str
 		fm.logger.Debug("Removed existing file for symlink", "dest", absDestPath)
 	}
 
-	// Calculate relative path from symlink location to storage file
-	relPath, err := filepath.Rel(destDir, storagePath)
-	if err != nil {
-		return "", fmt.Errorf("cannot calculate relative path: %w", err)
-	}
-
-	// Create the symlink
-	if err := os.Symlink(relPath, absDestPath); err != nil {
+	// Create the relative symlink
+	if err := fileops.CreateRelativeSymlink(storagePath, absDestPath); err != nil {
 		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	fm.logger.Info("Symlink created successfully", "target", storagePath, "link", absDestPath, "relative", relPath)
+	fm.logger.Info("Symlink created successfully", "target", storagePath, "link", absDestPath)
 	return absDestPath, nil
-}
-
-// atomicCopy performs an atomic file copy operation.
-// It copies to a temporary file first, then renames to the final destination.
-// This ensures we don't corrupt existing files if the copy fails midway.
-//
-// Parameters:
-//   - srcPath: Absolute path to source file
-//   - destPath: Absolute path to destination file
-//
-// Returns:
-//   - error: Copy operation errors
-//
-// The operation is atomic at the filesystem level - the destination file
-// either appears fully copied or not at all.
-func (fm *FileManager) atomicCopy(srcPath, destPath string) error {
-	// Open source file
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to open source file: %w", err)
-	}
-	defer srcFile.Close()
-
-	// Create temporary file in same directory as destination
-	tempPath := destPath + ".tmp"
-	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-
-	// Ensure cleanup of temp file if anything goes wrong
-	var copySuccess bool
-	defer func() {
-		tempFile.Close()
-		if !copySuccess {
-			os.Remove(tempPath) // Clean up on failure
-		}
-	}()
-
-	// Copy file contents
-	if _, err := io.Copy(tempFile, srcFile); err != nil {
-		return fmt.Errorf("failed to copy file contents: %w", err)
-	}
-
-	// Sync to ensure data is written to disk
-	if err := tempFile.Sync(); err != nil {
-		return fmt.Errorf("failed to sync file: %w", err)
-	}
-
-	// Close temp file before rename
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temporary file: %w", err)
-	}
-
-	// Atomic rename - this is the atomic operation
-	if err := os.Rename(tempPath, destPath); err != nil {
-		os.Remove(tempPath) // Clean up temp file
-		return fmt.Errorf("failed to rename temporary file: %w", err)
-	}
-
-	copySuccess = true
-	return nil
 }
 
 // GetStorageDir returns the storage directory path.
@@ -341,71 +267,11 @@ func (fm *FileManager) GetStorageDir() string {
 // validateCWDPath validates that a destination path is safe relative to current working directory.
 // Prevents path traversal outside of CWD and ensures path is relative.
 func validateCWDPath(destPath string) error {
-	if destPath == "" {
-		return fmt.Errorf("destination path cannot be empty")
-	}
-
-	// Path must be relative
-	if filepath.IsAbs(destPath) {
-		return fmt.Errorf("destination path must be relative to current working directory")
-	}
-
-	// Check for path traversal
-	if strings.Contains(destPath, "..") {
-		return fmt.Errorf("path traversal not allowed in destination path")
-	}
-
-	// Clean and validate the path
-	cleanPath := filepath.Clean(destPath)
-	if strings.HasPrefix(cleanPath, "..") || strings.Contains(cleanPath, "..") {
-		return fmt.Errorf("destination path attempts to escape current working directory")
-	}
-
-	return nil
+	return fileops.ValidateCWDPath(destPath)
 }
 
 // validateFileInStorage validates that a file path is within the storage directory
 // and that the file exists and is accessible.
 func validateFileInStorage(filePath, storageDir string) error {
-	// Resolve absolute paths
-	absFilePath, err := filepath.Abs(filePath)
-	if err != nil {
-		return fmt.Errorf("cannot resolve file path: %w", err)
-	}
-
-	absStorageDir, err := filepath.Abs(storageDir)
-	if err != nil {
-		return fmt.Errorf("cannot resolve storage directory: %w", err)
-	}
-
-	// Check if file is within storage directory
-	relPath, err := filepath.Rel(absStorageDir, absFilePath)
-	if err != nil {
-		return fmt.Errorf("cannot determine relative path: %w", err)
-	}
-
-	if strings.HasPrefix(relPath, "..") {
-		return fmt.Errorf("file is not within storage directory")
-	}
-
-	// Check if file exists and is accessible
-	fileInfo, err := os.Stat(absFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("file does not exist in storage: %s", filepath.Base(filePath))
-		}
-		return fmt.Errorf("cannot access file: %w", err)
-	}
-
-	// Ensure it's a regular file
-	if fileInfo.IsDir() {
-		return fmt.Errorf("path is a directory, not a file")
-	}
-
-	// Security: validate symlinks
-	if err := validateSymlinkSecurity(absFilePath); err != nil {
-		return fmt.Errorf("symlink security check failed: %w", err)
-	}
-
-	return nil
+	return fileops.ValidateFileInDirectory(filePath, storageDir)
 }

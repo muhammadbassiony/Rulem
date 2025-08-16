@@ -3,6 +3,7 @@ package filemanager
 import (
 	"os"
 	"path/filepath"
+	"rulem/pkg/fileops"
 	"strings"
 	"testing"
 )
@@ -85,7 +86,7 @@ func TestExpandPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExpandPath(tt.input)
+			result := fileops.ExpandPath(tt.input)
 			if result != tt.expected {
 				t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
@@ -132,7 +133,7 @@ func TestExpandPathEdgeCases(t *testing.T) {
 			cleanup := tt.setupEnv()
 			defer cleanup()
 
-			result := ExpandPath(tt.input)
+			result := fileops.ExpandPath(tt.input)
 			tt.validate(t, result)
 		})
 	}
@@ -201,66 +202,6 @@ func TestCreateSecureStorageRoot(t *testing.T) {
 	}
 }
 
-// TestGetRelativePathInHome tests the getRelativePathInHome helper
-func TestGetRelativePathInHome(t *testing.T) {
-	home := getHomeDir(t)
-
-	tests := []struct {
-		name      string
-		input     string
-		wantError bool
-		errorMsg  string
-		expected  string
-	}{
-		{
-			name:     "path within home",
-			input:    filepath.Join(home, "Documents", "rulem"),
-			expected: filepath.Join("Documents", "rulem"),
-		},
-		{
-			name:      "path outside home",
-			input:     "/etc/passwd",
-			wantError: true,
-			errorMsg:  "outside home directory",
-		},
-		{
-			name:      "path traversal outside home",
-			input:     filepath.Join(home, "..", "etc", "passwd"),
-			wantError: true,
-			errorMsg:  "outside home directory",
-		},
-		{
-			name:     "home directory itself",
-			input:    home,
-			expected: ".",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := getRelativePathInHome(tt.input)
-
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("getRelativePathInHome(%q) expected error but got none", tt.input)
-					return
-				}
-				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("getRelativePathInHome(%q) error = %v, want error containing %q",
-						tt.input, err, tt.errorMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("getRelativePathInHome(%q) unexpected error: %v", tt.input, err)
-				}
-				if result != tt.expected {
-					t.Errorf("getRelativePathInHome(%q) = %q, want %q", tt.input, result, tt.expected)
-				}
-			}
-		})
-	}
-}
-
 // Integration test for complete workflow
 func TestIntegrationWorkflow(t *testing.T) {
 	t.Run("complete workflow", func(t *testing.T) {
@@ -280,15 +221,18 @@ func TestIntegrationWorkflow(t *testing.T) {
 		}
 
 		// Step 3: Validate the directory using helper function
-		err := ValidateStorageDir(testDir)
+		err := fileops.ValidateStoragePath(testDir)
 		if err != nil {
 			t.Fatalf("ValidateStorageDir failed: %v", err)
 		}
 
-		// Step 4: Create and test the directory using helper function
-		err = CreateStorageDir(testDir)
-		if err != nil {
-			t.Fatalf("CreateStorageDir failed: %v", err)
+		// Step 4: Create the directory and test writability using fileops functions
+		if err := fileops.EnsureDirectoryExists(testDir); err != nil {
+			t.Fatalf("EnsureDirectoryExists failed: %v", err)
+		}
+
+		if err := fileops.ValidateDirectoryWritable(testDir); err != nil {
+			t.Fatalf("ValidateDirectoryWritable failed: %v", err)
 		}
 
 		// Step 5: Verify directory exists and is usable
@@ -318,24 +262,6 @@ func TestIntegrationWorkflow(t *testing.T) {
 		// Cleanup
 		os.RemoveAll(testDir)
 	})
-}
-
-// Benchmark tests for performance monitoring
-func BenchmarkExpandPath(b *testing.B) {
-	testPaths := []string{
-		"~/Documents/rulem",
-		"~/Projects/go/rulem/data",
-		"~/Desktop/rules/important/security",
-		"/absolute/path/to/directory",
-		"relative/path/to/directory",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for _, path := range testPaths {
-			ExpandPath(path)
-		}
-	}
 }
 
 func BenchmarkGetDefaultStorageDir(b *testing.B) {

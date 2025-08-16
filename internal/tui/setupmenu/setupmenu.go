@@ -10,6 +10,7 @@ import (
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
+	"rulem/pkg/fileops"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -187,12 +188,12 @@ func (m *SetupModel) validateAndProceed() (*SetupModel, tea.Cmd) {
 	input := strings.TrimSpace(m.textInput.Value())
 	m.logger.Debug("Validating storage directory", "path", input)
 
-	if err := filemanager.ValidateStorageDir(input); err != nil {
+	if err := fileops.ValidateStoragePath(input); err != nil {
 		m.logger.Warn("Storage directory validation failed", "error", err)
 		return m, func() tea.Msg { return setupErrorMsg{err} }
 	}
 
-	m.StorageDir = filemanager.ExpandPath(input)
+	m.StorageDir = fileops.ExpandPath(input)
 	m.logger.LogStateTransition("SetupModel", "SetupStateStorageInput", "SetupStateConfirmation")
 	m.state = SetupStateConfirmation
 	m.layout = m.layout.ClearError()

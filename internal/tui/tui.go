@@ -301,6 +301,18 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logger.LogStateTransition("MainModel", "FeatureState", "StateMenu")
 		return m.returnToMenu(), nil
 
+	case config.ReloadConfigMsg:
+		// Handle config reload after settings updates
+		if msg.Error != nil {
+			m.logger.Error("Failed to reload configuration", "error", msg.Error)
+			return m, func() tea.Msg { return ErrorMsg{Err: msg.Error} }
+		}
+		if msg.Config != nil {
+			m.logger.Info("Configuration reloaded successfully")
+			m.config = msg.Config
+		}
+		return m, nil
+
 	default:
 		// Handle any unrecognized message types
 		// Delegate to active model if present

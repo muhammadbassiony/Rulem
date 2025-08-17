@@ -116,7 +116,8 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settingsCompleteMsg:
 		m.state = SettingsStateComplete
 		m.layout = m.layout.ClearError()
-		return m, nil
+		// Trigger config reload in parent after successful update
+		return m, config.ReloadConfig()
 
 	case config.LoadConfigMsg:
 		if msg.Error != nil {
@@ -390,5 +391,3 @@ func (m *SettingsModel) viewError() string {
 
 	return m.layout.Render(content)
 }
-
-// TODO when the settings menu updates the config, we need to refresh it in the main model

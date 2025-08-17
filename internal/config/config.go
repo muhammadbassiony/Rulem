@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	tea "github.com/charmbracelet/bubbletea"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,6 +21,11 @@ type LoadConfigMsg struct {
 
 type SaveConfigMsg struct {
 	Error error
+}
+
+type ReloadConfigMsg struct {
+	Config *Config
+	Error  error
 }
 
 const APP_NAME = "rulem" // application name used for config directory
@@ -164,6 +170,15 @@ func LoadConfig() (*Config, error) {
 // SaveConfig saves configuration for TUI operations
 func SaveConfig(cfg *Config) error {
 	return cfg.Save()
+}
+
+// ReloadConfig reloads configuration from disk for TUI operations
+// This is useful when the config has been updated by another component
+func ReloadConfig() tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := Load()
+		return ReloadConfigMsg{Config: cfg, Error: err}
+	}
 }
 
 // UpdateStorageDir updates the storage directory, ensures it exists, and saves the config

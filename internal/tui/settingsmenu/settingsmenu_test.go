@@ -183,8 +183,8 @@ func TestSettingsModelUpdate_Completion(t *testing.T) {
 	updatedModel, cmd := model.Update(completeMsg)
 	settingsModel := updatedModel.(*SettingsModel)
 
-	if cmd != nil {
-		t.Error("Completion message should not return a command")
+	if cmd == nil {
+		t.Error("Completion message should return a config reload command")
 	}
 
 	if settingsModel.state != SettingsStateComplete {

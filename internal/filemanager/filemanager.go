@@ -132,7 +132,7 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 // Performs atomic copy operation to ensure data integrity.
 //
 // Parameters:
-//   - storagePath: Path to the file in storage directory
+//   - storagePath: Path to the file in storage directory (can be absolute or relative)
 //   - destPath: Destination path relative to current working directory
 //   - overwrite: Whether to replace existing files
 //
@@ -148,13 +148,27 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 //
 // The destPath must be relative to CWD and cannot escape to parent directories.
 func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, overwrite bool) (string, error) {
+	fm.logger.Debug("Copying file from storage", "src", storagePath, "dest", destPath, "overwrite", overwrite)
+
 	// Validate destination path
-	if err := validateCWDPath(destPath); err != nil {
+	if err := fileops.ValidateCWDPath(destPath); err != nil {
 		return "", fmt.Errorf("invalid destination path: %w", err)
 	}
 
+	// Handle both absolute and relative storage paths intelligently
+	var absStoragePath string
+	if filepath.IsAbs(storagePath) {
+		// If path is absolute, use it directly but validate it's within storage
+		absStoragePath = storagePath
+		fm.logger.Debug("Using absolute storage path", "absolute", absStoragePath)
+	} else {
+		// If path is relative, join with storage directory
+		absStoragePath = filepath.Join(fm.storageDir, storagePath)
+		fm.logger.Debug("Converted relative to absolute storage path", "relative", storagePath, "absolute", absStoragePath)
+	}
+
 	// Validate that source file exists and is within storage directory
-	if err := validateFileInStorage(storagePath, fm.storageDir); err != nil {
+	if err := fileops.ValidateFileInDirectory(absStoragePath, fm.storageDir); err != nil {
 		return "", fmt.Errorf("source file validation failed: %w", err)
 	}
 
@@ -182,11 +196,11 @@ func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, 
 	}
 
 	// Perform atomic copy
-	if err := fileops.AtomicCopy(storagePath, absDestPath); err != nil {
+	if err := fileops.AtomicCopy(absStoragePath, absDestPath); err != nil {
 		return "", fmt.Errorf("failed to copy file from storage: %w", err)
 	}
 
-	fm.logger.Info("File copied from storage successfully", "src", storagePath, "dest", absDestPath)
+	fm.logger.Info("File copied from storage successfully", "src", absStoragePath, "dest", absDestPath)
 	return absDestPath, nil
 }
 
@@ -194,7 +208,7 @@ func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, 
 // that points to a file in the storage directory using relative paths.
 //
 // Parameters:
-//   - storagePath: Path to the file in storage directory
+//   - storagePath: Path to the file in storage directory (can be absolute or relative)
 //   - destPath: Destination path for symlink relative to current working directory
 //   - overwrite: Whether to replace existing files/symlinks
 //
@@ -212,12 +226,24 @@ func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, 
 // This provides real-time synchronization but requires careful permission management.
 func (fm *FileManager) CreateSymlinkFromStorage(storagePath string, destPath string, overwrite bool) (string, error) {
 	// Validate destination path
-	if err := validateCWDPath(destPath); err != nil {
+	if err := fileops.ValidateCWDPath(destPath); err != nil {
 		return "", fmt.Errorf("invalid destination path: %w", err)
 	}
 
+	// Handle both absolute and relative storage paths intelligently
+	var absStoragePath string
+	if filepath.IsAbs(storagePath) {
+		// If path is absolute, use it directly but validate it's within storage
+		absStoragePath = storagePath
+		fm.logger.Debug("Using absolute storage path", "absolute", absStoragePath)
+	} else {
+		// If path is relative, join with storage directory
+		absStoragePath = filepath.Join(fm.storageDir, storagePath)
+		fm.logger.Debug("Converted relative to absolute storage path", "relative", storagePath, "absolute", absStoragePath)
+	}
+
 	// Validate that source file exists and is within storage directory
-	if err := validateFileInStorage(storagePath, fm.storageDir); err != nil {
+	if err := fileops.ValidateFileInDirectory(absStoragePath, fm.storageDir); err != nil {
 		return "", fmt.Errorf("source file validation failed: %w", err)
 	}
 
@@ -248,11 +274,11 @@ func (fm *FileManager) CreateSymlinkFromStorage(storagePath string, destPath str
 	}
 
 	// Create the relative symlink
-	if err := fileops.CreateRelativeSymlink(storagePath, absDestPath); err != nil {
+	if err := fileops.CreateRelativeSymlink(absStoragePath, absDestPath); err != nil {
 		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	fm.logger.Info("Symlink created successfully", "target", storagePath, "link", absDestPath)
+	fm.logger.Info("Symlink created successfully", "target", absStoragePath, "link", absDestPath)
 	return absDestPath, nil
 }
 
@@ -262,16 +288,4 @@ func (fm *FileManager) CreateSymlinkFromStorage(storagePath string, destPath str
 //   - string: Absolute path to the configured storage directory
 func (fm *FileManager) GetStorageDir() string {
 	return fm.storageDir
-}
-
-// validateCWDPath validates that a destination path is safe relative to current working directory.
-// Prevents path traversal outside of CWD and ensures path is relative.
-func validateCWDPath(destPath string) error {
-	return fileops.ValidateCWDPath(destPath)
-}
-
-// validateFileInStorage validates that a file path is within the storage directory
-// and that the file exists and is accessible.
-func validateFileInStorage(filePath, storageDir string) error {
-	return fileops.ValidateFileInDirectory(filePath, storageDir)
 }

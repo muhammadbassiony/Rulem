@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"rulem/internal/logging"
 	"strings"
 	"testing"
 	"time"
@@ -74,8 +75,15 @@ func TestScanCurrDirectory_Integration(t *testing.T) {
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()
 
+	// Create FileManager for scanning
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(tempDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
 	// Scan directory
-	files, err := ScanCurrDirectory()
+	files, err := fm.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -140,7 +148,14 @@ func TestScanCurrDirectory_RealisticProject(t *testing.T) {
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()
 
-	files, err := ScanCurrDirectory()
+	// Create FileManager for scanning
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(tempDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	files, err := fm.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -196,8 +211,15 @@ func TestScanCurrDirectory_Performance(t *testing.T) {
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()
 
+	// Create FileManager for scanning
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(tempDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
 	start := time.Now()
-	files, err := ScanCurrDirectory()
+	files, err := fm.ScanCurrDirectory()
 	duration := time.Since(start)
 
 	if err != nil {
@@ -238,8 +260,15 @@ func TestScanCurrDirectory_ErrorHandling(t *testing.T) {
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()
 
+	// Create FileManager for scanning
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(tempDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
 	// Should complete successfully and skip unreadable directory
-	files, err := ScanCurrDirectory()
+	files, err := fm.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -287,7 +316,14 @@ func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()
 
-	files, err := ScanCurrDirectory()
+	// Create FileManager for scanning
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(tempDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	files, err := fm.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -309,5 +345,497 @@ func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
 		if !fileSet[expectedFile] {
 			t.Errorf("Expected file %q not found in results", expectedFile)
 		}
+	}
+}
+
+// Tests for ScanCentralRepo
+
+func TestScanCentralRepo_BasicDiscovery(t *testing.T) {
+	// Test basic markdown file discovery in storage directory
+	structure := map[string]string{
+		"README.md": "# Root README",
+		"notes.txt": "Not markdown",
+		"docs.md":   "# Documentation",
+		"script.js": "console.log('hello')",
+	}
+
+	storageDir := createTempDirStructure(t, structure)
+	defer os.RemoveAll(storageDir)
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	files, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	expectedFiles := []string{"README.md", "docs.md"}
+	if len(files) != len(expectedFiles) {
+		t.Errorf("Expected %d files, got %d: %v", len(expectedFiles), len(files), files)
+	}
+
+	fileSet := make(map[string]bool)
+	for _, file := range files {
+		fileSet[file.Path] = true
+	}
+
+	for _, expectedFile := range expectedFiles {
+		if !fileSet[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
+}
+
+func TestScanCentralRepo_RecursiveDiscovery(t *testing.T) {
+	// Test nested markdown file discovery
+	structure := map[string]string{
+		"README.md":                  "# Root",
+		"docs/guide.md":              "# Guide",
+		"docs/sub/readme.md":         "# Sub readme",
+		"docs/sub/deep/nested.md":    "# Deep nested",
+		"src/main.go":                "package main",
+		"config/settings.yaml":       "key: value",
+		"tests/integration/setup.md": "# Test setup",
+	}
+
+	storageDir := createTempDirStructure(t, structure)
+	defer os.RemoveAll(storageDir)
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	files, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	expectedFiles := []string{
+		"README.md",
+		"docs/guide.md",
+		"docs/sub/readme.md",
+		"docs/sub/deep/nested.md",
+		"tests/integration/setup.md",
+	}
+
+	if len(files) != len(expectedFiles) {
+		t.Errorf("Expected %d files, got %d: %v", len(expectedFiles), len(files), files)
+	}
+
+	fileSet := make(map[string]bool)
+	for _, file := range files {
+		fileSet[file.Path] = true
+	}
+
+	for _, expectedFile := range expectedFiles {
+		if !fileSet[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
+}
+
+func TestScanCentralRepo_SkipCommonDirectories(t *testing.T) {
+	// Test that common skip patterns are honored
+	structure := map[string]string{
+		"root.md":                  "# Root markdown",
+		"node_modules/pkg/doc.md":  "# Package docs", // Should be skipped
+		"vendor/lib/README.md":     "# Vendor lib",   // Should be skipped
+		"build/output.md":          "# Build docs",   // Should be skipped
+		".git/hooks/pre-commit.md": "# Git hook",     // Should be skipped
+		".vscode/snippets.md":      "# VS Code",      // Should be skipped
+		"dist/bundle.md":           "# Bundle docs",  // Should be skipped
+		"__pycache__/cache.md":     "# Python cache", // Should be skipped
+		"normal/docs.md":           "# Normal docs",
+	}
+
+	storageDir := createTempDirStructure(t, structure)
+	defer os.RemoveAll(storageDir)
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	files, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	expectedFiles := []string{"root.md", "normal/docs.md"}
+	if len(files) != len(expectedFiles) {
+		t.Errorf("Expected %d files, got %d: %v", len(expectedFiles), len(files), files)
+	}
+
+	// Verify no skipped directories are included
+	for _, file := range files {
+		skippedPrefixes := []string{"node_modules", "vendor", "build", ".git", ".vscode", "dist", "__pycache__"}
+		for _, prefix := range skippedPrefixes {
+			if strings.HasPrefix(file.Path, prefix) {
+				t.Errorf("Found file in skipped directory: %s", file.Path)
+			}
+		}
+	}
+}
+
+func TestScanCentralRepo_HiddenFilesAndMaxDepth(t *testing.T) {
+	// Test hidden files inclusion and max depth behavior
+	structure := map[string]string{
+		".hidden.md":          "# Hidden markdown",
+		"normal.md":           "# Normal markdown",
+		".config/settings.md": "# Config markdown",
+	}
+
+	// Create a very deep nested structure beyond MaxDepth (50)
+	deepPath := ""
+	for i := range 55 {
+		deepPath = filepath.Join(deepPath, fmt.Sprintf("dir%d", i))
+	}
+	structure[filepath.Join(deepPath, "deep.md")] = "# Very deep"
+
+	storageDir := createTempDirStructure(t, structure)
+	defer os.RemoveAll(storageDir)
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	files, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	// Should include hidden files but not files beyond max depth
+	expectedFiles := []string{".hidden.md", "normal.md", ".config/settings.md"}
+
+	foundFiles := make(map[string]bool)
+	for _, file := range files {
+		foundFiles[file.Path] = true
+	}
+
+	for _, expectedFile := range expectedFiles {
+		if !foundFiles[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
+
+	// Verify that very deep file is not included (beyond MaxDepth)
+	deepFile := filepath.Join(deepPath, "deep.md")
+	if foundFiles[deepFile] {
+		t.Errorf("File beyond MaxDepth should not be included: %s", deepFile)
+	}
+}
+
+func TestScanCentralRepo_SymlinkHandling(t *testing.T) {
+	// Test symlink handling within storage directory
+	structure := map[string]string{
+		"real/file.md":  "# Real file",
+		"target/doc.md": "# Target doc",
+		"normal.md":     "# Normal",
+	}
+
+	storageDir := createTempDirStructure(t, structure)
+	defer os.RemoveAll(storageDir)
+
+	// Create symlink to directory within storage
+	realDir := filepath.Join(storageDir, "real")
+	linkDir := filepath.Join(storageDir, "link_to_real")
+	createTestSymlink(t, realDir, linkDir)
+
+	// Create symlink to file within storage
+	targetFile := filepath.Join(storageDir, "target", "doc.md")
+	linkFile := filepath.Join(storageDir, "link_to_doc.md")
+	createTestSymlink(t, targetFile, linkFile)
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	files, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	// Should find files through symlinks
+	expectedMinimum := 3 // normal.md + real/file.md + target/doc.md (+ possibly symlinked versions)
+
+	if len(files) < expectedMinimum {
+		t.Errorf("Expected at least %d files, got %d: %v", expectedMinimum, len(files), files)
+	}
+
+	expected := []string{"normal.md", "real/file.md"}
+	fileSet := make(map[string]bool)
+	for _, file := range files {
+		fileSet[file.Path] = true
+	}
+
+	for _, expectedFile := range expected {
+		if !fileSet[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
+}
+
+func TestScanCentralRepo_UnreadableDirectories(t *testing.T) {
+	// Test handling of unreadable directories
+	structure := map[string]string{
+		"readable/file.md":     "# Readable",
+		"unreadable/secret.md": "# Secret",
+		"normal.md":            "# Normal",
+	}
+
+	storageDir := createTempDirStructure(t, structure)
+	defer os.RemoveAll(storageDir)
+
+	// Make directory unreadable
+	unreadableDir := filepath.Join(storageDir, "unreadable")
+	if err := os.Chmod(unreadableDir, 0000); err != nil {
+		t.Skipf("Cannot change permissions: %v", err)
+	}
+	defer os.Chmod(unreadableDir, 0755) // Restore for cleanup
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Should complete successfully and skip unreadable directory
+	files, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	// Should find readable files but skip unreadable directory
+	expected := []string{"readable/file.md", "normal.md"}
+
+	if len(files) != len(expected) {
+		t.Errorf("Expected %d files, got %d: %v", len(expected), len(files), files)
+	}
+
+	fileSet := make(map[string]bool)
+	for _, file := range files {
+		fileSet[file.Path] = true
+	}
+
+	for _, expectedFile := range expected {
+		if !fileSet[expectedFile] {
+			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
+}
+
+func TestScanCentralRepo_NonExistentStorageDir(t *testing.T) {
+	// Test error when storage directory doesn't exist
+	nonExistentDir := filepath.Join(os.TempDir(), "non-existent-storage-dir")
+
+	logger, _ := logging.NewTestLogger()
+
+	// This should fail during NewFileManager creation due to ValidateStoragePath
+	_, err := NewFileManager(nonExistentDir, logger)
+	if err == nil {
+		t.Fatal("Expected NewFileManager to fail with non-existent directory")
+	}
+
+	if !strings.Contains(err.Error(), "storage directory does not exist") {
+		t.Errorf("Expected error about non-existent directory, got: %v", err)
+	}
+}
+
+func TestScanCentralRepo_StorageDirIsFile(t *testing.T) {
+	// Test error when storage path points to a file instead of directory
+	tempDir := createTempTestDir(t, "scan-test-*")
+	storageFile := createTestFile(t, tempDir, "notadirectory.txt", "content")
+
+	logger, _ := logging.NewTestLogger()
+
+	// This might fail during NewFileManager creation or later during directory check
+	fm, err := NewFileManager(storageFile, logger)
+	if err != nil {
+		// If NewFileManager fails, that's expected and acceptable
+		if strings.Contains(err.Error(), "not a directory") ||
+			strings.Contains(err.Error(), "Invalid storage directory") {
+			return // Test passed
+		}
+		t.Errorf("Expected error about invalid directory, got: %v", err)
+		return
+	}
+
+	// If NewFileManager succeeded, ScanCentralRepo should fail
+	_, err = fm.ScanCentralRepo()
+	if err == nil {
+		t.Fatal("Expected ScanCentralRepo to fail when storage path is a file")
+	}
+
+	if !strings.Contains(err.Error(), "not a directory") &&
+		!strings.Contains(err.Error(), "storage path is not a directory") {
+		t.Errorf("Expected error about not being a directory, got: %v", err)
+	}
+}
+
+func TestScanCentralRepo_SymlinkToSystemDirectory(t *testing.T) {
+	// Test security: symlink pointing to system directory should fail
+	tempDir := createTempTestDir(t, "scan-symlink-test-*")
+
+	// Create a symlink to /etc (or other system directory)
+	systemDir := "/etc"
+	if isWindows() {
+		systemDir = "C:\\Windows\\System32"
+	}
+
+	symlinkPath := filepath.Join(tempDir, "storage")
+	createTestSymlink(t, systemDir, symlinkPath)
+
+	logger, _ := logging.NewTestLogger()
+
+	// This should fail during NewFileManager creation due to ValidateStoragePath
+	_, err := NewFileManager(symlinkPath, logger)
+	if err == nil {
+		t.Fatal("Expected NewFileManager to fail with symlink to system directory")
+	}
+
+	// Accept various security-related error messages
+	if !strings.Contains(err.Error(), "security validation") &&
+		!strings.Contains(err.Error(), "reserved") &&
+		!strings.Contains(err.Error(), "path traversal") &&
+		!strings.Contains(err.Error(), "Invalid storage directory") {
+		t.Errorf("Expected security-related error, got: %v", err)
+	}
+}
+
+func TestScanCentralRepo_Performance(t *testing.T) {
+	// Test performance with larger file sets
+	structure := make(map[string]string)
+
+	// Create 500 markdown files across 20 directories
+	for i := range 20 {
+		for j := range 25 {
+			path := fmt.Sprintf("dir%d/file%d.md", i, j)
+			structure[path] = fmt.Sprintf("# File %d-%d", i, j)
+		}
+	}
+
+	// Add some non-markdown files
+	for i := range 100 {
+		path := fmt.Sprintf("other%d.txt", i)
+		structure[path] = "text content"
+	}
+
+	storageDir := createTempDirStructure(t, structure)
+	defer os.RemoveAll(storageDir)
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	start := time.Now()
+	files, err := fm.ScanCentralRepo()
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	// Should find 500 markdown files
+	if len(files) != 500 {
+		t.Errorf("Expected 500 files, got %d", len(files))
+	}
+
+	// Performance check - should complete within reasonable time
+	if duration > 10*time.Second {
+		t.Errorf("Scan took too long: %v", duration)
+	}
+
+	t.Logf("Scanned %d files in %v", len(files), duration)
+}
+
+func TestScanCentralRepo_NilFileManager(t *testing.T) {
+	// Test error handling with nil FileManager
+	var fm *FileManager = nil
+
+	_, err := fm.ScanCentralRepo()
+	if err == nil {
+		t.Fatal("Expected error with nil FileManager")
+	}
+
+	if !strings.Contains(err.Error(), "filemanager is nil") {
+		t.Errorf("Expected 'filemanager is nil' error, got: %v", err)
+	}
+}
+
+func TestScanCentralRepo_EmptyStorageDir(t *testing.T) {
+	// Test error handling with empty storage directory configuration
+	logger, _ := logging.NewTestLogger()
+
+	// Create FileManager with empty storage directory by directly setting the field
+	// Note: This shouldn't normally happen as NewFileManager validates, but test the method's robustness
+	fm := &FileManager{
+		logger:     logger,
+		storageDir: "", // Empty storage dir
+	}
+
+	_, err := fm.ScanCentralRepo()
+	if err == nil {
+		t.Fatal("Expected error with empty storage directory")
+	}
+
+	if !strings.Contains(err.Error(), "storage directory is not configured") {
+		t.Errorf("Expected 'storage directory is not configured' error, got: %v", err)
+	}
+}
+
+func TestScanCentralRepo_ValidStorageSymlink(t *testing.T) {
+	// Test valid symlink within allowed paths (positive test for symlink security)
+	// Create actual storage directory within user's home or temp directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("Cannot get home directory: %v", err)
+	}
+
+	// Create temp dir within home for valid symlink test
+	tempDir, err := os.MkdirTemp(homeDir, "scan-valid-symlink-test-*")
+	if err != nil {
+		t.Skipf("Cannot create temp dir in home: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create actual storage directory
+	realStorageDir := createTestDir(t, tempDir, "real_storage")
+	createTestFile(t, realStorageDir, "test.md", "# Test markdown")
+
+	// Create symlink to the real storage directory
+	symlinkStorageDir := filepath.Join(tempDir, "symlink_storage")
+	createTestSymlink(t, realStorageDir, symlinkStorageDir)
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(symlinkStorageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed with valid symlink: %v", err)
+	}
+
+	files, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed with valid symlink: %v", err)
+	}
+
+	// Should find the test markdown file
+	if len(files) != 1 {
+		t.Errorf("Expected 1 file, got %d: %v", len(files), files)
+	}
+
+	if len(files) > 0 && files[0].Name != "test.md" {
+		t.Errorf("Expected file 'test.md', got %q", files[0].Name)
 	}
 }

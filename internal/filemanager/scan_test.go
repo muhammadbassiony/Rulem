@@ -839,3 +839,344 @@ func TestScanCentralRepo_ValidStorageSymlink(t *testing.T) {
 		t.Errorf("Expected file 'test.md', got %q", files[0].Name)
 	}
 }
+
+// Tests for ConvertToAbsolutePaths
+
+func TestConvertToAbsolutePaths(t *testing.T) {
+	storageDir := createTempTestDir(t, "convert-paths-test-*")
+
+	// Create test files in storage
+	structure := map[string]string{
+		"root.md":          "# Root file",
+		"docs/guide.md":    "# Guide",
+		"sub/deep/file.md": "# Deep file",
+	}
+
+	for path, content := range structure {
+		fullPath := filepath.Join(storageDir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("Failed to create directory: %v", err)
+		}
+		createTestFile(t, filepath.Dir(fullPath), filepath.Base(fullPath), content)
+	}
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Get files with relative paths
+	relativeFiles, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	// Convert to absolute paths
+	absoluteFiles := fm.ConvertToAbsolutePaths(relativeFiles)
+
+	t.Run("same length", func(t *testing.T) {
+		if len(absoluteFiles) != len(relativeFiles) {
+			t.Errorf("Expected same length, got relative: %d, absolute: %d", len(relativeFiles), len(absoluteFiles))
+		}
+	})
+
+	t.Run("paths are absolute", func(t *testing.T) {
+		for _, file := range absoluteFiles {
+			if !filepath.IsAbs(file.Path) {
+				t.Errorf("Expected absolute path, got: %s", file.Path)
+			}
+		}
+	})
+
+	t.Run("paths point to storage directory", func(t *testing.T) {
+		for _, file := range absoluteFiles {
+			if !strings.HasPrefix(file.Path, storageDir) {
+				t.Errorf("Expected path to be under storage dir %s, got: %s", storageDir, file.Path)
+			}
+		}
+	})
+
+	t.Run("names are preserved", func(t *testing.T) {
+		for i, file := range absoluteFiles {
+			if file.Name != relativeFiles[i].Name {
+				t.Errorf("Expected name %s, got %s", relativeFiles[i].Name, file.Name)
+			}
+		}
+	})
+
+	t.Run("files are readable", func(t *testing.T) {
+		for _, file := range absoluteFiles {
+			content, err := os.ReadFile(file.Path)
+			if err != nil {
+				t.Errorf("Failed to read file %s: %v", file.Path, err)
+			}
+			if len(content) == 0 {
+				t.Errorf("File %s is empty", file.Path)
+			}
+		}
+	})
+}
+
+func TestConvertToAbsolutePaths_EmptySlice(t *testing.T) {
+	storageDir := createTempTestDir(t, "convert-empty-test-*")
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Test with empty slice
+	emptyFiles := []FileItem{}
+	result := fm.ConvertToAbsolutePaths(emptyFiles)
+
+	if len(result) != 0 {
+		t.Errorf("Expected empty slice, got length: %d", len(result))
+	}
+}
+
+func TestConvertToAbsolutePaths_NilSlice(t *testing.T) {
+	storageDir := createTempTestDir(t, "convert-nil-test-*")
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Test with nil slice
+	var nilFiles []FileItem
+	result := fm.ConvertToAbsolutePaths(nilFiles)
+
+	if result == nil {
+		t.Error("Expected non-nil slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Errorf("Expected empty slice, got length: %d", len(result))
+	}
+}
+
+func TestConvertToAbsolutePaths_DoesNotModifyOriginal(t *testing.T) {
+	storageDir := createTempTestDir(t, "convert-immutable-test-*")
+
+	// Create test file
+	createTestFile(t, storageDir, "test.md", "# Test")
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Get original files
+	originalFiles, err := fm.ScanCentralRepo()
+	if err != nil {
+		t.Fatalf("ScanCentralRepo failed: %v", err)
+	}
+
+	// Store original paths for comparison
+	originalPaths := make([]string, len(originalFiles))
+	for i, file := range originalFiles {
+		originalPaths[i] = file.Path
+	}
+
+	// Convert to absolute paths
+	_ = fm.ConvertToAbsolutePaths(originalFiles)
+
+	// Verify original slice was not modified
+	for i, file := range originalFiles {
+		if file.Path != originalPaths[i] {
+			t.Errorf("Original slice was modified at index %d: expected %s, got %s", i, originalPaths[i], file.Path)
+		}
+	}
+}
+
+// Tests for ConvertToAbsolutePathsCWD
+
+func TestConvertToAbsolutePathsCWD(t *testing.T) {
+	// Create a temporary directory structure for CWD testing
+	tempCwd := createTempTestDir(t, "convert-cwd-test-*")
+
+	// Create test files in temp CWD
+	structure := map[string]string{
+		"root.md":          "# Root file",
+		"docs/guide.md":    "# Guide",
+		"sub/deep/file.md": "# Deep file",
+	}
+
+	for path, content := range structure {
+		fullPath := filepath.Join(tempCwd, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("Failed to create directory: %v", err)
+		}
+		createTestFile(t, filepath.Dir(fullPath), filepath.Base(fullPath), content)
+	}
+
+	// Change to temp CWD
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current directory: %v", err)
+	}
+	defer os.Chdir(originalCwd)
+
+	if err := os.Chdir(tempCwd); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Create FileManager (storage dir doesn't matter for this test)
+	storageDir := createTempTestDir(t, "storage-*")
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Get files with relative paths from CWD
+	relativeFiles, err := fm.ScanCurrDirectory()
+	if err != nil {
+		t.Fatalf("ScanCurrDirectory failed: %v", err)
+	}
+
+	// Convert to absolute paths
+	absoluteFiles := fm.ConvertToAbsolutePathsCWD(relativeFiles)
+
+	t.Run("same length", func(t *testing.T) {
+		if len(absoluteFiles) != len(relativeFiles) {
+			t.Errorf("Expected same length, got relative: %d, absolute: %d", len(relativeFiles), len(absoluteFiles))
+		}
+	})
+
+	t.Run("paths are absolute", func(t *testing.T) {
+		for _, file := range absoluteFiles {
+			if !filepath.IsAbs(file.Path) {
+				t.Errorf("Expected absolute path, got: %s", file.Path)
+			}
+		}
+	})
+
+	t.Run("paths point to CWD", func(t *testing.T) {
+		// Resolve symlinks for both paths to handle macOS /var vs /private/var differences
+		resolvedTempCwd, err := filepath.EvalSymlinks(tempCwd)
+		if err != nil {
+			resolvedTempCwd = tempCwd // fallback to original if symlink resolution fails
+		}
+
+		for _, file := range absoluteFiles {
+			resolvedFilePath, err := filepath.EvalSymlinks(file.Path)
+			if err != nil {
+				resolvedFilePath = file.Path // fallback to original if symlink resolution fails
+			}
+
+			if !strings.HasPrefix(resolvedFilePath, resolvedTempCwd) {
+				t.Errorf("Expected path to be under CWD %s, got: %s", resolvedTempCwd, resolvedFilePath)
+			}
+		}
+	})
+
+	t.Run("names are preserved", func(t *testing.T) {
+		for i, file := range absoluteFiles {
+			if file.Name != relativeFiles[i].Name {
+				t.Errorf("Expected name %s, got %s", relativeFiles[i].Name, file.Name)
+			}
+		}
+	})
+
+	t.Run("files are readable", func(t *testing.T) {
+		for _, file := range absoluteFiles {
+			content, err := os.ReadFile(file.Path)
+			if err != nil {
+				t.Errorf("Failed to read file %s: %v", file.Path, err)
+			}
+			if len(content) == 0 {
+				t.Errorf("File %s is empty", file.Path)
+			}
+		}
+	})
+}
+
+func TestConvertToAbsolutePathsCWD_EmptySlice(t *testing.T) {
+	storageDir := createTempTestDir(t, "convert-cwd-empty-test-*")
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Test with empty slice
+	emptyFiles := []FileItem{}
+	result := fm.ConvertToAbsolutePathsCWD(emptyFiles)
+
+	if len(result) != 0 {
+		t.Errorf("Expected empty slice, got length: %d", len(result))
+	}
+}
+
+func TestConvertToAbsolutePathsCWD_NilSlice(t *testing.T) {
+	storageDir := createTempTestDir(t, "convert-cwd-nil-test-*")
+
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Test with nil slice
+	var nilFiles []FileItem
+	result := fm.ConvertToAbsolutePathsCWD(nilFiles)
+
+	if result == nil {
+		t.Error("Expected non-nil slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Errorf("Expected empty slice, got length: %d", len(result))
+	}
+}
+
+func TestConvertToAbsolutePathsCWD_DoesNotModifyOriginal(t *testing.T) {
+	// Create temporary CWD with test file
+	tempCwd := createTempTestDir(t, "convert-cwd-immutable-test-*")
+	createTestFile(t, tempCwd, "test.md", "# Test")
+
+	// Change to temp CWD
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current directory: %v", err)
+	}
+	defer os.Chdir(originalCwd)
+
+	if err := os.Chdir(tempCwd); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	// Create FileManager
+	storageDir := createTempTestDir(t, "storage-*")
+	logger, _ := logging.NewTestLogger()
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("NewFileManager failed: %v", err)
+	}
+
+	// Get original files
+	originalFiles, err := fm.ScanCurrDirectory()
+	if err != nil {
+		t.Fatalf("ScanCurrDirectory failed: %v", err)
+	}
+
+	// Store original paths for comparison
+	originalPaths := make([]string, len(originalFiles))
+	for i, file := range originalFiles {
+		originalPaths[i] = file.Path
+	}
+
+	// Convert to absolute paths
+	_ = fm.ConvertToAbsolutePathsCWD(originalFiles)
+
+	// Verify original slice was not modified
+	for i, file := range originalFiles {
+		if file.Path != originalPaths[i] {
+			t.Errorf("Original slice was modified at index %d: expected %s, got %s", i, originalPaths[i], file.Path)
+		}
+	}
+}

@@ -200,3 +200,53 @@ func (fm *FileManager) GetAbsolutePathCWD(item FileItem) string {
 	cwd, _ := os.Getwd()
 	return filepath.Join(cwd, item.Path)
 }
+
+// ConvertToAbsolutePaths converts a slice of FileItems with relative paths to absolute paths
+// for the storage directory. This is needed for FilePicker which requires absolute paths for file reading.
+//
+// Parameters:
+//   - items: List of FileItems with paths relative to storage directory
+//
+// Returns:
+//   - []FileItem: New slice with absolute paths for storage directory
+//
+// Note: This creates a new slice and does not modify the original items.
+func (fm *FileManager) ConvertToAbsolutePaths(items []FileItem) []FileItem {
+	if len(items) == 0 {
+		return []FileItem{}
+	}
+
+	result := make([]FileItem, len(items))
+	for i, item := range items {
+		result[i] = FileItem{
+			Name: item.Name,
+			Path: fm.GetAbsolutePath(item),
+		}
+	}
+	return result
+}
+
+// ConvertToAbsolutePathsCWD converts a slice of FileItems with relative paths to absolute paths
+// for the current working directory. This is needed for FilePicker which requires absolute paths for file reading.
+//
+// Parameters:
+//   - items: List of FileItems with paths relative to current working directory
+//
+// Returns:
+//   - []FileItem: New slice with absolute paths for current working directory
+//
+// Note: This creates a new slice and does not modify the original items.
+func (fm *FileManager) ConvertToAbsolutePathsCWD(items []FileItem) []FileItem {
+	if len(items) == 0 {
+		return []FileItem{}
+	}
+
+	result := make([]FileItem, len(items))
+	for i, item := range items {
+		result[i] = FileItem{
+			Name: item.Name,
+			Path: fm.GetAbsolutePathCWD(item),
+		}
+	}
+	return result
+}

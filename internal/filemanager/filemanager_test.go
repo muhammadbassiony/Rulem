@@ -1029,6 +1029,90 @@ func TestCreateSymlinkFromStorageValidation(t *testing.T) {
 	}
 }
 
+// Test for broken symlink detection in CopyFileFromStorage
+func TestCopyFileFromStorage_BrokenSymlinkDetection(t *testing.T) {
+	logger := createTestLogger()
+	storageDir := createTempStorage(t)
+	defer os.RemoveAll(storageDir)
+
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("Failed to create FileManager: %v", err)
+	}
+
+	// Create test content in storage
+	testContent := "# Test content for broken symlink copy test"
+	storageFilePath := createTestFile(t, storageDir, "copy-source.md", testContent)
+
+	// Create a temporary working directory
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current directory: %v", err)
+	}
+	tempCwd := createTempStorage(t)
+	defer os.RemoveAll(tempCwd)
+	defer os.Chdir(originalCwd)
+
+	if err := os.Chdir(tempCwd); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	t.Run("detects broken symlink without overwrite", func(t *testing.T) {
+		// Create a broken symlink (pointing to non-existent target)
+		brokenLinkPath := filepath.Join(tempCwd, "broken-copy.md")
+		if err := os.Symlink("nonexistent-copy-target.md", brokenLinkPath); err != nil {
+			t.Fatalf("Failed to create broken symlink: %v", err)
+		}
+
+		// Verify the symlink exists but points to nothing
+		if _, err := os.Lstat(brokenLinkPath); err != nil {
+			t.Fatalf("Broken symlink should exist as a symlink: %v", err)
+		}
+		if _, err := os.Stat(brokenLinkPath); err == nil {
+			t.Fatal("Broken symlink should not resolve to a valid target")
+		}
+
+		// Try to copy file without overwrite - should fail
+		_, err := fm.CopyFileFromStorage(storageFilePath, "broken-copy.md", false)
+		if err == nil {
+			t.Error("Expected error when copying over broken symlink without overwrite")
+		}
+
+		if !strings.Contains(err.Error(), "already exists") {
+			t.Errorf("Expected 'already exists' error, got: %v", err)
+		}
+	})
+
+	t.Run("overwrites broken symlink with overwrite=true", func(t *testing.T) {
+		// Create another broken symlink
+		brokenLinkPath := filepath.Join(tempCwd, "broken-copy2.md")
+		if err := os.Symlink("another-nonexistent-copy-target.md", brokenLinkPath); err != nil {
+			t.Fatalf("Failed to create broken symlink: %v", err)
+		}
+
+		// Copy file with overwrite - should succeed
+		resultPath, err := fm.CopyFileFromStorage(storageFilePath, "broken-copy2.md", true)
+		if err != nil {
+			t.Fatalf("CopyFileFromStorage with overwrite should succeed: %v", err)
+		}
+
+		// Verify new file content
+		content := readFileContent(t, resultPath)
+		if content != testContent {
+			t.Errorf("Content mismatch. Expected %q, got %q", testContent, content)
+		}
+
+		// Verify it's no longer a symlink
+		isLink, err := fileops.IsSymlink(resultPath)
+		if err != nil {
+			t.Fatalf("Failed to check if path is symlink: %v", err)
+		}
+		if isLink {
+			t.Error("Result should not be a symlink after copy")
+		}
+	})
+}
+
 // Tests for GetAbsolutePath and GetAbsolutePathCWD methods
 
 func TestGetAbsolutePath(t *testing.T) {
@@ -1110,6 +1194,90 @@ func TestGetAbsolutePathCWD(t *testing.T) {
 	if actualNested != expectedNested {
 		t.Errorf("GetAbsolutePathCWD() nested = %q, want %q", actualNested, expectedNested)
 	}
+}
+
+// Test for broken symlink detection and overwrite behavior
+func TestCreateSymlinkFromStorage_BrokenSymlinkDetection(t *testing.T) {
+	logger := createTestLogger()
+	storageDir := createTempStorage(t)
+	defer os.RemoveAll(storageDir)
+
+	fm, err := NewFileManager(storageDir, logger)
+	if err != nil {
+		t.Fatalf("Failed to create FileManager: %v", err)
+	}
+
+	// Create test content in storage
+	testContent := "# Test content for broken symlink test"
+	storageFilePath := createTestFile(t, storageDir, "test-source.md", testContent)
+
+	// Create a temporary working directory
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current directory: %v", err)
+	}
+	tempCwd := createTempStorage(t)
+	defer os.RemoveAll(tempCwd)
+	defer os.Chdir(originalCwd)
+
+	if err := os.Chdir(tempCwd); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	t.Run("detects broken symlink without overwrite", func(t *testing.T) {
+		// Create a broken symlink (pointing to non-existent target)
+		brokenLinkPath := filepath.Join(tempCwd, "broken-link.md")
+		if err := os.Symlink("nonexistent-target.md", brokenLinkPath); err != nil {
+			t.Fatalf("Failed to create broken symlink: %v", err)
+		}
+
+		// Verify the symlink exists but points to nothing
+		if _, err := os.Lstat(brokenLinkPath); err != nil {
+			t.Fatalf("Broken symlink should exist as a symlink: %v", err)
+		}
+		if _, err := os.Stat(brokenLinkPath); err == nil {
+			t.Fatal("Broken symlink should not resolve to a valid target")
+		}
+
+		// Try to create symlink without overwrite - should fail
+		_, err := fm.CreateSymlinkFromStorage(storageFilePath, "broken-link.md", false)
+		if err == nil {
+			t.Error("Expected error when creating symlink over broken symlink without overwrite")
+		}
+
+		if !strings.Contains(err.Error(), "already exists") {
+			t.Errorf("Expected 'already exists' error, got: %v", err)
+		}
+	})
+
+	t.Run("overwrites broken symlink with overwrite=true", func(t *testing.T) {
+		// Create another broken symlink
+		brokenLinkPath := filepath.Join(tempCwd, "broken-link2.md")
+		if err := os.Symlink("another-nonexistent-target.md", brokenLinkPath); err != nil {
+			t.Fatalf("Failed to create broken symlink: %v", err)
+		}
+
+		// Create symlink with overwrite - should succeed
+		resultPath, err := fm.CreateSymlinkFromStorage(storageFilePath, "broken-link2.md", true)
+		if err != nil {
+			t.Fatalf("CreateSymlinkFromStorage with overwrite should succeed: %v", err)
+		}
+
+		// Verify new symlink works
+		content := readFileContent(t, resultPath)
+		if content != testContent {
+			t.Errorf("Content mismatch. Expected %q, got %q", testContent, content)
+		}
+
+		// Verify it's actually a symlink
+		isLink, err := fileops.IsSymlink(resultPath)
+		if err != nil {
+			t.Fatalf("Failed to check if path is symlink: %v", err)
+		}
+		if !isLink {
+			t.Error("Result should be a symlink")
+		}
+	})
 }
 
 // 6. Cross-function Integration Tests

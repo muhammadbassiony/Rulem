@@ -159,7 +159,8 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FileScanCompleteMsg:
 		m.logger.Debug("Save rules model - File scan completed", "files_count", len(message.Files))
-		m.markdownFiles = message.Files
+		// Convert relative paths from ScanCurrDirectory to absolute paths for FilePicker
+		m.markdownFiles = m.fileManager.ConvertToAbsolutePathsCWD(message.Files)
 		m.state = StateFileSelection
 		m.err = nil
 

@@ -1405,3 +1405,134 @@ func TestImportRulesModel_RelativeToAbsoluteConversion(t *testing.T) {
 		}
 	}
 }
+
+// TestImportRulesModel_BrokenSymlinkOverwrite tests the scenario where a broken symlink
+// exists at the destination and should trigger overwrite confirmation
+func TestImportRulesModel_BrokenSymlinkOverwrite(t *testing.T) {
+	// Create storage directory with test files
+	storageDir := createTestStorageDir(t)
+
+	// Create test file in storage
+	testContent := "# Test Rule for Broken Symlink\nThis is a test rule file."
+	testFile := filepath.Join(storageDir, "test-rule.md")
+	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Create working directory and change to it first
+	workDir := createTestStorageDir(t)
+
+	// Save original working directory
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	// Change to work directory BEFORE creating symlink
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("Failed to change to work directory: %v", err)
+	}
+
+	// Create a broken symlink at destination (relative to working directory)
+	if err := os.Symlink("nonexistent-target.md", "GEMINI.md"); err != nil {
+		t.Fatalf("Failed to create broken symlink: %v", err)
+	}
+
+	// Verify broken symlink exists
+	if _, err := os.Lstat("GEMINI.md"); err != nil {
+		t.Fatalf("Broken symlink should exist: %v", err)
+	}
+	if _, err := os.Stat("GEMINI.md"); err == nil {
+		t.Fatal("Broken symlink should not resolve to valid target")
+	}
+
+	// Create model with custom context that doesn't change directories
+	ctx := helpers.UIContext{
+		Width:  80,
+		Height: 24,
+		Config: &config.Config{
+			StorageDir: storageDir,
+		},
+		Logger: createTestLogger(),
+	}
+	model := NewImportRulesModel(ctx)
+
+	// Set up the model state as if user selected file, editor, and import mode
+	model.selectedFile = filemanager.FileItem{
+		Name: "test-rule.md",
+		Path: testFile, // Absolute path (as it would be after ConvertToAbsolutePaths)
+	}
+	// Find Gemini CLI editor which generates GEMINI.md
+	var geminiEditor editors.EditorRuleConfig
+	for _, editor := range editors.GetAllEditorRuleConfigs() {
+		if editor.NewName == "GEMINI.md" {
+			geminiEditor = editor
+			break
+		}
+	}
+	if geminiEditor.Name == "" {
+		t.Fatal("Could not find Gemini CLI editor configuration")
+	}
+	model.selectedEditor = geminiEditor
+	model.selectedImportMode = CopyMode{
+		title:       "Link file",
+		description: "Create symbolic link",
+		copyMode:    CopyModeOptionLink,
+	}
+
+	// Try to import without overwrite (first attempt)
+	cmd := model.saveFileCmd(false)
+	if cmd == nil {
+		t.Fatal("Command should not be nil")
+	}
+
+	// Execute the command
+	msg := cmd()
+	errorMsg, ok := msg.(ImportFileErrorMsg)
+	if !ok {
+		t.Fatalf("Expected ImportFileErrorMsg for broken symlink conflict, got %T", msg)
+	}
+
+	// Should be detected as overwrite error
+	if !errorMsg.IsOverwriteError {
+		t.Error("Should be detected as overwrite error for broken symlink")
+	}
+
+	if !strings.Contains(errorMsg.Err.Error(), "already exists") {
+		t.Errorf("Expected 'already exists' error, got: %v", errorMsg.Err)
+	}
+
+	// Now try with overwrite enabled
+	cmdOverwrite := model.saveFileCmd(true)
+	if cmdOverwrite == nil {
+		t.Fatal("Overwrite command should not be nil")
+	}
+
+	// Execute overwrite command
+	msgOverwrite := cmdOverwrite()
+	successMsg, ok := msgOverwrite.(ImportFileCompleteMsg)
+	if !ok {
+		t.Fatalf("Expected ImportFileCompleteMsg for successful overwrite, got %T: %v", msgOverwrite, msgOverwrite)
+	}
+
+	// Verify success
+	if successMsg.DestPath == "" {
+		t.Error("Success message should have destination path")
+	}
+
+	// Verify the broken symlink was replaced with a working symlink
+	if _, err := os.Stat("GEMINI.md"); err != nil {
+		t.Errorf("New symlink should be accessible: %v", err)
+	}
+
+	// Verify content can be read through new symlink
+	content, err := os.ReadFile("GEMINI.md")
+	if err != nil {
+		t.Errorf("Failed to read through new symlink: %v", err)
+	}
+
+	if string(content) != testContent {
+		t.Errorf("Content mismatch through symlink: expected %q, got %q", testContent, string(content))
+	}
+}

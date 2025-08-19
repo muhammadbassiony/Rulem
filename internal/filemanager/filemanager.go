@@ -106,8 +106,8 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 	// Construct destination path
 	destPath := filepath.Join(fm.storageDir, fileName)
 
-	// Check if destination exists
-	if _, err := os.Stat(destPath); err == nil {
+	// Check if destination exists (use Lstat to detect symlinks, even broken ones)
+	if _, err := os.Lstat(destPath); err == nil {
 		if !overwrite {
 			return "", fmt.Errorf("destination file already exists: %s (use overwrite=true to replace)", fileName)
 		}
@@ -187,8 +187,8 @@ func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, 
 		return "", fmt.Errorf("cannot create destination directory: %w", err)
 	}
 
-	// Check if destination exists
-	if _, err := os.Stat(absDestPath); err == nil {
+	// Check if destination exists (use Lstat to detect symlinks, even broken ones)
+	if _, err := os.Lstat(absDestPath); err == nil {
 		if !overwrite {
 			return "", fmt.Errorf("destination file already exists: %s (use overwrite=true to replace)", destPath)
 		}
@@ -262,8 +262,8 @@ func (fm *FileManager) CreateSymlinkFromStorage(storagePath string, destPath str
 		return "", fmt.Errorf("cannot create destination directory: %w", err)
 	}
 
-	// Check if destination exists
-	if _, err := os.Stat(absDestPath); err == nil {
+	// Check if destination exists (use Lstat to detect symlinks, even broken ones)
+	if _, err := os.Lstat(absDestPath); err == nil {
 		if !overwrite {
 			return "", fmt.Errorf("destination file already exists: %s (use overwrite=true to replace)", destPath)
 		}

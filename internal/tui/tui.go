@@ -5,6 +5,7 @@ import (
 	"rulem/internal/logging"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
+	"rulem/internal/tui/importrulesmenu"
 	saverulesmodel "rulem/internal/tui/saverulesmodel"
 	settingsmenu "rulem/internal/tui/settingsmenu"
 
@@ -25,7 +26,6 @@ const (
 	StateMigration
 	StateSaveRules
 	StateImportCopy
-	StateImportLink
 	StateFetchGithub
 )
 
@@ -97,13 +97,8 @@ func NewMainModel(cfg *config.Config, logger *logging.AppLogger) *MainModel {
 		},
 		item{
 			title:       "📄  Import rules (Copy)",
-			description: "Import a rule file from the central rules repository, to the current directory.\nThis will copy the file to the current directory. \nAny changes made to the file in the current directory will NOT be reflected in the central rules repository.",
+			description: "Import a rule file from the central rules repository, to the current directory.\nYou will have the option to either copy or link the rules file. \nYou can also select your AI assistant or IDE or CLI coding tool so we can customize the file for you.",
 			state:       StateImportCopy,
-		},
-		item{
-			title:       "🔗  Import rules (Link)",
-			description: "Import a rule file from the central rules repository, to the current directory.\nThis will create a symlink to the file in the current directory. \nAny changes made to the file in the current directory WILL be reflected in the central rules repository, and vice versa.",
-			state:       StateImportLink,
 		},
 		item{
 			title:       "⬇️  Fetch rules from Github",
@@ -146,6 +141,7 @@ func (m *MainModel) Init() tea.Cmd {
 	m.logger.Info("MainModel initialized")
 	return nil
 }
+
 func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -247,7 +243,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case StateSettings, StateSaveRules, StateImportCopy, StateImportLink, StateFetchGithub:
+		case StateSettings, StateSaveRules, StateImportCopy, StateFetchGithub:
 			// Delegate all messages to active model - they handle their own navigation
 			if m.activeModel != nil {
 				updatedModel, modelCmd := m.activeModel.Update(msg)
@@ -392,16 +388,8 @@ func (m *MainModel) getOrInitializeModel(state AppState) MenuItemModel {
 		return saverulesmodel.NewSaveRulesModel(ctx)
 
 	case StateImportCopy:
-		// TODO: Initialize import copy model when implemented
-		// return NewImportCopyModel(ctx)
-		m.logger.Debug("Import copy model not yet implemented")
-		return nil
-
-	case StateImportLink:
-		// TODO: Initialize import link model when implemented
-		// return NewImportLinkModel(ctx)
-		m.logger.Debug("Import link model not yet implemented")
-		return nil
+		m.logger.Debug("Creating fresh import rules model")
+		return importrulesmenu.NewImportRulesModel(ctx)
 
 	case StateFetchGithub:
 		// TODO: Initialize fetch github model when implemented

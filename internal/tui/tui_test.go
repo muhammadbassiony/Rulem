@@ -179,10 +179,10 @@ func TestGetOrInitializeModel(t *testing.T) {
 		t.Error("Save rules model should be initialized")
 	}
 
-	// Test unimplemented model
+	// Test implemented model
 	importCopyModel := model.getOrInitializeModel(StateImportCopy)
-	if importCopyModel != nil {
-		t.Error("Import copy model should be nil (not implemented)")
+	if importCopyModel == nil {
+		t.Error("Import copy model should be created")
 	}
 }
 
@@ -205,10 +205,10 @@ func TestFreshModelGeneration(t *testing.T) {
 		t.Error("Save rules model should be created")
 	}
 
-	// Test unimplemented models return nil
+	// Test implemented model
 	importCopyModel := model.getOrInitializeModel(StateImportCopy)
-	if importCopyModel != nil {
-		t.Error("Import copy model should be nil (not implemented)")
+	if importCopyModel == nil {
+		t.Error("Import copy model should be created")
 	}
 }
 

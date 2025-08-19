@@ -38,12 +38,6 @@ type (
 		Err error
 	}
 
-	StartSaveFileMsg struct {
-		FilePath    string
-		NewFileName *string
-		Overwrite   bool
-	}
-
 	SaveFileCompleteMsg struct {
 		DestPath string
 	}
@@ -476,14 +470,10 @@ func (m *SaveRulesModel) optionalNewNamePtr() *string {
 func (m SaveRulesModel) scanForFilesCmd() tea.Cmd {
 	m.logger.Debug("File scan started")
 	return func() tea.Msg {
-		files, err := filemanager.ScanCurrDirectory()
+		files, err := m.fileManager.ScanCurrDirectory()
 		if err != nil {
 			return FileScanErrorMsg{Err: err}
 		}
-		// // TODO why is this an error? should handle as an empty list? - handle in filepicker by adding an empty state?
-		// if len(files) == 0 {
-		// 	return FileScanErrorMsg{Err: fmt.Errorf("no markdown files found in current directory")}
-		// }
 		return FileScanCompleteMsg{Files: files}
 	}
 }

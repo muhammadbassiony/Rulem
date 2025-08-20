@@ -165,7 +165,9 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 
 		// Build FilePicker once files are available
-		ctx := helpers.NewUIContext(m.layout.ContentWidth(), m.layout.ContentHeight(), nil, m.logger)
+		// Use reasonable default dimensions since we don't have actual terminal size yet
+		// The FilePicker will be updated with correct dimensions when WindowSizeMsg is received
+		ctx := helpers.NewUIContext(100, 30, nil, m.logger)
 		fp := filepicker.NewFilePicker(
 			"💾 Save Rules File",
 			"Select a markdown file to save to your central rules repository (press Enter). \nUse / to filter, arrows to navigate, g to toggle formatting.",

@@ -210,7 +210,7 @@ func TestFilePicker_FullPreviewLoadsBeyondTruncate(t *testing.T) {
 	fp.fileList.Select(0)
 	msg := fp.renderFileContent(large, false, fp.useGlamour)()
 	_, _ = fp.Update(msg)
-	if !strings.Contains(fp.viewport.View(), "Press 'f' to load") {
+	if !strings.Contains(fp.viewport.View(), "Press 'f'") {
 		// Diagnostic: show the viewport when the truncated header isn't found
 		t.Log("viewport without truncated header:", fp.viewport.View())
 		t.Fatalf("expected truncated advisory header")

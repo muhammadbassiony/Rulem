@@ -316,25 +316,52 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		fp.windowHeight = msg.Height
 		fp.help.Width = msg.Width
 
-		// Compute frame sizes from the final pane style to avoid clipping.
+		// Compute frame sizes and padding from the pane style to avoid clipping.
 		frameW, frameH := styles.PaneStyle.GetFrameSize()
-		// Total horizontal extras for two panes (frame only) = 2 * frameW
-		totalExtras := frameW * 2
 
-		// Account for a small left margin for the main panes container
-		// to align with help and title/subtitle
-		const mainLeftMargin = 1
-		avail := max(msg.Width-totalExtras-mainLeftMargin, 0)
+		// Account for all horizontal styling layers:
+		// 1. MainContainerStyle margin (applied in View())
+		// 2. Pane borders (2 panes × 2 borders each)
+		// 3. Pane padding (2 panes × (left + right) padding)
+		mainContainerMargin := 1       // MainContainerStyle.MarginLeft
+		totalBorders := frameW * 2 * 2 // 2 panes × 2 borders each
+		totalPadding := (2 + 1) * 2    // (left + right) padding × 2 panes
 
-		// Content widths
+		// Total horizontal extras = container margin + borders + padding
+		totalExtras := mainContainerMargin + totalBorders + totalPadding
+
+		// Available width for content after accounting for all styling
+		avail := max(msg.Width-totalExtras, 0)
+
+		// Content widths: list gets 1/3, preview gets 2/3
 		listWidth := avail / 3
 		vpWidth := avail - listWidth
 
+		// Minimum width constraints
 		if listWidth < 20 {
 			listWidth = 20
 		}
 		if vpWidth < 30 {
 			vpWidth = 30
+		}
+
+		// Ensure total width doesn't exceed available space
+		totalRequested := listWidth + vpWidth
+		if totalRequested > avail {
+			// Scale down proportionally if needed
+			scale := float64(avail) / float64(totalRequested)
+			listWidth = int(float64(listWidth) * scale)
+			vpWidth = int(float64(vpWidth) * scale)
+
+			// Reapply minimum constraints after scaling
+			if listWidth < 20 {
+				listWidth = 20
+				vpWidth = avail - listWidth
+			}
+			if vpWidth < 30 {
+				vpWidth = 30
+				listWidth = avail - vpWidth
+			}
 		}
 
 		// Calculate dynamic heights: header (title+subtitle) and help.
@@ -357,7 +384,7 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		fp.viewport.Width = vpWidth
 		fp.viewport.Height = contentHeight
 
-		fp.logger.Debug("Window resized", "width", msg.Width, "height", msg.Height, "list_width", listWidth, "viewport_width", vpWidth)
+		fp.logger.Debug("Window resized", "width", msg.Width, "height", msg.Height, "list_width", listWidth, "viewport_width", vpWidth, "total_extras", totalExtras, "avail", avail)
 		return fp, nil
 
 	case tea.MouseMsg:
@@ -520,6 +547,18 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, vcmd)
 				}
 				return fp, tea.Batch(cmds...)
+			}
+		}
+
+		// Handle other keys when focus is on preview (don't let them fall through to list)
+		if fp.focusPane == focusPreview {
+			switch msg.String() {
+			case "enter", "q", "esc", "f", "g", "/":
+				// These keys should work regardless of focus
+				break
+			default:
+				// For preview focus, consume other keys to prevent double handling
+				return fp, nil
 			}
 		}
 

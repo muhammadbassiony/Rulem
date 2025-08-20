@@ -125,13 +125,16 @@ func TestWindowResize_HeightsMatchAndWidthsSum(t *testing.T) {
 		t.Fatalf("list and viewport heights do not match: %d vs %d", fp.fileList.Height(), fp.viewport.Height)
 	}
 
-	// Widths should approximately sum to available width minus frames and left margin
+	// Widths should sum to available width after accounting for all styling layers
 	frameW, _ := styles.PaneStyle.GetFrameSize()
-	const mainLeftMargin = 1
-	avail := msg.Width - (2 * frameW) - mainLeftMargin
+	mainContainerMargin := 1       // MainContainerStyle.MarginLeft
+	totalBorders := frameW * 2 * 2 // 2 panes × 2 borders each
+	totalPadding := (2 + 1) * 2    // (left + right) padding × 2 panes
+	totalExtras := mainContainerMargin + totalBorders + totalPadding
+	avail := msg.Width - totalExtras
 	sum := fp.fileList.Width() + fp.viewport.Width
 	if sum != avail {
-		t.Fatalf("expected widths sum %d, got %d (list=%d, vp=%d, frameW=%d)", avail, sum, fp.fileList.Width(), fp.viewport.Width, frameW)
+		t.Fatalf("expected widths sum %d, got %d (list=%d, vp=%d, totalExtras=%d)", avail, sum, fp.fileList.Width(), fp.viewport.Width, totalExtras)
 	}
 
 	// Header should still render
@@ -454,10 +457,13 @@ func TestHeaderAndHelpMeasurementMatchesView(t *testing.T) {
 	_, _ = fp.Update(tea.WindowSizeMsg{Width: w, Height: h})
 
 	frameW, frameH := styles.PaneStyle.GetFrameSize()
-	const mainLeftMargin = 1
-	availW := w - (2 * frameW) - mainLeftMargin
+	mainContainerMargin := 1       // MainContainerStyle.MarginLeft
+	totalBorders := frameW * 2 * 2 // 2 panes × 2 borders each
+	totalPadding := (2 + 1) * 2    // (left + right) padding × 2 panes
+	totalExtras := mainContainerMargin + totalBorders + totalPadding
+	availW := w - totalExtras
 	if fp.fileList.Width()+fp.viewport.Width != availW {
-		t.Fatalf("width allocation mismatch: list+vp=%d expected=%d", fp.fileList.Width()+fp.viewport.Width, availW)
+		t.Fatalf("width allocation mismatch: list+vp=%d expected=%d (totalExtras=%d)", fp.fileList.Width()+fp.viewport.Width, availW, totalExtras)
 	}
 
 	contentH := h - headerH - helpH - frameH

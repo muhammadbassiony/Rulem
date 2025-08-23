@@ -28,6 +28,11 @@ jobs:
         with:
           go-version: "1.24"
 
+      - name: Setup Snapcraft
+        run: |
+          sudo snap install snapcraft --classic
+          sudo snap install multipass
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -35,5 +40,5 @@ jobs:
           version: "~> v2"
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}

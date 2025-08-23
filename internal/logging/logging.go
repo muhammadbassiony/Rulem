@@ -1,3 +1,33 @@
+// Package logging provides structured logging for the rulem application.
+//
+// This package wraps the Charm bracelet log library to provide consistent,
+// structured logging throughout the application. It supports multiple log levels,
+// key-value pair metadata, and integration with the Bubble Tea TUI framework.
+//
+// Key features:
+//   - Structured logging with key-value pairs for better debugging
+//   - Multiple log levels (Debug, Info, Warn, Error)
+//   - Singleton pattern for easy access across the application
+//   - Bubble Tea integration for logging UI events and state changes
+//   - User action tracking for analytics and debugging
+//   - Configurable output formatting and destinations
+//
+// The AppLogger struct is the main logging interface, providing methods for:
+//   - Standard log levels with structured metadata
+//   - User action logging for tracking user interactions
+//   - State transition logging for TUI debugging
+//   - Message logging for Bubble Tea event tracking
+//
+// Usage patterns:
+//   - Use package-level functions for simple logging: logging.Info("message")
+//   - Use AppLogger instance for more control: logger.Info("message", "key", "value")
+//   - Include relevant context in key-value pairs for better debugging
+//
+// Log levels:
+//   - Debug: Detailed debugging information (disabled in production)
+//   - Info: General information about application flow
+//   - Warn: Warning conditions that don't prevent operation
+//   - Error: Error conditions that may impact functionality
 package logging
 
 import (

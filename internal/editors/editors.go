@@ -1,3 +1,31 @@
+// Package editors provides configuration and utilities for managing AI assistant and editor rule files.
+//
+// This package contains the definitions and configurations for various AI assistants
+// and code editors that rulem supports. It defines how rule files should be named,
+// where they should be placed, and how they should be transformed for different tools.
+//
+// Key components:
+//   - EditorRuleConfig: Configuration for each supported editor/assistant
+//   - RenameOption: Enumeration of file renaming strategies
+//   - EditorRuleConfigs: Registry of all supported editors and assistants
+//
+// Supported editors and assistants:
+//   - GitHub Copilot (Both general rules and custom instructions)
+//   - Cursor
+//   - Claude code
+//   - Gemini CLI
+//   - Opencode
+//   - And more as the registry grows
+//
+// Each configuration specifies:
+//   - The display name and description
+//   - The target file path for the rule file
+//   - How the file should be renamed (prefix, suffix, or full rename)
+//   - The new name to use for the transformation
+//
+// This package serves as the central registry for supported tools and provides
+// the mapping between user-friendly names and the technical file specifications
+// required by each AI assistant or editor.
 package editors
 
 type RenameOption int

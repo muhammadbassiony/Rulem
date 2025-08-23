@@ -1,125 +1,141 @@
-# rulem: AI Assistant Instruction Manager CLI
+# rulem: AI Assistant Instruction Manager
 
-rulem is a command-line tool for managing and organizing rule files on your machine. It provides a robust TUI (Terminal User Interface) for browsing, editing, and moving rule files between different environments and formats with ease.
+[![Release](https://img.shields.io/github/v/release/muhammadbassiony/rulem)](https://github.com/muhammadbassiony/rulem/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A command-line tool for managing and organizing AI assistant instruction files across different environments and formats. Built with Go and featuring a modern terminal user interface.
+
+## Table of Contents
+
+- [Motivation & Use Cases](#motivation--use-cases)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+  - [Supported AI Assistants](#supported-ai-assistants)
+- [Development](#development)
+  - [Prerequisites](#prerequisites)
+  - [Common Commands](#common-commands)
+  - [Project Structure](#project-structure)
+- [Contributing](#contributing)
+
+## Motivation & Use Cases
+
+My main motivations for creating `rulem` are:
+- **Inter-Tool/IDE Compatibility**: Easily switch between different AI tools and IDEs such as GitHub Copilot, Cursor, and Claude
+- **Centralized Management**: Store all instruction files in one organized location
+- **Reusability**: Reuse and adapt instructions across multiple projects without duplication, rulem also supports symlinking to keep files up to date as you constantly improve them.
+- **Version Control**: Having a single source of truth for instruction files that can be tracked with version control systems.
+- Experimentation & adpoting more AI powered development
 
 ## Features
 
-- Browse and select instruction files with a modern TUI (Bubble Tea, Lipgloss)
-- Migrate files between different AI assistants and formats
-- Copy or symlink files to target locations
-- Edit instruction files in your preferred terminal editor
-- Validate Markdown files for required structure/schema
-- Prevent accidental overwrites with confirmation prompts
-- Supports default and custom storage locations
-- Extensible for new assistants and formats
-- Comprehensive unit tests for all core logic and UI
+- Modern terminal user interface built with Bubble Tea
+- Cross-platform support (macOS, Linux, Windows)
+- Secure file operations with validation
+- Copy and symlink support for file management
+- Extensible architecture for new AI assistants
 
 ## Installation
 
-### Via Homebrew (macOS)
-```sh
-# Replace 'yourusername' with actual GitHub username
-brew tap yourusername/rulem
+### Homebrew (macOS)
+```bash
+brew tap muhammadbassiony/rulem
 brew install rulem
 ```
 
-### Via Snap (Linux)
-```sh
+### Snap (Linux)
+```bash
 sudo snap install rulem
 ```
 
-### Download Binary (Alternative)
-Download the latest binary for your platform from [GitHub Releases](https://github.com/yourusername/rulem/releases/latest)
-
-> **Note**: Replace `yourusername` with the actual GitHub username in all URLs above
+### Binary Download
+Download the latest binary from [GitHub Releases](https://github.com/muhammadbassiony/rulem/releases/latest)
 
 ### Build from Source
-If you have Go 1.24+ installed:
-```sh
-git clone https://github.com/yourusername/rulem.git
+```bash
+git clone https://github.com/muhammadbassiony/rulem.git
 cd rulem
 go build -o rulem ./cmd/rulem
 ```
 
-### Verify Installation
-```sh
-rulem --version
-```
+## Quick Start
 
-### Prerequisites
-- (Optional) $EDITOR environment variable set for editing files
+1. **First Run**: Launch rulem and complete the setup wizard
+   ```bash
+   rulem
+   ```
 
-## Usage
+2. **Save Instructions**: Store your instruction files in the central repository
+   - Navigate to "Save rules file"
+   - Select your instruction file
+   - Choose the appropriate AI assistant type
 
-```sh
-./rulem
-```
+3. **Import to Project**: Apply instructions to a new project
+   - Navigate to "Import rules (Copy)"
+   - Select the instruction file
+   - Choose copy or symlink mode
 
-- Use arrow keys to navigate the file viewer
-- Press <space> to select files for migration
-- Choose between copy or symlink when prompted
-- Select the target AI assistant/format
-- Edit files in your terminal editor as needed
-- Follow on-screen prompts for validation and error handling
+4. **Configure Settings**: Customize storage locations and preferences
+   - Navigate to "Update settings"
+   - Modify configuration as needed
+
 
 ## Configuration
 
-- Configuration is stored in YAML (default: `~/.config/rulem/config.yaml`)
-- Set or update storage locations for rule files
-- Supports both default and custom locations for each assistant
+Configuration is stored in `~/.config/rulem/config.yaml`:
 
-## Supported AI Assistants
+```yaml
+storage_dir: "/Users/username/.rulem"
+version: "1.0"
+init_time: 1640995200
+```
 
-- GitHub Copilot
+for now it only contains the location of the storage directory, but more settings will be added in the future.
+
+### Supported AI Assistants
+
+- GitHub Copilot (both general and custom instructions)
 - Cursor
-- Claude
-- Gemini-CLI
+- Claude code
+- Gemini CLI
 - Opencode
-- (Easily extensible for more)
 
-## Local Development
-
-This project uses [Taskfile](https://taskfile.dev/) for common development workflows. Taskfile provides a simple, cross-platform way to run build, test, lint, and other commands without Make.
+## Development
 
 ### Prerequisites
-- [Go 1.21+](https://go.dev/doc/install)
-- [Task](https://taskfile.dev/installation/) (install with `brew install go-task/tap/go-task` or see Taskfile docs)
+- Go 1.24+
+- [Task](https://taskfile.dev/) (optional, for development tasks)
 
 ### Common Commands
 
-All commands below are run from the project root:
+```bash
+# Development workflow
+go mod tidy          # Install dependencies
+go build ./cmd/rulem # Build binary
+go test ./...        # Run tests
+go run ./cmd/rulem   # Run from source
 
-| Command                | Description                                 |
-|------------------------|---------------------------------------------|
-| `task build`           | Build the rulem CLI binary                  |
-| `task run`             | Run the CLI interactively                   |
-| `task test`            | Run all unit tests                          |
-| `task lint`            | Lint the codebase with golangci-lint        |
-| `task tidy`            | Clean up go.mod and go.sum                  |
-| `task clean`           | Remove built binaries and temp files        |
-| `task dev`             | Build, lint, and test in sequence           |
+# With Task (recommended)
+task build           # Build binary
+task test            # Run tests
+task lint            # Run linters
+```
 
-#### Example Workflow
+### Project Structure
 
-1. Install dependencies: `go mod tidy`
-2. Build the CLI: `task build`
-3. Run tests: `task test`
-4. Lint the code: `task lint`
-5. Run the CLI: `task run`
-6. Clean up: `task clean`
-
-See `Taskfile.yml` for all available tasks and details.
+```
+rulem/
+├── cmd/rulem/           # CLI entry point
+├── internal/
+│   ├── config/         # Configuration management
+│   ├── filemanager/    # File operations
+│   ├── logging/        # Logging system
+│   └── tui/            # Terminal UI components
+├── pkg/fileops/        # Core file operations
+└── tasks/              # Development documentation
+```
 
 ## Contributing
 
-Contributions are welcome! Please open issues or pull requests for bug fixes, new features, or improvements.
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
-
-## Acknowledgements
-
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) for TUI
-- [Lipgloss](https://github.com/charmbracelet/lipgloss) for styling
-- Inspired by the needs of multi-assistant power users
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.

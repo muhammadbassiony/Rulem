@@ -1,95 +1,90 @@
 # Architecture Overview: rulem
 
-This document describes the architecture, design decisions, and extensibility model for the rulem CLI tool.
+## Overview
+
+rulem is built as a modular Go application following clean architecture principles. It uses a Terminal User Interface (TUI) built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss) for styling, providing an interactive way to manage AI assistant rule files.
 
 ## 1. High-Level Architecture
 
-rulem is organized as a modular Go application with a clear separation of concerns:
+### Directory Structure
 
-- **cmd/rulem/**: CLI entry point, argument parsing, and main loop
-- **internal/config/**: Configuration management (YAML/JSON), storage location logic
-- **internal/ui/**: Terminal UI (TUI) components using Bubble Tea and Lipgloss
-- **internal/core/**: Core migration, symlink, and assistant mapping logic
-- **internal/validation/**: Markdown file validation logic
+```
+rulem/
+├── cmd/rulem/                  # CLI entry point and main loop
+├── internal/
+│   ├── config/                # Configuration management (YAML)
+│   ├── logging/               # Structured logging system
+│   ├── tui/                   # Terminal User Interface components
+│   │   ├── components/       # Reusable UI components (layout, filepicker)
+│   │   ├── helpers/          # UI utility functions and context
+│   │   ├── setupmenu/        # First-time setup wizard
+│   │   ├── saverulesmodel/   # Save rules file functionality
+│   │   ├── importrulesmenu/  # Import rules with copy/symlink
+│   │   ├── settingsmenu/     # Configuration settings UI
+│   │   └── styles/           # TUI styling and theming
+│   ├── filemanager/          # File system operations and storage management
+│   └── editors/              # Editor integration and detection
+├── pkg/
+│   └── fileops/              # Core file operations (copy, symlink, validation)
+└── tasks/                    # Development tasks and documentation
+```
 
 ## 2. Key Components
 
 ### CLI Entry Point (`cmd/rulem/main.go`)
-- Handles startup, config loading, and user prompts
-- Orchestrates UI and core logic
 
-### Configuration (`internal/config/config.go`)
-- Loads and saves YAML config (default: `~/.config/rulem/config.yaml`)
-- Manages storage locations for each assistant
-- Provides update and validation methods
+**Responsibilities:**
+- Application initialization and startup sequence
+- First-time setup detection and handling
+- Configuration loading and validation
+- TUI initialization with Bubble Tea
 
-### Terminal UI (`internal/ui/fileviewer.go`)
-- Implements file browser and selection using Bubble Tea
-- Handles navigation, selection, and error/success messages
-- Integrates with core logic for migration actions
+### Configuration Management (`internal/config/`)
 
-### Core Logic (`internal/core/migrator.go`, `assistantmap.go`)
-- Handles file copy/symlink operations
-- Maps instruction files to correct locations for each assistant
-- Prevents overwrites and confirms user actions
-- Extensible for new assistants/formats
+**Responsibilities:**
+- YAML-based configuration persistence
+- Platform-specific config file location handling (XDG Base Directory spec)
+- Configuration validation and migration
+- Secure storage directory management
 
-### Validation (`internal/validation/validator.go`)
-- Validates Markdown files for required structure/schema
-- Provides clear error messages for invalid files
+### Terminal User Interface (`internal/tui/`)
 
-## 3. Data Flow
+**Architecture:** State-based TUI with centralized navigation
 
-1. User launches CLI → Config is loaded
-2. File viewer displays available instruction files
-3. User selects files and migration method (copy/symlink)
-4. User selects target assistant/format
-5. Core migrator performs operation, validates files, and updates UI
-6. User can edit files in terminal editor; validation is re-run
+**Core Components:**
+- `MainModel`: Root TUI model implementing the Bubble Tea pattern
+- `AppState`: Enumeration of application states (Menu, Settings, Import, etc.)
+- `MenuItemModel`: Interface for feature-specific models
 
-## 4. Extensibility
+**Key Features:**
+- **State Management**: Clean separation between different application views
+- **Navigation System**: Message-based transitions between states
+- **Error Handling**: Consistent error display and recovery mechanisms
+- **Responsive Design**: Dynamic layout adaptation to terminal dimensions
 
-- **Adding a new AI assistant:**
-  - Update `assistantmap.go` with new mapping logic and default locations
-  - Add any required validation rules in `validator.go`
-  - Update config schema if needed
-- **Supporting new file formats:**
-  - Extend validation logic
-  - Update migration logic to handle new formats
+**UI Models:**
+- `SetupModel`: First-time setup wizard
+- `SettingsModel`: Configuration management interface
+- `SaveRulesModel`: Save rules file functionality
+- `ImportRulesModel`: Import rules with copy/symlink options
 
-## 5. Error Handling & User Experience
+### File Management (`internal/filemanager/`)
 
-- All errors are surfaced in the TUI with clear, actionable messages
-- Overwrites require explicit confirmation
-- Invalid files prompt user to edit or abort
-- Smooth navigation and return to main menu after actions
+**Responsibilities:**
+- Secure storage directory creation and management
+- File system operations with proper permissions
+- Storage path resolution and validation
+- Directory scanning and file discovery
 
-## 6. Testing
+### File Operations (`pkg/fileops/`)
 
-- Unit tests for all core logic, config, UI, and validation
-- Run with `go test ./...`
-- Tests are located alongside their respective code files
+**Responsibilities:**
+- Core file operations (copy, symlink, validation)
+- Cross-platform file system compatibility
+- Error handling for file system operations
+- File content validation and processing
 
-## 7. Design Decisions
+### Editor Integration (`internal/editors/`)
 
-- **Bubble Tea & Lipgloss** chosen for modern, maintainable TUI
-- **YAML config** for human-readability and extensibility
-- **Modular internal packages** for testability and maintainability
-- **Editor integration** for seamless file editing
-
-## 8. Future Improvements
-
-- Plugin system for third-party assistant support
-- Remote sync/integration with cloud storage
-- Richer validation and linting for instruction files
-- Enhanced accessibility and keyboard shortcuts
-
-## 9. References
-
-- [Bubble Tea Documentation](https://github.com/charmbracelet/bubbletea)
-- [Lipgloss Documentation](https://github.com/charmbracelet/lipgloss)
-- [Go Modules](https://blog.golang.org/using-go-modules)
-
----
-
-For questions or contributions, see [README.md](./README.md) or open an issue on GitHub.
+**Responsibilities:**
+- Contains editor rule file configurations

@@ -1,3 +1,31 @@
+// Package config provides configuration management for the rulem application.
+//
+// This package handles loading, saving, and managing user configuration settings
+// for the rulem CLI tool. It supports YAML-based configuration files stored in
+// platform-standard locations using the XDG Base Directory specification.
+//
+// Key features:
+//   - Automatic detection of configuration file locations
+//   - First-run setup detection and handling
+//   - Secure storage directory management
+//   - Configuration validation and error handling
+//   - Integration with Bubble Tea for async configuration operations
+//
+// Configuration is stored in YAML format and includes:
+//   - Storage directory for rule files
+//   - Configuration version tracking
+//   - Initialization timestamp
+//
+// The package provides both synchronous and asynchronous (Bubble Tea command)
+// interfaces for configuration operations, making it suitable for both CLI
+// and TUI contexts.
+//
+// Default configuration location:
+//   - Linux/macOS: ~/.config/rulem/config.yaml
+//   - Windows: %APPDATA%\rulem\config.yaml
+//
+// Environment variables:
+//   - RULEM_CONFIG_PATH: Override default config path (primarily for testing)
 package config
 
 import (
@@ -14,15 +42,22 @@ import (
 )
 
 // TUI Messages for async operations
+
+// LoadConfigMsg is sent when a configuration loading operation completes.
+// It contains either the loaded configuration or an error if loading failed.
 type LoadConfigMsg struct {
 	Config *Config
 	Error  error
 }
 
+// SaveConfigMsg is sent when a configuration saving operation completes.
+// It contains an error if the save operation failed, or nil on success.
 type SaveConfigMsg struct {
 	Error error
 }
 
+// ReloadConfigMsg is sent when a configuration reload operation completes.
+// This is typically used after settings changes to refresh the application state.
 type ReloadConfigMsg struct {
 	Config *Config
 	Error  error
@@ -31,6 +66,15 @@ type ReloadConfigMsg struct {
 const APP_NAME = "rulem" // application name used for config directory
 
 // Config holds user configuration for rulem.
+//
+// This struct represents the complete configuration state of the application,
+// including storage locations, version information, and initialization metadata.
+// The configuration is persisted as YAML and loaded at application startup.
+//
+// Fields:
+//   - StorageDir: The directory where rulem stores its rule files and repositories
+//   - Version: Configuration schema version for handling upgrades
+//   - InitTime: Unix timestamp when the configuration was first created
 type Config struct {
 	// StorageDir is the directory where rulem stores its rule files.
 	StorageDir string `yaml:"storage_dir"`
@@ -54,8 +98,16 @@ func ConfigPath() (string, error) {
 	return configPath, nil
 }
 
-// Load loads the config from the standard location
-// If no config exists, it returns an error indicating first run is needed
+// Load loads the config from the standard location.
+// If no config exists, it returns an error indicating first run is needed.
+//
+// This is the primary entry point for loading configuration at application startup.
+// It automatically determines the correct config file path based on the platform
+// and XDG Base Directory specification.
+//
+// Returns:
+//   - *Config: The loaded configuration if successful
+//   - error: An error if loading fails or if first-time setup is required
 func Load() (*Config, error) {
 	configPath, exists := FindConfigFile()
 	logging.Debug("Loading config from", "path", configPath)
@@ -110,6 +162,11 @@ func IsFirstRun() bool {
 }
 
 // DefaultConfig returns a Config with sensible defaults.
+// This creates a new configuration instance with platform-appropriate default values,
+// including a default storage directory determined by the filemanager package.
+//
+// Returns:
+//   - Config: A configuration struct with default values set
 func DefaultConfig() Config {
 	path := filemanager.GetDefaultStorageDir()
 	logging.Debug("Using default storage directory", "path", path)

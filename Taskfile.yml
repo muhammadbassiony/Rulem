@@ -35,7 +35,3 @@ tasks:
     desc: Remove built binaries and temporary files
     cmds:
       - rm -f rulem
-
-  dev:
-    desc: Build, lint, and test in sequence
-    deps: [tidy, lint, test, build]

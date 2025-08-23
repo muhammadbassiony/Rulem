@@ -1,3 +1,27 @@
+// Package filemanager provides high-level file management operations for the rulem application.
+//
+// This package serves as the main interface for file system operations, providing
+// a safe and convenient abstraction over low-level file operations. It handles:
+//
+// - Storage directory management and validation
+// - Secure file copying and movement operations
+// - File discovery and listing with filtering
+// - Path validation and security checks
+// - Integration with the logging system for audit trails
+//
+// The FileManager struct is the primary entry point, providing methods for:
+//   - Copying files to/from storage with safety checks
+//   - Listing available rule files in storage
+//   - Managing storage directory structure
+//   - Validating file paths and permissions
+//
+// Security features:
+//   - Path traversal protection
+//   - Storage directory access validation
+//   - Safe file operations with atomic writes
+//   - Permission checking and validation
+//
+// All operations are logged for debugging and audit purposes.
 package filemanager
 
 import (

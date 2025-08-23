@@ -1,3 +1,29 @@
+// Package tui provides the Terminal User Interface for the rulem application.
+//
+// This package implements a modern TUI using the Bubble Tea framework and Lipgloss styling.
+// It provides an interactive menu-driven interface for managing AI assistant rule files,
+// including features like:
+//
+// - Main navigation menu with filtering capabilities
+// - Save rules functionality for storing rule files in a central repository
+// - Import rules functionality for copying/linking rules to current directory
+// - Settings management for configuring storage locations
+// - GitHub integration for fetching rules from remote repositories
+// - Error handling and user feedback through consistent UI patterns
+//
+// The TUI follows a state-based architecture where different application states
+// (menu, settings, save rules, etc.) are handled by specialized models that
+// implement the tea.Model interface. State transitions are managed through
+// custom message types and a centralized navigation system.
+//
+// Key Components:
+//   - MainModel: Root model that orchestrates the entire TUI application
+//   - AppState: Enumeration of possible application states
+//   - MenuItemModel: Interface for models that can be displayed in menus
+//   - Navigation system: Message-based state transitions between different views
+//
+// The package is designed to be extensible, allowing new features to be added
+// as separate models that integrate with the main navigation system.
 package tui
 
 import (
@@ -13,17 +39,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// AppState represents the current state of the application
+// AppState represents the current state of the TUI application.
+// Each state corresponds to a different view or mode of operation.
 type AppState int
 
 const (
+	// StateMenu represents the main navigation menu
 	StateMenu AppState = iota
 	StateError
 	StateComingSoon
 	StateQuitting
 
 	StateSettings
-	StateMigration
 	StateSaveRules
 	StateImportCopy
 	StateFetchGithub
@@ -44,7 +71,9 @@ type (
 	}
 )
 
-// MenuItemModel interface for menu item models
+// MenuItemModel interface for menu item models.
+// Any model that can be displayed as a menu item must implement this interface,
+// which requires implementing the tea.Model interface for Bubble Tea compatibility.
 type MenuItemModel interface {
 	tea.Model
 }
@@ -60,7 +89,23 @@ func (i item) Title() string       { return i.title }
 func (i item) Description() string { return i.description }
 func (i item) FilterValue() string { return i.title }
 
-// MainModel is the root model for the application
+// MainModel is the root model for the TUI application.
+//
+// This struct serves as the central coordinator for the entire application,
+// managing state transitions, user input, and rendering. It implements the
+// tea.Model interface and handles the main application loop.
+//
+// Key responsibilities:
+//   - Managing application state and state transitions
+//   - Coordinating between different feature-specific models
+//   - Handling user input and delegating to appropriate handlers
+//   - Managing window resizing and layout updates
+//   - Providing consistent error handling and user feedback
+//   - Orchestrating the main navigation menu
+//
+// The model uses a state-based architecture where different application states
+// correspond to different views and behaviors. It maintains references to
+// configuration, logging, and UI components to provide a cohesive user experience.
 type MainModel struct {
 	config    *config.Config
 	logger    *logging.AppLogger

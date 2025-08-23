@@ -16,21 +16,38 @@ rulem is a command-line tool for managing and organizing rule files on your mach
 
 ## Installation
 
-### Prerequisites
-- Go 1.21 or later
-- (Optional) $EDITOR environment variable set for editing files
+### Via Homebrew (macOS)
+```sh
+# Replace 'yourusername' with actual GitHub username
+brew tap yourusername/rulem
+brew install rulem
+```
+
+### Via Snap (Linux)
+```sh
+sudo snap install rulem
+```
+
+### Download Binary (Alternative)
+Download the latest binary for your platform from [GitHub Releases](https://github.com/yourusername/rulem/releases/latest)
+
+> **Note**: Replace `yourusername` with the actual GitHub username in all URLs above
 
 ### Build from Source
+If you have Go 1.24+ installed:
 ```sh
 git clone https://github.com/yourusername/rulem.git
 cd rulem
 go build -o rulem ./cmd/rulem
 ```
 
-### Run Tests
+### Verify Installation
 ```sh
-go test ./...
+rulem --version
 ```
+
+### Prerequisites
+- (Optional) $EDITOR environment variable set for editing files
 
 ## Usage
 

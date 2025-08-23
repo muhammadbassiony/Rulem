@@ -1,0 +1,103 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: "rulem"
+    main: ./cmd/rulem
+    binary: rulem
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # Set the modified timestamp on the output binary to the git timestamp.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - name: rulem
+    homepage: "https://github.com/muhammadbassiony/rulem"
+    description: "AI Assistant Instruction Manager CLI"
+    license: "MIT"
+    repository:
+      owner: muhammadbassiony
+      name: homebrew-rulem
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    test: |
+      system "#{bin}/rulem --version"
+
+# Snap packages for Linux
+snapcrafts:
+  - name: rulem
+    summary: AI Assistant Instruction Manager CLI
+    description: |
+      rulem is a command-line tool for managing and organizing rule files
+      on your machine. It provides a robust TUI for browsing, editing, and
+      moving rule files between different AI assistants and formats.
+    grade: stable
+    confinement: strict
+    publish: true
+    license: MIT
+    base: core22
+    apps:
+      rulem:
+        command: rulem
+        plugs: ["home", "removable-media"]
+
+release:
+  prerelease: auto
+  footer: |
+    ## Installation
+
+    ### Homebrew (macOS)
+    ```sh
+    brew tap muhammadbassiony/rulem
+    brew install rulem
+    ```
+
+    ### Snap (Linux)
+    ```sh
+    sudo snap install rulem
+    ```
+
+    ### Download Binary
+    Download the appropriate binary for your platform from the assets below.
+
+    ---
+
+    **Full Changelog**: https://github.com/muhammadbassiony/rulem/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

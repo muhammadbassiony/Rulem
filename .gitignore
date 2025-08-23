@@ -9,3 +9,5 @@ todo.md
 devCentral/
 
 rulem
+# Added by goreleaser init:
+dist/

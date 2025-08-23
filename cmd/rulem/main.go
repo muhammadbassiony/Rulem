@@ -13,7 +13,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Version info (set by GoReleaser)
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
+	// Handle version flag
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("rulem %s (%s) built on %s\n", version, commit, date)
+		return
+	}
 	// setup logging
 	appLogger := logging.NewAppLogger()
 

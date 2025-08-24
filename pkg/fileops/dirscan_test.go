@@ -873,7 +873,11 @@ func TestSecurityValidationErrors(t *testing.T) {
 		if err != nil {
 			t.Skipf("Cannot change file permissions: %v", err)
 		}
-		defer os.Chmod(testFile, 0644) // Restore for cleanup
+		defer func() {
+			if err := os.Chmod(testFile, 0644); err != nil {
+				t.Logf("warning: failed to restore permissions: %v", err)
+			}
+		}()
 
 		opts := &DirectoryScanOptions{
 			ValidateFileAccess: true,

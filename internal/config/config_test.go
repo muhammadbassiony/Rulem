@@ -13,7 +13,7 @@ func TestConfigPath(t *testing.T) {
 	t.Log("Testing ConfigPath using go-app-paths")
 
 	// Test that ConfigPaths returns valid paths
-	primary, err := ConfigPath()
+	primary, err := Path()
 	fmt.Println(primary)
 	if err != nil {
 		t.Fatalf("Failed to get config path: %s", err)
@@ -161,7 +161,7 @@ func TestConfigPathEnvironmentOverride(t *testing.T) {
 		t.Fatalf("Failed to set environment variable: %v", err)
 	}
 
-	configPath, err := ConfigPath()
+	configPath, err := Path()
 	if err != nil {
 		t.Fatalf("Failed to get config path: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestConfigPathEnvironmentOverride(t *testing.T) {
 
 	// Test with environment variable unset
 	os.Unsetenv("RULEM_CONFIG_PATH")
-	configPath, err = ConfigPath()
+	configPath, err = Path()
 	if err != nil {
 		t.Fatalf("Failed to get config path: %v", err)
 	}
@@ -198,7 +198,9 @@ func TestConfigErrorHandling(t *testing.T) {
 	t.Run("load invalid YAML", func(t *testing.T) {
 		tempDir := t.TempDir()
 		invalidFile := filepath.Join(tempDir, "invalid.yaml")
-		os.WriteFile(invalidFile, []byte("invalid: yaml: content: ["), 0644)
+		if err := os.WriteFile(invalidFile, []byte("invalid: yaml: content: ["), 0644); err != nil {
+			t.Fatalf("Failed to write invalid YAML file: %v", err)
+		}
 
 		_, err := LoadFrom(invalidFile)
 		if err == nil {

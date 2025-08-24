@@ -63,7 +63,7 @@ type ReloadConfigMsg struct {
 	Error  error
 }
 
-const APP_NAME = "rulem" // application name used for config directory
+const AppName = "rulem" // application name used for config directory
 
 // Config holds user configuration for rulem.
 //
@@ -82,16 +82,16 @@ type Config struct {
 	InitTime   int64  `yaml:"init_time"` // Unix timestamp of first setup
 }
 
-// ConfigPath returns the standard config file paths for the current platform
+// Path returns the standard config file paths for the current platform
 // Can be overridden with RULEM_CONFIG_PATH environment variable for testing
-func ConfigPath() (string, error) {
+func Path() (string, error) {
 	// Check for test override first
 	if testPath := os.Getenv("RULEM_CONFIG_PATH"); testPath != "" {
 		logging.Debug("Using test config path from environment", "path", testPath)
 		return testPath, nil
 	}
 
-	configDir := filepath.Join(xdg.ConfigHome, APP_NAME)
+	configDir := filepath.Join(xdg.ConfigHome, AppName)
 	configPath := filepath.Join(configDir, "config.yaml")
 
 	logging.Debug("Determined config paths", "path", configPath)
@@ -139,7 +139,7 @@ func LoadFrom(path string) (*Config, error) {
 
 // FindConfigFile returns the path to an existing config file, and whether it exists.
 func FindConfigFile() (string, bool) {
-	primary, err := ConfigPath()
+	primary, err := Path()
 	if err != nil {
 		logging.Error("Failed to get config path", "error", err)
 		return "", false

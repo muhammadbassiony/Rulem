@@ -17,12 +17,13 @@ tasks:
       - go test --cover ./...
 
   lint:
-    desc: Run golangci-lint on the codebase
+    desc: Run golangci-lint on the codebase (installs if missing)
     cmds:
       - |
         if ! command -v golangci-lint >/dev/null 2>&1; then
-          echo 'golangci-lint not found. Installing...';
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest;
+          echo 'golangci-lint not found. Installing...'
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          export PATH=$PATH:$(go env GOPATH)/bin
         fi
         golangci-lint run ./...
 
@@ -35,3 +36,10 @@ tasks:
     desc: Remove built binaries and temporary files
     cmds:
       - rm -f rulem
+
+  format:
+    desc: Format code using gofmt and goimports
+    cmds:
+      - go fmt ./...
+      - if ! command -v goimports >/dev/null 2>&1; then go install golang.org/x/tools/cmd/goimports@latest; fi
+      - goimports -w .

@@ -95,22 +95,6 @@ func readFileContent(t *testing.T, path string) string {
 
 // Permission Management
 
-// makeReadOnly makes a directory read-only (cross-platform)
-func makeReadOnly(t *testing.T, path string) {
-	t.Helper()
-	if err := os.Chmod(path, 0555); err != nil {
-		t.Fatalf("failed to make directory read-only: %v", err)
-	}
-}
-
-// restoreWritePermissions restores write permissions
-func restoreWritePermissions(t *testing.T, path string) {
-	t.Helper()
-	if err := os.Chmod(path, 0755); err != nil {
-		t.Logf("warning: failed to restore write permissions: %v", err)
-	}
-}
-
 // Directory Navigation
 
 // changeToDir changes working directory with automatic cleanup

@@ -17,8 +17,8 @@ import (
 
 // Helper to execute a single command and any immediate follow-up command returned by Update.
 func runCmd(fp *FilePicker, cmd tea.Cmd) {
-	max := 8
-	for i := 0; cmd != nil && i < max; i++ {
+	maxIterations := 8
+	for i := 0; cmd != nil && i < maxIterations; i++ {
 		msg := cmd()
 		_, cmd = fp.Update(msg)
 	}

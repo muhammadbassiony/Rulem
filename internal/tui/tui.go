@@ -128,7 +128,6 @@ type MainModel struct {
 	// UI state
 	err               error
 	loading           bool
-	loadingMessage    string
 	comingSoonFeature string
 }
 

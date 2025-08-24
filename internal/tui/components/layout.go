@@ -6,7 +6,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/muesli/reflow/wordwrap"
-	"github.com/muesli/reflow/wrap"
 )
 
 type LayoutConfig struct {
@@ -166,16 +165,6 @@ func (m LayoutModel) wrapText(text string, width int) string {
 	}
 
 	return strings.Join(wrappedParagraphs, "\n\n")
-}
-
-// Alternative wrapping method with indent support for lists
-func (m LayoutModel) wrapTextWithIndent(text string, width int, indent int) string {
-	if width <= 0 {
-		return text
-	}
-
-	// Use reflow's wrap package for more advanced wrapping
-	return wrap.String(text, width-indent)
 }
 
 func (m LayoutModel) addMargins(content string) string {

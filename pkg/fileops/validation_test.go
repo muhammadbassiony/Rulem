@@ -176,12 +176,16 @@ func TestValidateFileInDirectory(t *testing.T) {
 	// Create test files
 	validFile := createTestFile(t, tempDir, "valid.txt", "content")
 	subDir := filepath.Join(tempDir, "subdir")
-	os.Mkdir(subDir, 0755)
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("Failed to create subDir: %v", err)
+	}
 	nestedFile := createTestFile(t, subDir, "nested.txt", "nested content")
 
 	// Create directory for testing
 	testDir := filepath.Join(tempDir, "testdir")
-	os.Mkdir(testDir, 0755)
+	if err := os.Mkdir(testDir, 0755); err != nil {
+		t.Fatalf("Failed to create testDir: %v", err)
+	}
 
 	t.Run("valid file in directory", func(t *testing.T) {
 		err := ValidateFileInDirectory(validFile, tempDir)
@@ -404,7 +408,11 @@ func TestValidateFileAccess(t *testing.T) {
 			if err := os.Chmod(unreadableFile, 0000); err != nil {
 				t.Skip("Cannot change file permissions")
 			}
-			defer os.Chmod(unreadableFile, 0644) // Restore for cleanup
+			defer func() {
+				if err := os.Chmod(unreadableFile, 0644); err != nil {
+					t.Logf("warning: failed to restore permissions: %v", err)
+				}
+			}()
 
 			err := ValidateFileAccess(unreadableFile, false)
 			if err == nil {
@@ -583,7 +591,9 @@ func TestGetReservedDirectories(t *testing.T) {
 func BenchmarkValidatePathSecurity(b *testing.B) {
 	testPath := "valid/path/to/file.txt"
 	for range b.N {
-		ValidatePathSecurity(testPath)
+		if err := ValidatePathSecurity(testPath); err != nil {
+			b.Logf("ValidatePathSecurity returned error: %v", err)
+		}
 	}
 }
 
@@ -626,7 +636,9 @@ func TestValidateDirectoryWritable(t *testing.T) {
 			name: "file exists with same name",
 			setup: func() string {
 				filePath := filepath.Join(tempDir, "existing_file")
-				os.WriteFile(filePath, []byte("content"), 0644)
+				if err := os.WriteFile(filePath, []byte("content"), 0644); err != nil {
+					t.Fatalf("Failed to write file: %v", err)
+				}
 				return filePath
 			},
 			wantError: true,

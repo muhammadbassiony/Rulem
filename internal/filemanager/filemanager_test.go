@@ -168,7 +168,11 @@ func TestSourceValidation(t *testing.T) {
 				if err := os.Chmod(srcPath, 0000); err != nil {
 					t.Skip("Cannot change file permissions")
 				}
-				t.Cleanup(func() { os.Chmod(srcPath, 0644) }) // Restore for cleanup
+				t.Cleanup(func() {
+					if err := os.Chmod(srcPath, 0644); err != nil {
+						t.Logf("warning: failed to restore permissions: %v", err)
+					}
+				}) // Restore for cleanup
 				return srcPath
 			},
 			expectError: "failed to open source file",
@@ -576,7 +580,11 @@ func TestCopyFileFromStorage(t *testing.T) {
 
 	tempCwd := createTempStorage(t)
 	defer os.RemoveAll(tempCwd)
-	defer os.Chdir(originalCwd) // Restore original CWD
+	defer func() {
+		if err := os.Chdir(originalCwd); err != nil {
+			t.Logf("warning: failed to restore original CWD: %v", err)
+		}
+	}() // Restore original CWD
 
 	if err := os.Chdir(tempCwd); err != nil {
 		t.Fatalf("Failed to change to temp directory: %v", err)
@@ -673,7 +681,11 @@ func TestCopyFileFromStorageValidation(t *testing.T) {
 	}
 	tempCwd := createTempStorage(t)
 	defer os.RemoveAll(tempCwd)
-	defer os.Chdir(originalCwd)
+	defer func() {
+		if err := os.Chdir(originalCwd); err != nil {
+			t.Logf("warning: failed to restore original CWD: %v", err)
+		}
+	}()
 	if err := os.Chdir(tempCwd); err != nil {
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
@@ -778,7 +790,11 @@ func TestCreateSymlinkFromStorage(t *testing.T) {
 
 	tempCwd := createTempStorage(t)
 	defer os.RemoveAll(tempCwd)
-	defer os.Chdir(originalCwd)
+	defer func() {
+		if err := os.Chdir(originalCwd); err != nil {
+			t.Logf("warning: failed to restore original CWD: %v", err)
+		}
+	}()
 
 	if err := os.Chdir(tempCwd); err != nil {
 		t.Fatalf("Failed to change to temp directory: %v", err)

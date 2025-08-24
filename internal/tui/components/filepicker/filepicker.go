@@ -746,7 +746,7 @@ func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) 
 		}
 
 		// Decide how many bytes to read
-		var toRead int64 = fi.Size()
+		var toRead = fi.Size()
 		truncated := false
 		fp.logger.Debug("Checking truncation", "path", path, "size", fi.Size(), "full", full, "largeFileThreshold", fp.largeFileThreshold, "bigger ? ", fi.Size() > int64(fp.largeFileThreshold), "renderID", renderID)
 		if !full && fi.Size() > int64(fp.largeFileThreshold) {

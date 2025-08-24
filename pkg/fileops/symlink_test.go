@@ -33,7 +33,9 @@ func TestIsSymlink(t *testing.T) {
 	// Create test file and directory
 	testFile := createTestFile(t, tempDir, "regular.txt", "content")
 	testDir := filepath.Join(tempDir, "testdir")
-	os.Mkdir(testDir, 0755)
+	if err := os.Mkdir(testDir, 0755); err != nil {
+		t.Fatalf("Failed to create testDir: %v", err)
+	}
 
 	t.Run("regular file is not symlink", func(t *testing.T) {
 		isLink, err := IsSymlink(testFile)
@@ -327,12 +329,18 @@ func TestValidateSymlinkSecurity(t *testing.T) {
 	// Create allowed directories
 	allowedDir1 := filepath.Join(tempDir, "allowed1")
 	allowedDir2 := filepath.Join(tempDir, "allowed2")
-	os.MkdirAll(allowedDir1, 0755)
-	os.MkdirAll(allowedDir2, 0755)
+	if err := os.MkdirAll(allowedDir1, 0755); err != nil {
+		t.Fatalf("Failed to create allowedDir1: %v", err)
+	}
+	if err := os.MkdirAll(allowedDir2, 0755); err != nil {
+		t.Fatalf("Failed to create allowedDir2: %v", err)
+	}
 
 	// Create forbidden directory
 	forbiddenDir := filepath.Join(tempDir, "forbidden")
-	os.MkdirAll(forbiddenDir, 0755)
+	if err := os.MkdirAll(forbiddenDir, 0755); err != nil {
+		t.Fatalf("Failed to create forbiddenDir: %v", err)
+	}
 
 	allowedPaths := []string{allowedDir1, allowedDir2}
 
@@ -679,7 +687,9 @@ func BenchmarkIsSymlink(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		IsSymlink(linkPath)
+		if _, err := IsSymlink(linkPath); err != nil {
+			b.Fatalf("Failed to check if path is symlink: %v", err)
+		}
 	}
 }
 
@@ -702,6 +712,8 @@ func BenchmarkCreateRelativeSymlink(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		linkPath := filepath.Join(tempDir, "bench_link_"+string(rune(i))+".txt")
-		CreateRelativeSymlink(targetFilePath, linkPath)
+		if err := CreateRelativeSymlink(targetFilePath, linkPath); err != nil {
+			b.Fatalf("Failed to create relative symlink: %v", err)
+		}
 	}
 }

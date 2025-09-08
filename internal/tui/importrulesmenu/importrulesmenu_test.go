@@ -1122,6 +1122,76 @@ func TestImportRulesModel_KeyHandling_Filtering(t *testing.T) {
 	_ = cmd
 }
 
+// Test empty repository scenario
+func TestImportRulesModel_EmptyRepository(t *testing.T) {
+	model := createTestModel(t) // Creates model with empty storage directory
+
+	// Start with loading state and receive scan complete with empty files
+	if model.state != StateLoading {
+		t.Errorf("Expected initial state %v, got %v", StateLoading, model.state)
+	}
+
+	// Simulate empty scan result
+	emptyFiles := []filemanager.FileItem{}
+	scanMsg := FileScanCompleteMsg{Files: emptyFiles}
+	updatedModel, _ := model.Update(scanMsg)
+	model, ok := updatedModel.(*ImportRulesModel)
+	if !ok {
+		t.Error("Update should return ImportRulesModel")
+	}
+
+	// Should transition to file selection state (FilePicker handles empty state)
+	if model.state != StateFileSelection {
+		t.Errorf("Expected state %v, got %v", StateFileSelection, model.state)
+	}
+
+	// Should not have any error for empty repository
+	if model.err != nil {
+		t.Errorf("Error should be nil for empty repository, got: %v", model.err)
+	}
+
+	// Should not have any rule files
+	if len(model.ruleFiles) != 0 {
+		t.Errorf("Expected 0 rule files, got %d", len(model.ruleFiles))
+	}
+
+	// FilePicker should be created (it handles empty state gracefully)
+	if model.filePicker == nil {
+		t.Error("FilePicker should be created even for empty repository")
+	}
+
+	// Test that FilePicker can handle navigation keys even with empty state
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}
+	updatedModel, _ = model.Update(keyMsg)
+	model, ok = updatedModel.(*ImportRulesModel)
+	if !ok {
+		t.Error("Update should return ImportRulesModel")
+	}
+
+	// Should remain in file selection state
+	if model.state != StateFileSelection {
+		t.Errorf("Expected state %v after navigation, got %v", StateFileSelection, model.state)
+	}
+
+	// FilePicker should still exist
+	if model.filePicker == nil {
+		t.Error("FilePicker should persist after navigation")
+	}
+
+	// Test quit functionality from empty file selection
+	quitKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(KeyQuit)}
+	updatedModel, quitCmd := model.Update(quitKey)
+	model, ok = updatedModel.(*ImportRulesModel)
+	if !ok {
+		t.Error("Update should return ImportRulesModel")
+	}
+
+	// Should have command to navigate to main menu
+	if quitCmd == nil {
+		t.Error("Quit should return navigation command")
+	}
+}
+
 // Integration test - complete workflow
 
 func TestImportRulesModel_CompleteWorkflow(t *testing.T) {

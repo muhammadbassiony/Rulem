@@ -226,7 +226,8 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logger.Debug("Import rules model - File scan completed", "files_count", len(message.Files))
 		// Convert relative paths from ScanCentralRepo to absolute paths for FilePicker
 		m.ruleFiles = m.fileManager.ConvertToAbsolutePaths(message.Files)
-		m.logger.Debug("Import rules model - converted scanned files paths to absolute", "first path", m.ruleFiles[0].Path)
+
+		m.logger.Debug("Import rules model - converted scanned files paths to absolute")
 		m.state = StateFileSelection
 		m.err = nil
 

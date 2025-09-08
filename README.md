@@ -66,17 +66,27 @@ go build -o rulem ./cmd/rulem
    rulem
    ```
 
-2. **Save Instructions**: Store your instruction files in the central repository
+2. **Get Help**: View all available commands and options
+   ```bash
+   rulem --help
+   ```
+
+3. **Debug Mode**: Enable detailed logging for troubleshooting
+   ```bash
+   rulem --debug
+   ```
+
+4. **Save Instructions**: Store your instruction files in the central repository
    - Navigate to "Save rules file"
    - Select your instruction file
    - Choose the appropriate AI assistant type
 
-3. **Import to Project**: Apply instructions to a new project
+5. **Import to Project**: Apply instructions to a new project
    - Navigate to "Import rules (Copy)"
    - Select the instruction file
    - Choose copy or symlink mode
 
-4. **Configure Settings**: Customize storage locations and preferences
+6. **Configure Settings**: Customize storage locations and preferences
    - Navigate to "Update settings"
    - Modify configuration as needed
 
@@ -92,6 +102,38 @@ init_time: 1640995200
 ```
 
 for now it only contains the location of the storage directory, but more settings will be added in the future.
+
+## CLI Commands
+
+### Basic Usage
+```bash
+# Launch interactive TUI (default)
+rulem
+
+# Show version information
+rulem version
+
+# Enable debug logging
+rulem --debug
+
+# Get help for any command
+rulem --help
+rulem [command] --help
+```
+
+### Available Commands
+
+- `rulem` - Launch the interactive Terminal User Interface
+- `rulem version` - Display version information
+- `rulem mcp` - Start MCP server (coming soon)
+
+
+### Flags
+
+- `-d, --debug` - Enable detailed debug logging to `rulem.log`
+- `-h, --help` - Show help information
+
+
 
 ### Supported AI Assistants
 

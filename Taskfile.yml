@@ -9,7 +9,7 @@ tasks:
   run:
     desc: Run the rulem CLI interactively
     cmds:
-      - DEBUG=1 go run ./cmd/rulem
+      - go run ./cmd/rulem --debug {{.CLI_ARGS}}
 
   test:
     desc: Run all unit tests
@@ -26,11 +26,6 @@ tasks:
           export PATH=$PATH:$(go env GOPATH)/bin
         fi
         golangci-lint run ./...
-
-  tidy:
-    desc: Clean up go.mod and go.sum
-    cmds:
-      - go mod tidy
 
   clean:
     desc: Remove built binaries and temporary files

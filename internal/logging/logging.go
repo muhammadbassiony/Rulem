@@ -34,7 +34,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -87,22 +86,33 @@ func LogPerformance(operation string, start time.Time) {
 
 func NewAppLogger() *AppLogger {
 	debug := os.Getenv("DEBUG") != ""
+	return newAppLoggerWithDebugMode(debug)
+}
+
+// NewAppLoggerWithDebug creates a new logger with debug mode explicitly enabled
+func NewAppLoggerWithDebug() *AppLogger {
+	return newAppLoggerWithDebugMode(true)
+}
+
+func newAppLoggerWithDebugMode(debug bool) *AppLogger {
 
 	var logger *log.Logger
 
 	if debug {
-		// Development: Log to file, clear on each run
-		cwd, err := os.Getwd()
-		if err != nil {
-			panic(fmt.Sprintf("Failed to get current working directory: %v", err))
-		}
+		// Debug mode: Always log to current directory and clear on each run
+		// This design choice helps with:
+		// 1. User issue debugging: Easy to find logs in current directory
+		// 2. Development workflow: Fresh logs for each debug session
+		// 3. Support requests: Clear, isolated log files for specific runs
+		logPath := "rulem.log"
 
-		logPath := filepath.Join(cwd, "rulem.log")
+		// Always clear the log file when debug is enabled for fresh debugging
+		// This ensures each debug session starts with a clean slate
+		openFlags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 
-		// Clear the log file on each run for development
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		logFile, err := os.OpenFile(logPath, openFlags, 0o644)
 		if err != nil {
-			panic(fmt.Sprintf("Failed to create debug log file: %v", err))
+			panic(fmt.Sprintf("Failed to create debug log file at %s: %v", logPath, err))
 		}
 
 		logger = log.NewWithOptions(logFile, log.Options{
@@ -114,6 +124,7 @@ func NewAppLogger() *AppLogger {
 		})
 		logger.SetLevel(log.DebugLevel)
 
+		fmt.Printf("Debug logging enabled. Log file: %s\n", logPath)
 		logger.Info("Debug logging enabled", "log_file", logPath)
 
 	} else {

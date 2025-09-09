@@ -9,14 +9,39 @@
 package mcp
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 
 	"rulem/internal/config"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 
+	"github.com/adrg/frontmatter"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// RuleFrontmatter represents the YAML frontmatter structure expected in rule files
+type RuleFrontmatter struct {
+	Description string `yaml:"description"`
+	Name        string `yaml:"name,omitempty"`
+	ApplyTo     string `yaml:"applyTo,omitempty"`
+}
+
+// RuleFile represents a parsed rule file with frontmatter and content
+type RuleFile struct {
+	// File information
+	FileName string
+	FilePath string
+
+	// Frontmatter fields
+	Description string
+	Name        string
+	ApplyTo     string
+
+	// File content (without frontmatter)
+	Content string
+}
 
 // Server represents an MCP server instance using mcp-go
 type Server struct {
@@ -45,15 +70,20 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to initialize file manager: %w", err)
 	}
 
-	files, err := s.getRepoFiles()
+	ruleFiles, err := s.getRuleFilesWithFrontmatter()
 	if err != nil {
-		return fmt.Errorf("failed to get repository files: %w", err)
+		return fmt.Errorf("failed to get rule files with frontmatter: %w", err)
 	}
 
-	s.logger.Info("Repository files loaded", "fileCount", len(files))
-	if len(files) > 0 {
-		for _, f := range files {
-			s.logger.Info("File", "name", f.Name, "path", f.Path)
+	s.logger.Info("Rule files with frontmatter loaded", "ruleCount", len(ruleFiles))
+	if len(ruleFiles) > 0 {
+		for _, rf := range ruleFiles {
+			s.logger.Info("Rule",
+				"name", rf.FileName,
+				"description", rf.Description,
+				"ruleName", rf.Name,
+				"applyTo", rf.ApplyTo,
+			)
 		}
 	}
 
@@ -98,4 +128,105 @@ func (s *Server) getRepoFiles() ([]filemanager.FileItem, error) {
 
 	s.logger.Debug("Successfully scanned central repository", "fileCount", len(files))
 	return files, nil
+}
+
+// parseRuleFiles takes a list of file items and parses them for frontmatter
+// Returns only files that have valid YAML frontmatter with at least a 'description' field
+func (s *Server) parseRuleFiles(files []filemanager.FileItem) ([]RuleFile, error) {
+	if s.fileManager == nil {
+		return nil, fmt.Errorf("file manager not initialized")
+	}
+
+	var ruleFiles []RuleFile
+	var skippedCount int
+
+	s.logger.Debug("Starting frontmatter parsing", "totalFiles", len(files))
+
+	for _, file := range files {
+		// Get absolute path for reading
+		absolutePath := s.fileManager.GetAbsolutePath(file)
+
+		s.logger.Debug("Parsing file", "name", file.Name, "path", file.Path)
+
+		// Read file content
+		content, err := os.ReadFile(absolutePath)
+		if err != nil {
+			s.logger.Debug("Failed to read file, skipping", "file", file.Name, "error", err)
+			skippedCount++
+			continue
+		}
+
+		// Parse frontmatter
+		var matter RuleFrontmatter
+		body, err := frontmatter.Parse(bytes.NewReader(content), &matter)
+		if err != nil {
+			s.logger.Debug("No valid frontmatter found, skipping", "file", file.Name, "error", err)
+			skippedCount++
+			continue
+		}
+
+		// Check if description field exists (required)
+		if matter.Description == "" {
+			s.logger.Debug("Missing required 'description' field in frontmatter, skipping", "file", file.Name)
+			skippedCount++
+			continue
+		}
+
+		// Create RuleFile with parsed data
+		ruleFile := RuleFile{
+			FileName:    file.Name,
+			FilePath:    file.Path,
+			Description: matter.Description,
+			Name:        matter.Name,
+			ApplyTo:     matter.ApplyTo,
+			Content:     string(body),
+		}
+
+		ruleFiles = append(ruleFiles, ruleFile)
+		s.logger.Debug("Successfully parsed rule file",
+			"file", file.Name,
+			"description", matter.Description,
+			"name", matter.Name,
+			"applyTo", matter.ApplyTo,
+		)
+	}
+
+	s.logger.Info("Frontmatter parsing completed",
+		"validRules", len(ruleFiles),
+		"skippedFiles", skippedCount,
+		"totalFiles", len(files),
+	)
+
+	return ruleFiles, nil
+}
+
+// getRuleFilesWithFrontmatter scans the repository and returns parsed rule files with frontmatter
+func (s *Server) getRuleFilesWithFrontmatter() ([]RuleFile, error) {
+	// First get all files from repository
+	files, err := s.getRepoFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repository files: %w", err)
+	}
+
+	// Parse frontmatter from files
+	ruleFiles, err := s.parseRuleFiles(files)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse rule files: %w", err)
+	}
+
+	return ruleFiles, nil
+}
+
+// InitializeComponents is a public method for testing and demo purposes
+// It initializes the file manager without starting the full MCP server
+func (s *Server) InitializeComponents() error {
+	var err error
+	s.fileManager, err = filemanager.NewFileManager(s.config.StorageDir, s.logger)
+	return err
+}
+
+// GetRuleFilesWithFrontmatter is a public method for testing and demo purposes
+// It returns parsed rule files with frontmatter
+func (s *Server) GetRuleFilesWithFrontmatter() ([]RuleFile, error) {
+	return s.getRuleFilesWithFrontmatter()
 }

@@ -38,3 +38,8 @@ tasks:
       - go fmt ./...
       - if ! command -v goimports >/dev/null 2>&1; then go install golang.org/x/tools/cmd/goimports@latest; fi
       - goimports -w .
+
+  mcp:
+    desc: Run the MCP server (Model Context Protocol) with debug enabled
+    cmds:
+      - go run ./cmd/rulem --debug mcp

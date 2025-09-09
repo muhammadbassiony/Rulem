@@ -13,6 +13,7 @@ A command-line tool for managing and organizing AI assistant instruction files a
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
   - [Supported AI Assistants](#supported-ai-assistants)
+- [MCP Integration](#mcp-integration)
 - [Development](#development)
   - [Prerequisites](#prerequisites)
   - [Common Commands](#common-commands)
@@ -32,6 +33,7 @@ My main motivations for creating `rulem` are:
 
 - Modern terminal user interface built with Bubble Tea
 - Cross-platform support (macOS, Linux, Windows)
+- Model Context Protocol (MCP) server for AI assistant integration
 - Secure file operations with validation
 - Copy and symlink support for file management
 - Extensible architecture for new AI assistants
@@ -103,6 +105,58 @@ init_time: 1640995200
 
 for now it only contains the location of the storage directory, but more settings will be added in the future.
 
+## MCP Integration
+
+rulem includes a Model Context Protocol (MCP) server that allows AI assistants to access your organized instruction files as tools and resources.
+
+### Starting the MCP Server
+
+```bash
+# Start MCP server (communicates via stdin/stdout)
+rulem mcp
+
+# Start with debug logging
+rulem mcp --debug
+```
+
+### AI Assistant Integration
+
+Configure your AI assistant to use rulem as an MCP server:
+
+**Claude Desktop:**
+```json
+{
+  "mcpServers": {
+    "rulem": {
+      "command": "rulem",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**Cursor:**
+```json
+{
+  "mcp": {
+    "servers": {
+      "rulem": {
+        "command": ["rulem", "mcp"],
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+- **list_rules** - List all rule files, optionally filtered by AI assistant
+- **read_rule** - Read content of a specific rule file  
+- **search_rules** - Search rules containing specific keywords
+
+For detailed integration examples and troubleshooting, see [docs/mcp-integration.md](docs/mcp-integration.md).
+
 ## CLI Commands
 
 ### Basic Usage
@@ -125,7 +179,7 @@ rulem [command] --help
 
 - `rulem` - Launch the interactive Terminal User Interface
 - `rulem version` - Display version information
-- `rulem mcp` - Start MCP server (coming soon)
+- `rulem mcp` - Start Model Context Protocol server for AI assistant integration
 
 
 ### Flags

@@ -22,6 +22,7 @@ import (
 
 	"rulem/internal/config"
 	"rulem/internal/logging"
+	mcp "rulem/internal/mcp"
 	"rulem/internal/tui"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/setupmenu"
@@ -62,6 +63,9 @@ Key features:
   # Start with debug logging enabled
   rulem --debug
 
+  # Start the MCP server
+  rulem mcp
+
   # Show version information
   rulem version
 
@@ -80,12 +84,27 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// mcpCmd represents the MCP server command
+var mcpCmd = &cobra.Command{
+	Use:   "mcp",
+	Short: "Start the Model Context Protocol server",
+	Long: `Start the Model Context Protocol (MCP) server to enable integration
+with AI assistants that support the MCP standard.
+
+This allows rulem to be used as a context provider for AI assistants,
+giving them access to your organized instruction files.
+
+The server communicates via stdin/stdout using JSON-RPC as per MCP specification.`,
+	RunE: runMCPServer,
+}
+
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&debugMode, "debug", "d", false, "Enable debug logging")
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(mcpCmd)
 
 	// Hide the help command and completion command in the main help output
 	rootCmd.SetHelpCommand(&cobra.Command{
@@ -241,4 +260,29 @@ func runWithRecovery(fn func() error, logger *logging.AppLogger, operation strin
 	}()
 
 	return fn()
+}
+
+// runMCPServer handles the MCP server execution
+func runMCPServer(cmd *cobra.Command, args []string) error {
+	// Initialize logger based on debug flag
+	initLogger()
+
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("error loading config: %w", err)
+	}
+	if cfg == nil {
+		return fmt.Errorf("configuration is nil after loading")
+	}
+
+	appLogger.Info("Starting MCP server", "storage_dir", cfg.StorageDir)
+
+	// Create and start MCP server
+	server := mcp.NewServer(cfg, appLogger)
+
+	appLogger.Debug("MCP server initialized, starting communication loop")
+	return runWithRecovery(func() error {
+		return server.Start()
+	}, appLogger, "MCP server")
 }

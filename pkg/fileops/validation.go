@@ -648,3 +648,168 @@ func ValidateStoragePath(path string) error {
 
 	return nil
 }
+
+// ValidateContentSecurity checks for potentially malicious content in strings.
+// This function detects common injection attacks, control characters, and other
+// suspicious patterns that could be used for security exploits.
+//
+// Parameters:
+//   - content: The string content to validate
+//
+// Returns:
+//   - error: Validation error if suspicious content is detected
+//
+// The function checks for:
+//   - Control characters (except newlines, carriage returns, and tabs)
+//   - Null bytes
+//   - Script injection patterns (script tags, javascript:, eval, etc.)
+//   - Other potentially dangerous content patterns
+//
+// Usage example:
+//
+//	if err := fileops.ValidateContentSecurity(userInput); err != nil {
+//	    return fmt.Errorf("suspicious content detected: %w", err)
+//	}
+func ValidateContentSecurity(content string) error {
+	// Check for control characters (except newlines and tabs)
+	for _, r := range content {
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
+			return fmt.Errorf("content contains control characters")
+		}
+	}
+
+	// Check for null bytes
+	if strings.Contains(content, "\x00") {
+		return fmt.Errorf("content contains null bytes")
+	}
+
+	// Check for script injection patterns
+	suspiciousPatterns := []string{
+		"<script",
+		"javascript:",
+		"vbscript:",
+		"data:text/html",
+		"eval(",
+		"exec(",
+		"onload=",
+		"onerror=",
+		"onclick=",
+	}
+
+	lowerContent := strings.ToLower(content)
+	for _, pattern := range suspiciousPatterns {
+		if strings.Contains(lowerContent, pattern) {
+			return fmt.Errorf("content contains potentially malicious pattern: %s", pattern)
+		}
+	}
+
+	return nil
+}
+
+// SanitizeIdentifier sanitizes a string to be safe for use as an identifier.
+// This function removes dangerous characters while preserving readability,
+// making it suitable for tool names, variable names, or other identifiers.
+//
+// Parameters:
+//   - identifier: The string to sanitize
+//   - maxLength: Maximum allowed length (0 for no limit)
+//
+// Returns:
+//   - string: Sanitized identifier
+//   - error: Validation error if the identifier becomes empty after sanitization
+//
+// The function:
+//   - Allows only alphanumeric characters, spaces, hyphens, underscores, and periods
+//   - Normalizes multiple consecutive separators
+//   - Trims leading/trailing separators
+//   - Enforces length limits if specified
+//
+// Usage example:
+//
+//	clean, err := fileops.SanitizeIdentifier("my-tool@name#123", 50)
+//	if err != nil {
+//	    return "", err
+//	}
+//	// clean will be "my-toolname123"
+func SanitizeIdentifier(identifier string, maxLength int) (string, error) {
+	if strings.TrimSpace(identifier) == "" {
+		return "", fmt.Errorf("identifier cannot be empty")
+	}
+
+	var cleanName strings.Builder
+
+	for _, r := range identifier {
+		// Allow alphanumeric, spaces, hyphens, underscores, and periods
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == ' ' || r == '-' || r == '_' || r == '.' {
+			cleanName.WriteRune(r)
+		}
+	}
+
+	result := strings.TrimSpace(cleanName.String())
+
+	// Replace multiple consecutive spaces/separators with single underscore
+	result = strings.ReplaceAll(result, "  ", " ")
+	result = strings.ReplaceAll(result, " ", "_")
+	result = strings.ReplaceAll(result, "--", "_")
+	result = strings.ReplaceAll(result, "__", "_")
+
+	// Limit length if specified
+	if maxLength > 0 && len(result) > maxLength {
+		result = result[:maxLength]
+	}
+
+	// Trim leading/trailing separators
+	result = strings.Trim(result, "_-.")
+
+	if result == "" {
+		return "", fmt.Errorf("identifier becomes empty after sanitization")
+	}
+
+	return result, nil
+}
+
+// ValidateFileSizeLimit checks if a file size is within acceptable limits.
+// This function helps prevent memory exhaustion from very large files.
+//
+// Parameters:
+//   - filePath: Path to the file to check
+//   - maxSize: Maximum allowed file size in bytes
+//
+// Returns:
+//   - error: Validation error if file exceeds size limit or cannot be accessed
+//
+// The function:
+//   - Checks file existence and accessibility
+//   - Compares file size against the specified limit
+//   - Returns descriptive errors for different failure modes
+//
+// Usage example:
+//
+//	// Limit files to 10MB
+//	if err := fileops.ValidateFileSizeLimit("/path/to/file.txt", 10*1024*1024); err != nil {
+//	    return fmt.Errorf("file too large: %w", err)
+//	}
+func ValidateFileSizeLimit(filePath string, maxSize int64) error {
+	if maxSize <= 0 {
+		return fmt.Errorf("invalid size limit: %d", maxSize)
+	}
+
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("file does not exist: %s", filepath.Base(filePath))
+		}
+		return fmt.Errorf("cannot access file: %w", err)
+	}
+
+	if fileInfo.IsDir() {
+		return fmt.Errorf("path is a directory, not a file: %s", filePath)
+	}
+
+	if fileInfo.Size() > maxSize {
+		return fmt.Errorf("file size %d bytes exceeds limit %d bytes", fileInfo.Size(), maxSize)
+	}
+
+	return nil
+}

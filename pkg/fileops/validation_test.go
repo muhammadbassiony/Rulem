@@ -828,3 +828,425 @@ func TestValidateStoragePath(t *testing.T) {
 		})
 	}
 }
+
+// Tests for ValidateContentSecurity
+
+func TestValidateContentSecurity(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "clean content",
+			content:     "This is clean content",
+			expectError: false,
+		},
+		{
+			name:        "content with newlines",
+			content:     "Content with\nnewlines",
+			expectError: false,
+		},
+		{
+			name:        "content with tabs",
+			content:     "Content with\ttabs",
+			expectError: false,
+		},
+		{
+			name:        "content with carriage returns",
+			content:     "Content with\rcarriage returns",
+			expectError: false,
+		},
+		{
+			name:        "content with null byte",
+			content:     "Content with\x00null byte",
+			expectError: true,
+			errorText:   "control characters",
+		},
+		{
+			name:        "content with control character",
+			content:     "Content with\x01control char",
+			expectError: true,
+			errorText:   "control characters",
+		},
+		{
+			name:        "content with script tag",
+			content:     "Content with <script>alert('xss')</script>",
+			expectError: true,
+			errorText:   "<script",
+		},
+		{
+			name:        "content with javascript protocol",
+			content:     "Content with javascript:alert('xss')",
+			expectError: true,
+			errorText:   "javascript:",
+		},
+		{
+			name:        "content with vbscript",
+			content:     "Content with vbscript:msgbox('xss')",
+			expectError: true,
+			errorText:   "vbscript:",
+		},
+		{
+			name:        "content with data url",
+			content:     "Content with data:text/html,<script>alert(1)</script>",
+			expectError: true,
+			errorText:   "<script",
+		},
+		{
+			name:        "content with eval",
+			content:     "Content with eval(maliciousCode)",
+			expectError: true,
+			errorText:   "eval(",
+		},
+		{
+			name:        "content with exec",
+			content:     "Content with exec(systemCommand)",
+			expectError: true,
+			errorText:   "exec(",
+		},
+		{
+			name:        "content with onload",
+			content:     "Content with onload=alert('xss')",
+			expectError: true,
+			errorText:   "onload=",
+		},
+		{
+			name:        "case insensitive script detection",
+			content:     "Content with <SCRIPT>alert('xss')</SCRIPT>",
+			expectError: true,
+			errorText:   "<script",
+		},
+		{
+			name:        "mixed case javascript",
+			content:     "Content with JavaScript:alert('xss')",
+			expectError: true,
+			errorText:   "javascript:",
+		},
+		{
+			name:        "empty content",
+			content:     "",
+			expectError: false,
+		},
+		{
+			name:        "unicode content",
+			content:     "Content with unicode 字符 and émojis 🚀",
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateContentSecurity(tt.content)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("ValidateContentSecurity(%q) expected error but got none", tt.content)
+				} else if !strings.Contains(err.Error(), tt.errorText) {
+					t.Errorf("ValidateContentSecurity(%q) error = %v, want error containing %q", tt.content, err, tt.errorText)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateContentSecurity(%q) unexpected error: %v", tt.content, err)
+				}
+			}
+		})
+	}
+}
+
+// Tests for SanitizeIdentifier
+
+func TestSanitizeIdentifier(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		maxLength   int
+		expected    string
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "clean identifier",
+			input:       "clean_identifier",
+			maxLength:   100,
+			expected:    "clean_identifier",
+			expectError: false,
+		},
+		{
+			name:        "identifier with spaces",
+			input:       "identifier with spaces",
+			maxLength:   100,
+			expected:    "identifier_with_spaces",
+			expectError: false,
+		},
+		{
+			name:        "identifier with special characters",
+			input:       "identifier@#$%^&*()with!special",
+			maxLength:   100,
+			expected:    "identifierwithspecial",
+			expectError: false,
+		},
+		{
+			name:        "identifier with multiple spaces",
+			input:       "identifier  with   multiple    spaces",
+			maxLength:   100,
+			expected:    "identifier_with_multiple_spaces",
+			expectError: false,
+		},
+		{
+			name:        "identifier with hyphens",
+			input:       "identifier-with-hyphens",
+			maxLength:   100,
+			expected:    "identifier-with-hyphens",
+			expectError: false,
+		},
+		{
+			name:        "identifier with underscores",
+			input:       "identifier_with_underscores",
+			maxLength:   100,
+			expected:    "identifier_with_underscores",
+			expectError: false,
+		},
+		{
+			name:        "identifier with periods",
+			input:       "identifier.with.periods",
+			maxLength:   100,
+			expected:    "identifier.with.periods",
+			expectError: false,
+		},
+		{
+			name:        "identifier with leading/trailing separators",
+			input:       "_-identifier-with-separators-_",
+			maxLength:   100,
+			expected:    "identifier-with-separators",
+			expectError: false,
+		},
+		{
+			name:        "empty identifier",
+			input:       "",
+			maxLength:   100,
+			expected:    "",
+			expectError: true,
+			errorText:   "empty",
+		},
+		{
+			name:        "whitespace only identifier",
+			input:       "   \t\n  ",
+			maxLength:   100,
+			expected:    "",
+			expectError: true,
+			errorText:   "empty",
+		},
+		{
+			name:        "identifier with only special characters",
+			input:       "@#$%^&*()",
+			maxLength:   100,
+			expected:    "",
+			expectError: true,
+			errorText:   "empty after sanitization",
+		},
+		{
+			name:        "identifier with consecutive separators",
+			input:       "identifier--with__consecutive",
+			maxLength:   100,
+			expected:    "identifier_with_consecutive",
+			expectError: false,
+		},
+		{
+			name:        "very long identifier",
+			input:       strings.Repeat("a", 150),
+			maxLength:   100,
+			expected:    strings.Repeat("a", 100),
+			expectError: false,
+		},
+		{
+			name:        "mixed case with numbers",
+			input:       "TestIdentifier123WithNumbers",
+			maxLength:   100,
+			expected:    "TestIdentifier123WithNumbers",
+			expectError: false,
+		},
+		{
+			name:        "unicode characters",
+			input:       "identifier_with_unicode_字符",
+			maxLength:   100,
+			expected:    "identifier_with_unicode",
+			expectError: false,
+		},
+		{
+			name:        "no length limit",
+			input:       "very_long_identifier_name",
+			maxLength:   0,
+			expected:    "very_long_identifier_name",
+			expectError: false,
+		},
+		{
+			name:        "exact length limit",
+			input:       "exact",
+			maxLength:   5,
+			expected:    "exact",
+			expectError: false,
+		},
+		{
+			name:        "length limit with truncation",
+			input:       "toolongidentifier",
+			maxLength:   10,
+			expected:    "toolongide",
+			expectError: false,
+		},
+		{
+			name:        "script injection attempt",
+			input:       "<script>alert('xss')</script>",
+			maxLength:   100,
+			expected:    "scriptalertxssscript",
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := SanitizeIdentifier(tt.input, tt.maxLength)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("SanitizeIdentifier(%q, %d) expected error but got none", tt.input, tt.maxLength)
+				} else if !strings.Contains(err.Error(), tt.errorText) {
+					t.Errorf("SanitizeIdentifier(%q, %d) error = %v, want error containing %q", tt.input, tt.maxLength, err, tt.errorText)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("SanitizeIdentifier(%q, %d) unexpected error: %v", tt.input, tt.maxLength, err)
+				} else if result != tt.expected {
+					t.Errorf("SanitizeIdentifier(%q, %d) = %q, want %q", tt.input, tt.maxLength, result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+// Tests for ValidateFileSizeLimit
+
+func TestValidateFileSizeLimit(t *testing.T) {
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "fileops-filesize-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tests := []struct {
+		name        string
+		content     string
+		maxSize     int64
+		expectError bool
+		errorText   string
+		skipFile    bool // For testing non-existent files
+	}{
+		{
+			name:        "file within size limit",
+			content:     "Small file content",
+			maxSize:     100,
+			expectError: false,
+		},
+		{
+			name:        "file exceeds size limit",
+			content:     strings.Repeat("Large content ", 100),
+			maxSize:     50,
+			expectError: true,
+			errorText:   "exceeds limit",
+		},
+		{
+			name:        "empty file",
+			content:     "",
+			maxSize:     100,
+			expectError: false,
+		},
+		{
+			name:        "file at exact size limit",
+			content:     strings.Repeat("x", 50),
+			maxSize:     50,
+			expectError: false,
+		},
+		{
+			name:        "file one byte over limit",
+			content:     strings.Repeat("x", 51),
+			maxSize:     50,
+			expectError: true,
+			errorText:   "exceeds limit",
+		},
+		{
+			name:        "invalid size limit - zero",
+			content:     "Content",
+			maxSize:     0,
+			expectError: true,
+			errorText:   "invalid size limit",
+		},
+		{
+			name:        "invalid size limit - negative",
+			content:     "Content",
+			maxSize:     -1,
+			expectError: true,
+			errorText:   "invalid size limit",
+		},
+		{
+			name:        "non-existent file",
+			content:     "",
+			maxSize:     100,
+			expectError: true,
+			errorText:   "does not exist",
+			skipFile:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var testPath string
+
+			if tt.skipFile {
+				// Test with non-existent file
+				testPath = filepath.Join(tempDir, "nonexistent-file.txt")
+			} else {
+				// Create test file
+				testPath = filepath.Join(tempDir, "test-"+tt.name+".txt")
+				if err := os.WriteFile(testPath, []byte(tt.content), 0644); err != nil {
+					t.Fatalf("Failed to create test file: %v", err)
+				}
+			}
+
+			err := ValidateFileSizeLimit(testPath, tt.maxSize)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("ValidateFileSizeLimit(%q, %d) expected error but got none", testPath, tt.maxSize)
+				} else if !strings.Contains(err.Error(), tt.errorText) {
+					t.Errorf("ValidateFileSizeLimit(%q, %d) error = %v, want error containing %q", testPath, tt.maxSize, err, tt.errorText)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateFileSizeLimit(%q, %d) unexpected error: %v", testPath, tt.maxSize, err)
+				}
+			}
+		})
+	}
+}
+
+// Test ValidateFileSizeLimit with directory instead of file
+func TestValidateFileSizeLimitWithDirectory(t *testing.T) {
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "fileops-dir-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create a subdirectory to test with
+	subDir := filepath.Join(tempDir, "subdir")
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("Failed to create subdirectory: %v", err)
+	}
+
+	err = ValidateFileSizeLimit(subDir, 100)
+	if err == nil {
+		t.Error("ValidateFileSizeLimit should fail when given a directory")
+	} else if !strings.Contains(err.Error(), "directory, not a file") {
+		t.Errorf("ValidateFileSizeLimit error = %v, want error containing 'directory, not a file'", err)
+	}
+}

@@ -18,7 +18,7 @@ import (
 // requiring changes throughout the codebase or test files
 const (
 	// ToolDescriptionPrefix is prepended to all tool descriptions
-	ToolDescriptionPrefix = "Use this for "
+	ToolDescriptionPrefix = ""
 
 	// ApplyToFormat defines how the applyTo field is formatted in descriptions
 	ApplyToFormat = "apply to"

@@ -18,7 +18,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"rulem/internal/config"
 	"rulem/internal/logging"
@@ -280,9 +282,43 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 
 	// Create and start MCP server
 	server := mcp.NewServer(cfg, appLogger)
+	if server == nil {
+		return fmt.Errorf("failed to initialize MCP server")
+	}
 
 	appLogger.Debug("MCP server initialized, starting communication loop")
-	return runWithRecovery(func() error {
-		return server.Start()
-	}, appLogger, "MCP server")
+
+	// Set up signal handling for graceful shutdown
+
+	// Create channel to listen for interrupt signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start server in goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- runWithRecovery(func() error {
+			return server.Start()
+		}, appLogger, "MCP server")
+	}()
+
+	// Wait for either server error or shutdown signal
+	select {
+	case err := <-errChan:
+		if err != nil {
+			appLogger.Error("MCP server error", "error", err)
+			return err
+		}
+	case sig := <-sigChan:
+		appLogger.Info("Received shutdown signal", "signal", sig)
+
+		// Graceful shutdown
+		if err := server.Stop(); err != nil {
+			appLogger.Error("Error during server shutdown", "error", err)
+		} else {
+			appLogger.Info("MCP server stopped gracefully")
+		}
+	}
+
+	return nil
 }

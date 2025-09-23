@@ -11,3 +11,6 @@ devCentral/
 rulem
 # Added by goreleaser init:
 dist/
+
+.kiro/*
+.vscode/*

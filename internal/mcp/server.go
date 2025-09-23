@@ -9,59 +9,41 @@
 package mcp
 
 import (
-	"bytes"
+	"context"
 	"fmt"
-	"os"
 
 	"rulem/internal/config"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 
-	"github.com/adrg/frontmatter"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// RuleFrontmatter represents the YAML frontmatter structure expected in rule files
-type RuleFrontmatter struct {
-	Description string `yaml:"description"`
-	Name        string `yaml:"name,omitempty"`
-	ApplyTo     string `yaml:"applyTo,omitempty"`
-}
-
-// RuleFile represents a parsed rule file with frontmatter and content
-type RuleFile struct {
-	// File information
-	FileName string
-	FilePath string
-
-	// Frontmatter fields
-	Description string
-	Name        string
-	ApplyTo     string
-
-	// File content (without frontmatter)
-	Content string
-}
-
-// Server represents an MCP server instance using mcp-go
 type Server struct {
-	config      *config.Config
-	logger      *logging.AppLogger
-	fileManager *filemanager.FileManager
-	mcpServer   *server.MCPServer
+	config        *config.Config
+	logger        *logging.AppLogger
+	fileManager   *filemanager.FileManager
+	mcpServer     *server.MCPServer
+	toolRegistry  map[string]*RuleFileTool // Maps tool names to their RuleFileTool instances
+	ruleProcessor *RuleFileProcessor       // Handles rule file parsing and processing
 }
 
 // NewServer creates a new MCP server instance
 func NewServer(cfg *config.Config, logger *logging.AppLogger) *Server {
 	return &Server{
-		config: cfg,
-		logger: logger,
+		config:       cfg,
+		logger:       logger,
+		toolRegistry: make(map[string]*RuleFileTool),
 	}
 }
 
 // Start initializes and starts the MCP server
 func (s *Server) Start() error {
 	s.logger.Info("Initializing MCP server")
+
+	// Create MCP server instance
+	s.mcpServer = server.NewMCPServer("rulem", "1.0.0", server.WithToolCapabilities(true))
 
 	// Initialize file manager for repository scanning
 	var err error
@@ -70,37 +52,29 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to initialize file manager: %w", err)
 	}
 
-	ruleFiles, err := s.getRuleFilesWithFrontmatter()
+	// Initialize rule file processor
+	maxFileSize := int64(5 * 1024 * 1024) // 5 MB
+	s.ruleProcessor = NewRuleFileProcessor(s.logger, s.fileManager, maxFileSize)
+
+	// Register rule files as MCP tools
+	err = s.RegisterRuleFileTools()
 	if err != nil {
-		return fmt.Errorf("failed to get rule files with frontmatter: %w", err)
+		s.logger.Error("Failed to register rule file tools", "error", err)
+		return err
 	}
 
-	s.logger.Info("Rule files with frontmatter loaded", "ruleCount", len(ruleFiles))
-	if len(ruleFiles) > 0 {
-		for _, rf := range ruleFiles {
-			s.logger.Info("Rule",
-				"name", rf.FileName,
-				"description", rf.Description,
-				"ruleName", rf.Name,
-				"applyTo", rf.ApplyTo,
-			)
-		}
+	s.logger.Info("Successfully registered rule file tools", "toolCount", len(s.toolRegistry))
+
+	s.logger.Info("MCP server setup complete")
+
+	// Start the stdio server
+	s.logger.Info("Starting MCP stdio server")
+	if err := server.ServeStdio(s.mcpServer); err != nil {
+		s.logger.Error("MCP server error", "error", err)
+		return fmt.Errorf("MCP server failed: %w", err)
 	}
 
-	// MCP server setup and start logic would go here
-	// For now, we log that the server would start
-	s.logger.Info("MCP server setup complete (server start logic not implemented)")
-
-	// // Create MCP server with basic capabilities
-	// s.mcpServer = server.NewMCPServer("rulem", "1.0.0")
-
-	// s.logger.Info("MCP server created, starting stdio communication")
-
-	// // Start the server using stdio transport
-	// if err := server.ServeStdio(s.mcpServer); err != nil {
-	// 	return fmt.Errorf("MCP server failed: %w", err)
-	// }
-
+	s.logger.Info("MCP server stopped")
 	return nil
 }
 
@@ -118,115 +92,125 @@ func (s *Server) getRepoFiles() ([]filemanager.FileItem, error) {
 		return nil, fmt.Errorf("file manager not initialized")
 	}
 
-	s.logger.Debug("Scanning central repository for files")
-
 	files, err := s.fileManager.ScanCentralRepo()
 	if err != nil {
 		s.logger.Error("Failed to scan central repository", "error", err)
 		return nil, fmt.Errorf("failed to scan central repository: %w", err)
 	}
 
-	s.logger.Debug("Successfully scanned central repository", "fileCount", len(files))
 	return files, nil
 }
 
-// parseRuleFiles takes a list of file items and parses them for frontmatter
-// Returns only files that have valid YAML frontmatter with at least a 'description' field
-func (s *Server) parseRuleFiles(files []filemanager.FileItem) ([]RuleFile, error) {
-	if s.fileManager == nil {
-		return nil, fmt.Errorf("file manager not initialized")
-	}
-
-	var ruleFiles []RuleFile
-	var skippedCount int
-
-	s.logger.Debug("Starting frontmatter parsing", "totalFiles", len(files))
-
-	for _, file := range files {
-		// Get absolute path for reading
-		absolutePath := s.fileManager.GetAbsolutePath(file)
-
-		s.logger.Debug("Parsing file", "name", file.Name, "path", file.Path)
-
-		// Read file content
-		content, err := os.ReadFile(absolutePath)
-		if err != nil {
-			s.logger.Debug("Failed to read file, skipping", "file", file.Name, "error", err)
-			skippedCount++
-			continue
-		}
-
-		// Parse frontmatter
-		var matter RuleFrontmatter
-		body, err := frontmatter.Parse(bytes.NewReader(content), &matter)
-		if err != nil {
-			s.logger.Debug("No valid frontmatter found, skipping", "file", file.Name, "error", err)
-			skippedCount++
-			continue
-		}
-
-		// Check if description field exists (required)
-		if matter.Description == "" {
-			s.logger.Debug("Missing required 'description' field in frontmatter, skipping", "file", file.Name)
-			skippedCount++
-			continue
-		}
-
-		// Create RuleFile with parsed data
-		ruleFile := RuleFile{
-			FileName:    file.Name,
-			FilePath:    file.Path,
-			Description: matter.Description,
-			Name:        matter.Name,
-			ApplyTo:     matter.ApplyTo,
-			Content:     string(body),
-		}
-
-		ruleFiles = append(ruleFiles, ruleFile)
-		s.logger.Debug("Successfully parsed rule file",
-			"file", file.Name,
-			"description", matter.Description,
-			"name", matter.Name,
-			"applyTo", matter.ApplyTo,
-		)
-	}
-
-	s.logger.Info("Frontmatter parsing completed",
-		"validRules", len(ruleFiles),
-		"skippedFiles", skippedCount,
-		"totalFiles", len(files),
-	)
-
-	return ruleFiles, nil
-}
-
-// getRuleFilesWithFrontmatter scans the repository and returns parsed rule files with frontmatter
-func (s *Server) getRuleFilesWithFrontmatter() ([]RuleFile, error) {
-	// First get all files from repository
+// RegisterRuleFileTools registers all valid rule files as MCP tools
+// This method scans rule files with frontmatter and registers them as callable MCP tools
+func (s *Server) RegisterRuleFileTools() error {
+	// Get all files from repository
 	files, err := s.getRepoFiles()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get repository files: %w", err)
+		return fmt.Errorf("failed to get repository files: %w", err)
 	}
 
-	// Parse frontmatter from files
-	ruleFiles, err := s.parseRuleFiles(files)
+	// Process rule files using the rule processor
+	toolsMap, err := s.ruleProcessor.ProcessRuleFiles(files)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse rule files: %w", err)
+		return fmt.Errorf("failed to process rule files: %w", err)
 	}
 
-	return ruleFiles, nil
+	// Set the server's registry to the processed tools
+	s.toolRegistry = toolsMap
+
+	// Loop through tools and register them with the MCP server
+	for toolName, tool := range toolsMap {
+		s.logger.Debug("Registering MCP tool", "name", toolName, "description", tool.Description)
+		// create new MCP tool and its handler
+		mcpTool := mcp.NewTool(toolName, mcp.WithDescription(tool.Description))
+		handler, err := s.getRulefileToolHandler(toolName)
+		if err != nil {
+			s.logger.Error("Failed to get tool handler", "tool", toolName, "error", err)
+			continue
+		}
+		s.mcpServer.AddTool(mcpTool, handler)
+	}
+
+	return nil
 }
 
-// InitializeComponents is a public method for testing and demo purposes
-// It initializes the file manager without starting the full MCP server
+// getRulefileToolHandler creates an MCP tool handler function for a specific rule file tool.
+// This function returns a handler that can be registered with the MCP server to handle
+// tool invocation requests. The handler will return the pre-processed content of the rule file.
+//
+// The function performs tool validation at handler creation time rather than at each invocation
+// for better performance. The returned handler is thread-safe and can be called concurrently.
+//
+// Parameters:
+//   - toolName: The name of the tool to create a handler for (must exist in toolRegistry)
+//
+// Returns:
+//   - server.ToolHandlerFunc: Handler function that can process MCP tool requests
+//   - error: Validation error if the tool doesn't exist in the registry
+//
+// Usage:
+//
+//	handler, err := server.getRulefileToolHandler("my_tool")
+//	if err != nil {
+//	    return fmt.Errorf("failed to create handler: %w", err)
+//	}
+//	mcpServer.AddTool(tool, handler)
+func (s *Server) getRulefileToolHandler(toolName string) (server.ToolHandlerFunc, error) {
+	// Validate tool exists in registry at handler creation time
+	tool, exists := s.toolRegistry[toolName]
+	if !exists {
+		return nil, fmt.Errorf("tool '%s' not found in registry", toolName)
+	}
+
+	// Capture the content at handler creation time for better performance
+	content := tool.RuleFile.Content
+
+	// Return the handler function that will be called for each tool invocation
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Log the tool invocation for debugging/monitoring purposes
+		s.logger.Debug("Processing rule file tool request",
+			"tool", toolName,
+			"contentLength", len(content))
+
+		// Check if context was cancelled
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		// Return the pre-processed rule file content
+		return mcp.NewToolResultText(content), nil
+	}, nil
+}
+
+// InitializeComponents initializes the server components (file manager and rule processor)
+// without starting the full MCP server. This method is specifically designed for testing
+// scenarios where you need to access server functionality without the MCP server lifecycle.
+//
+// This method initializes:
+//   - FileManager for repository scanning and file operations
+//   - RuleFileProcessor for parsing and processing rule files
+//
+// Use this method in tests when you need to call methods like RegisterRuleFileTools,
+// getRepoFiles, or other server methods that depend on these components being initialized.
+//
+// For production use, prefer Start() which initializes components and starts the MCP server.
+//
+// Returns:
+//   - error: Initialization error if file manager creation fails
 func (s *Server) InitializeComponents() error {
+	// Initialize file manager for repository scanning
 	var err error
 	s.fileManager, err = filemanager.NewFileManager(s.config.StorageDir, s.logger)
-	return err
-}
+	if err != nil {
+		return fmt.Errorf("failed to initialize file manager: %w", err)
+	}
 
-// GetRuleFilesWithFrontmatter is a public method for testing and demo purposes
-// It returns parsed rule files with frontmatter
-func (s *Server) GetRuleFilesWithFrontmatter() ([]RuleFile, error) {
-	return s.getRuleFilesWithFrontmatter()
+	// Initialize rule file processor
+	maxFileSize := int64(5 * 1024 * 1024) // 5 MB
+	s.ruleProcessor = NewRuleFileProcessor(s.logger, s.fileManager, maxFileSize)
+
+	return nil
 }

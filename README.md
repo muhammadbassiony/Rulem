@@ -14,6 +14,13 @@ A command-line tool for managing and organizing AI assistant instruction files a
 - [Configuration](#configuration)
   - [Supported AI Assistants](#supported-ai-assistants)
 - [MCP Integration](#mcp-integration)
+  - [How MCP Works](#how-mcp-works)
+  - [Tool Registration](#tool-registration)
+  - [Example Tool Usage](#example-tool-usage)
+  - [Integration with Popular Code Editors](#integration-with-popular-code-editors)
+  - [Writing Effective Rule Descriptions](#writing-effective-rule-descriptions)
+  - [Developing and Testing the MCP Server](#developing-and-testing-the-mcp-server)
+  - [Why Rules as Tools](#why-rules-as-tools)
 - [Development](#development)
   - [Prerequisites](#prerequisites)
   - [Common Commands](#common-commands)
@@ -27,7 +34,10 @@ My main motivations for creating `rulem` are:
 - **Centralized Management**: Store all instruction files in one organized location
 - **Reusability**: Reuse and adapt instructions across multiple projects without duplication, rulem also supports symlinking to keep files up to date as you constantly improve them.
 - **Version Control**: Having a single source of truth for instruction files that can be tracked with version control systems.
-- Experimentation & adpoting more AI powered development
+- **Better Integration in AI Assisted Development**: By integrating with the Model Context Protocol (MCP), rulem allows AI assistants to access your organized instruction files as tools and resources, enhancing their ability to assist you effectively.
+- **Experimentation** & adpoting more AI powered development
+
+For an example of a centralized rule repository in action, see [muhammadbassiony/Rulefiles](https://github.com/muhammadbassiony/Rulefiles).
 
 ## Features
 
@@ -92,6 +102,8 @@ go build -o rulem ./cmd/rulem
    - Navigate to "Update settings"
    - Modify configuration as needed
 
+For examples of rule files and repository organization, see [muhammadbassiony/Rulefiles](https://github.com/muhammadbassiony/Rulefiles).
+
 
 ## Configuration
 
@@ -119,41 +131,119 @@ rulem mcp
 rulem mcp --debug
 ```
 
-### AI Assistant Integration
+### How MCP Works
 
-Configure your AI assistant to use rulem as an MCP server:
+The rulem MCP server automatically scans your rule files and registers them as dynamic tools based on their YAML frontmatter. Each rule file with valid frontmatter (containing at least a `description` field) becomes an MCP tool that AI assistants can invoke to access the rule content.
 
-**Claude Desktop:**
+### Tool Registration
+
+- **Automatic Discovery**: Tools are registered at server startup by scanning the configured storage directory
+- **Naming**: Tool names are generated from the rule file's frontmatter `name` field or filename, with sanitization for safety
+- **Descriptions**: Tool descriptions combine the rule's description with application context (if `applyTo` is specified)
+- **Content Access**: When invoked, tools return the full content of the rule file (excluding frontmatter)
+
+### Example Tool Usage
+
+If you have a rule file `react-best-practices.md` with frontmatter:
+```yaml
+description: "React development best practices"
+applyTo: "frontend development"
+```
+
+It becomes an MCP tool named `react_best_practices` with description "Use this for React development best practices (apply to: frontend development)".
+
+For a practical example of a centralized rule repository integrated with this CLI tool and MCP server, see [muhammadbassiony/Rulefiles](https://github.com/muhammadbassiony/Rulefiles).
+
+### Integration with Popular Code Editors
+
+For most AI IDEs and CLI tools that support MCP, you can configure them to use rulem as an MCP server running locally through stdio. For most tools, the configuration is similar. You will need to add a setting like:
 ```json
-{
-  "mcpServers": {
-    "rulem": {
+  "rulem": {
+    "command": ["rulem", "mcp"],
+    "env": {}
+  }
+```
+
+An example from Zed in your settings file:
+```json
+  "context_servers": {
+    "Rulem": {
+      "enabled": true,
+      "source": "custom",
       "command": "rulem",
       "args": ["mcp"]
     }
   }
-}
 ```
 
-**Cursor:**
-```json
-{
-  "mcp": {
-    "servers": {
-      "rulem": {
-        "command": ["rulem", "mcp"],
-        "env": {}
-      }
-    }
-  }
-}
+### Writing Effective Rule Descriptions
+
+To maximize the likelihood that LLMs will use your rule files, write clear, specific, and actionable descriptions in the YAML frontmatter:
+
+- **Be Specific**: Clearly state the context or scenario where the rule applies (e.g., "Use this for debugging React component state issues")
+- **Action-Oriented**: Start with verbs like "Use this for", "Apply this when", or "Follow these guidelines for"
+- **Include Context**: Mention technologies, frameworks, or problem types (e.g., "React", "API design", "error handling")
+- **Concise but Descriptive**: Keep under 200 characters while being informative
+- **Indicate Scope**: Use the `applyTo` field to specify broader application areas
+
+**Example of an effective description:**
+```yaml
+description: "Use this for implementing secure API authentication with JWT tokens"
+applyTo: "backend development"
 ```
 
-### Available MCP Tools
+This makes it more likely the LLM will invoke the tool when working on authentication-related tasks.
 
-- **list_rules** - List all rule files, optionally filtered by AI assistant
-- **read_rule** - Read content of a specific rule file  
-- **search_rules** - Search rules containing specific keywords
+### Developing and Testing the MCP Server
+
+For development and testing of the MCP server, you can use the MCP Inspector tool to interact with the server and see how AI assistants perceive your rule files.
+
+#### Using MCP Inspector
+
+1. **Install MCP Inspector**:
+   ```bash
+   npm install -g @modelcontextprotocol/inspector
+   ```
+
+2. **Start the Inspector**:
+   ```bash
+   mcp-inspector
+   ```
+   This opens a web interface at `http://localhost:5173` (or similar).
+
+3. **Connect to rulem MCP Server**:
+   - In the Inspector, configure the server with command: `rulem mcp`
+   - The Inspector will start the server and display available tools
+
+4. **Test Tool Invocation**:
+   - Use the web interface to call tools and see the responses
+   - This shows exactly how AI assistants will see and interact with your rule files
+   - Verify tool names, descriptions, and content delivery
+
+The Inspector is invaluable for debugging tool registration, testing rule file parsing, and ensuring your rules are presented correctly to AI assistants.
+
+For more information, see the [MCP Inspector Documentation](https://modelcontextprotocol.io/docs/tools/inspector).
+
+### Why Rules as Tools
+
+We chose to implement rule files as MCP tools rather than resources or prompts for several key reasons:
+
+#### Design Rationale
+
+- **Active Invocation**: Tools allow AI assistants to actively request rule content when needed, rather than having static access to all rules
+- **Contextual Relevance**: LLMs can decide when to use specific rules based on the conversation context and task at hand
+- **Selective Access**: Prevents information overload by allowing assistants to pull only relevant rules
+- **Dynamic Content**: Tools can return processed content (e.g., excluding frontmatter) and adapt descriptions
+
+#### Technical Benefits
+
+- **Better Performance**: Only loads rule content when requested, reducing memory usage
+- **Security**: Content is validated and sanitized before delivery
+- **Flexibility**: Easy to add metadata-driven features like conditional application
+
+#### MCP Support
+
+This approach leverages MCP's tool capabilities, which are widely supported across clients. For a list of MCP-compatible clients, see the [official MCP clients page](https://modelcontextprotocol.io/clients).
 
 For detailed integration examples and troubleshooting, see [docs/mcp-integration.md](docs/mcp-integration.md).
 

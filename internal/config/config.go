@@ -12,7 +12,7 @@
 //   - Integration with Bubble Tea for async configuration operations
 //
 // Configuration is stored in YAML format and includes:
-//   - Storage directory for rule files
+//   - Central repository location and optional sync metadata
 //   - Configuration version tracking
 //   - Initialization timestamp
 //
@@ -72,14 +72,34 @@ const AppName = "rulem" // application name used for config directory
 // The configuration is persisted as YAML and loaded at application startup.
 //
 // Fields:
-//   - StorageDir: The directory where rulem stores its rule files and repositories
+//   - Central.Path: The directory where rulem stores or clones rule files
+//   - Central.RemoteURL: Optional Git remote used to populate the local cache
 //   - Version: Configuration schema version for handling upgrades
 //   - InitTime: Unix timestamp when the configuration was first created
 type Config struct {
-	// StorageDir is the directory where rulem stores its rule files.
-	StorageDir string `yaml:"storage_dir"`
-	Version    string `yaml:"version"`   // Track config version
-	InitTime   int64  `yaml:"init_time"` // Unix timestamp of first setup
+	Version  string                  `yaml:"version"`   // Track config version
+	InitTime int64                   `yaml:"init_time"` // Unix timestamp of first setup
+	Central  CentralRepositoryConfig `yaml:"central"`
+}
+
+// CentralRepositoryConfig defines the configuration for the central rule repository.
+//
+// This struct specifies the location and synchronization details for the authoritative
+// repository where rulem stores or clones rule files. It supports both local directories
+// and remote Git repositories, enabling flexible rule management and caching.
+// The configuration is persisted as YAML and used to manage the application's
+// rule storage and synchronization operations.
+//
+// Fields:
+//   - Path (required): The required directory path where rulem stores or clones rule files on disk. This is the path to the local cache, whether its local only or a clone of a remote repository.
+//   - RemoteURL: (Optional) Git remote URL used to populate and sync the local cache. If not set, the local path is used as-is without remote synchronization.
+//   - Branch: (Optional) Git branch name for the remote repository synchronization
+//   - LastSyncTime: (Optional) Unix timestamp of the last successful sync operation, used for freshness indicators
+type CentralRepositoryConfig struct {
+	Path         string  `yaml:"path"`
+	RemoteURL    *string `yaml:"remote_url,omitempty"`
+	Branch       *string `yaml:"branch,omitempty"`
+	LastSyncTime *int64  `yaml:"last_sync_time,omitempty"`
 }
 
 // Path returns the standard config file paths for the current platform
@@ -171,11 +191,14 @@ func DefaultConfig() Config {
 	path := filemanager.GetDefaultStorageDir()
 	logging.Debug("Using default storage directory", "path", path)
 
-	return Config{
-		StorageDir: path,
-		Version:    "1.0",
-		InitTime:   0, // Will be set during first save
+	cfg := Config{
+		Version:  "1.0",
+		InitTime: 0, // Will be set during first save
+		Central: CentralRepositoryConfig{
+			Path: path,
+		},
 	}
+	return cfg
 }
 
 // Save writes the config to the standard location
@@ -189,6 +212,10 @@ func (c *Config) SaveTo(path string) error {
 	// Set init time if this is the first save
 	if c.InitTime == 0 {
 		c.InitTime = time.Now().Unix()
+	}
+
+	if c.Central.Path == "" {
+		return fmt.Errorf("central path must be set before saving config")
 	}
 
 	// Ensure directory exists
@@ -213,9 +240,9 @@ func (c *Config) SaveTo(path string) error {
 	return nil
 }
 
-// SetStorageDir updates the storage directory and saves the config
-func (c *Config) SetStorageDir(newDir string) error {
-	c.StorageDir = newDir
+// SetCentralPath updates the central repository path and saves the config.
+func (c *Config) SetCentralPath(newPath string) error {
+	c.Central.Path = newPath
 	return c.Save()
 }
 
@@ -238,14 +265,14 @@ func ReloadConfig() tea.Cmd {
 	}
 }
 
-// UpdateStorageDir updates the storage directory, ensures it exists, and saves the config
-func UpdateStorageDir(cfg *Config, newStorageDir string) error {
-	cfg.StorageDir = newStorageDir
+// UpdateCentralPath updates the central repository path, ensures it exists, and saves the config.
+func UpdateCentralPath(cfg *Config, newPath string) error {
+	cfg.Central.Path = newPath
 
-	// Ensure storage directory exists
-	root, err := filemanager.CreateSecureStorageRoot(cfg.StorageDir)
+	// Ensure central repository path exists with secure permissions
+	root, err := filemanager.CreateSecureStorageRoot(cfg.Central.Path)
 	if err != nil {
-		return fmt.Errorf("failed to create storage directory: %w", err)
+		return fmt.Errorf("failed to prepare central repository directory: %w", err)
 	}
 	defer root.Close()
 
@@ -254,7 +281,7 @@ func UpdateStorageDir(cfg *Config, newStorageDir string) error {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	logging.Info("Configuration updated successfully", "storage_dir", cfg.StorageDir)
+	logging.Info("Configuration updated successfully", "central_path", cfg.Central.Path)
 	return nil
 }
 
@@ -262,10 +289,10 @@ func UpdateStorageDir(cfg *Config, newStorageDir string) error {
 func CreateNewConfig(storageDir string) error {
 	// Create the default config
 	cfg := DefaultConfig()
-	cfg.StorageDir = storageDir
+	cfg.Central.Path = storageDir
 
 	// Ensure storage directory exists
-	root, err := filemanager.CreateSecureStorageRoot(cfg.StorageDir)
+	root, err := filemanager.CreateSecureStorageRoot(cfg.Central.Path)
 	if err != nil {
 		return fmt.Errorf("failed to create storage directory: %w", err)
 	}
@@ -276,6 +303,6 @@ func CreateNewConfig(storageDir string) error {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	logging.Info("Configuration created successfully", "storage_dir", cfg.StorageDir)
+	logging.Info("Configuration created successfully", "central_path", cfg.Central.Path)
 	return nil
 }

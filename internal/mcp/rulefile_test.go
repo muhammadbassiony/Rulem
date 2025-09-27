@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"rulem/internal/config"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 )
@@ -19,9 +18,9 @@ func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 
-	cfg := &config.Config{StorageDir: tempDir}
+	cfg := createTestConfigWithPath(tempDir)
 	logger := logging.NewAppLogger()
-	fileManager, err := filemanager.NewFileManager(cfg.StorageDir, logger)
+	fileManager, err := filemanager.NewFileManager(cfg.Central.Path, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
 	}
@@ -705,8 +704,8 @@ This file has invalid YAML frontmatter.`,
 	}
 
 	// Create file manager and processor with test logger
-	cfg := &config.Config{StorageDir: tempDir}
-	fileManager, err := filemanager.NewFileManager(cfg.StorageDir, logger)
+	cfg := createTestConfigWithPath(tempDir)
+	fileManager, err := filemanager.NewFileManager(cfg.Central.Path, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
 	}
@@ -788,8 +787,8 @@ Write comprehensive tests.`,
 	}
 
 	// Create file manager and processor with test logger
-	cfg := &config.Config{StorageDir: tempDir}
-	fileManager, err := filemanager.NewFileManager(cfg.StorageDir, logger)
+	cfg := createTestConfigWithPath(tempDir)
+	fileManager, err := filemanager.NewFileManager(cfg.Central.Path, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
 	}

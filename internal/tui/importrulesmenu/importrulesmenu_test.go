@@ -17,6 +17,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func createTestConfigWithPath(path string) *config.Config {
+	return &config.Config{
+		Central: config.CentralRepositoryConfig{Path: path},
+	}
+}
+
 // Test utilities and fixtures
 
 func createTestLogger() *logging.AppLogger {
@@ -64,9 +70,7 @@ func createTestUIContext(t *testing.T) helpers.UIContext {
 	return helpers.UIContext{
 		Width:  80,
 		Height: 24,
-		Config: &config.Config{
-			StorageDir: storageDir,
-		},
+		Config: createTestConfigWithPath(storageDir),
 		Logger: createTestLogger(),
 	}
 }
@@ -107,7 +111,7 @@ func createTestModel(t *testing.T) *ImportRulesModel {
 func createTestModelWithFiles(t *testing.T) (*ImportRulesModel, []filemanager.FileItem) {
 	ctx := createTestUIContext(t)
 	model := NewImportRulesModel(ctx)
-	files := createTestFiles(t, ctx.Config.StorageDir)
+	files := createTestFiles(t, ctx.Config.Central.Path)
 	return model, files
 }
 
@@ -156,7 +160,7 @@ func TestNewImportRulesModel_WithInvalidDimensions(t *testing.T) {
 	ctx := helpers.UIContext{
 		Width:  0,
 		Height: 0,
-		Config: &config.Config{StorageDir: storageDir},
+		Config: createTestConfigWithPath(storageDir),
 		Logger: createTestLogger(),
 	}
 
@@ -1338,7 +1342,7 @@ func TestImportRulesModel_FilePickerCanReadFiles(t *testing.T) {
 
 	// Create model
 	ctx := createTestUIContext(t)
-	ctx.Config.StorageDir = storageDir
+	ctx.Config.Central.Path = storageDir
 	model := NewImportRulesModel(ctx)
 
 	// Initialize and trigger file scan
@@ -1426,7 +1430,7 @@ func TestImportRulesModel_RelativeToAbsoluteConversion(t *testing.T) {
 	}
 
 	ctx := createTestUIContext(t)
-	ctx.Config.StorageDir = storageDir
+	ctx.Config.Central.Path = storageDir
 
 	// Create FileManager directly to test the conversion
 	fm, err := filemanager.NewFileManager(storageDir, ctx.Logger)
@@ -1522,7 +1526,7 @@ func TestImportRulesModel_BrokenSymlinkOverwrite(t *testing.T) {
 		Width:  80,
 		Height: 24,
 		Config: &config.Config{
-			StorageDir: storageDir,
+			Central: config.CentralRepositoryConfig{Path: storageDir},
 		},
 		Logger: createTestLogger(),
 	}

@@ -16,6 +16,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func createTestConfigWithPath(path string) *config.Config {
+	return &config.Config{Central: config.CentralRepositoryConfig{Path: path}}
+}
+
 // Test utilities
 
 func createTestLogger() *logging.AppLogger {
@@ -66,9 +70,7 @@ func createTestUIContext(t *testing.T) helpers.UIContext {
 		os.Chdir(originalWd)
 	})
 
-	cfg := &config.Config{
-		StorageDir: storageDir,
-	}
+	cfg := createTestConfigWithPath(storageDir)
 
 	logger := createTestLogger()
 
@@ -130,9 +132,7 @@ func createTestModelWithFiles(t *testing.T) (SaveRulesModel, []filemanager.FileI
 
 	// Create model - storage dir is separate from work dir for SaveRulesModel
 	storageDir := createTestStorageDir(t)
-	cfg := &config.Config{
-		StorageDir: storageDir,
-	}
+	cfg := createTestConfigWithPath(storageDir)
 	logger := createTestLogger()
 	ctx := helpers.NewUIContext(80, 24, cfg, logger)
 	model := NewSaveRulesModel(ctx)
@@ -1378,7 +1378,7 @@ func TestSaveRulesModel_BrokenSymlinkHandling(t *testing.T) {
 	}
 
 	// Create model
-	cfg := &config.Config{StorageDir: storageDir}
+	cfg := createTestConfigWithPath(storageDir)
 	logger := createTestLogger()
 	ctx := helpers.NewUIContext(80, 24, cfg, logger)
 	model := NewSaveRulesModel(ctx)
@@ -1501,7 +1501,7 @@ func BenchmarkSaveRulesModel_Update(b *testing.B) {
 	defer os.Chdir(originalWd)
 	os.Chdir(workDir)
 
-	cfg := &config.Config{StorageDir: storageDir}
+	cfg := createTestConfigWithPath(storageDir)
 	logger := logging.NewAppLogger()
 	ctx := helpers.NewUIContext(80, 24, cfg, logger)
 	model := NewSaveRulesModel(ctx)
@@ -1540,7 +1540,7 @@ func BenchmarkSaveRulesModel_ScanForFiles(b *testing.B) {
 	storageDir, _ := os.MkdirTemp("", "bench-storage-*")
 	defer os.RemoveAll(storageDir)
 
-	cfg := &config.Config{StorageDir: storageDir}
+	cfg := createTestConfigWithPath(storageDir)
 	logger := logging.NewAppLogger()
 	ctx := helpers.NewUIContext(80, 24, cfg, logger)
 	model := NewSaveRulesModel(ctx)

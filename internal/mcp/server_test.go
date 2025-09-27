@@ -58,6 +58,12 @@ This rule tests content handling with:
 More content here.`
 )
 
+func createTestConfigWithPath(path string) *config.Config {
+	return &config.Config{
+		Central: config.CentralRepositoryConfig{Path: path},
+	}
+}
+
 // Test helpers
 func createTestServer(tb testing.TB) (*Server, string) {
 	tempDir, err := os.MkdirTemp("", "rulem-test-*")
@@ -71,7 +77,7 @@ func createTestServer(tb testing.TB) (*Server, string) {
 		}
 	})
 
-	cfg := &config.Config{StorageDir: tempDir}
+	cfg := createTestConfigWithPath(tempDir)
 	logger := logging.NewAppLogger()
 	server := NewServer(cfg, logger)
 
@@ -115,7 +121,7 @@ func TestServer_Construction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{StorageDir: tt.storageDir}
+			cfg := createTestConfigWithPath(tt.storageDir)
 			logger := logging.NewAppLogger()
 
 			server := NewServer(cfg, logger)
@@ -163,7 +169,7 @@ func TestServer_ComponentInitialization(t *testing.T) {
 		{
 			name: "invalid storage directory",
 			setupFunc: func(t testing.TB) *Server {
-				cfg := &config.Config{StorageDir: "/non/existent/directory"}
+				cfg := createTestConfigWithPath("/non/existent/directory")
 				logger := logging.NewAppLogger()
 				return NewServer(cfg, logger)
 			},
@@ -602,7 +608,7 @@ func TestServer_ErrorConditions(t *testing.T) {
 		{
 			name: "missing storage directory",
 			setupFunc: func(t testing.TB) *Server {
-				cfg := &config.Config{StorageDir: "/this/path/does/not/exist"}
+				cfg := createTestConfigWithPath("/this/path/does/not/exist")
 				logger := logging.NewAppLogger()
 				return NewServer(cfg, logger)
 			},

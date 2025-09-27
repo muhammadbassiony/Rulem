@@ -47,7 +47,7 @@ func (s *Server) Start() error {
 
 	// Initialize file manager for repository scanning
 	var err error
-	s.fileManager, err = filemanager.NewFileManager(s.config.StorageDir, s.logger)
+	s.fileManager, err = filemanager.NewFileManager(s.config.Central.Path, s.logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize file manager: %w", err)
 	}
@@ -203,7 +203,7 @@ func (s *Server) getRulefileToolHandler(toolName string) (server.ToolHandlerFunc
 func (s *Server) InitializeComponents() error {
 	// Initialize file manager for repository scanning
 	var err error
-	s.fileManager, err = filemanager.NewFileManager(s.config.StorageDir, s.logger)
+	s.fileManager, err = filemanager.NewFileManager(s.config.Central.Path, s.logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize file manager: %w", err)
 	}

@@ -127,8 +127,8 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentConfig = msg.Config
 		// Set current storage directory as default
 		if m.currentConfig != nil {
-			m.textInput.SetValue(m.currentConfig.StorageDir)
-			m.textInput.Placeholder = m.currentConfig.StorageDir
+			m.textInput.SetValue(m.currentConfig.Central.Path)
+			m.textInput.Placeholder = m.currentConfig.Central.Path
 		} else {
 			// Fallback to system default if no config exists
 			defaultDir := filemanager.GetDefaultStorageDir()
@@ -161,7 +161,7 @@ func (m *SettingsModel) updateTextInput(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 
 	// Check if there are changes from original
 	if m.currentConfig != nil {
-		m.hasChanges = strings.TrimSpace(m.textInput.Value()) != m.currentConfig.StorageDir
+		m.hasChanges = strings.TrimSpace(m.textInput.Value()) != m.currentConfig.Central.Path
 	} else {
 		m.hasChanges = strings.TrimSpace(m.textInput.Value()) != filemanager.GetDefaultStorageDir()
 	}
@@ -287,8 +287,8 @@ func (m *SettingsModel) saveConfig() tea.Cmd {
 func (m *SettingsModel) performConfigUpdate() error {
 	// Update existing config or create new one
 	if m.currentConfig != nil {
-		// Use UpdateStorageDir to ensure directory is created
-		if err := config.UpdateStorageDir(m.currentConfig, m.StorageDir); err != nil {
+		// Use UpdateCentralPath to ensure directory is created
+		if err := config.UpdateCentralPath(m.currentConfig, m.StorageDir); err != nil {
 			return fmt.Errorf("failed to update configuration: %w", err)
 		}
 	} else {
@@ -334,7 +334,7 @@ func (m *SettingsModel) viewStorageInput() string {
 
 	currentValue := ""
 	if m.currentConfig != nil {
-		currentValue = fmt.Sprintf("Current: %s", m.currentConfig.StorageDir)
+		currentValue = fmt.Sprintf("Current: %s", m.currentConfig.Central.Path)
 	}
 
 	prompt := "Storage directory path:"
@@ -354,7 +354,7 @@ func (m *SettingsModel) viewConfirmation() string {
 
 	oldValue := "Not set"
 	if m.currentConfig != nil {
-		oldValue = m.currentConfig.StorageDir
+		oldValue = m.currentConfig.Central.Path
 	}
 
 	changes := fmt.Sprintf("Old storage directory: %s\nNew storage directory: %s", oldValue, m.StorageDir)

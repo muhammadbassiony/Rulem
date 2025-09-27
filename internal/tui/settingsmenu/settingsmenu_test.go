@@ -10,6 +10,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func createTestConfigWithPath(path string) *config.Config {
+	return &config.Config{
+		Central: config.CentralRepositoryConfig{Path: path},
+	}
+}
+
 func TestNewSettingsModel(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(80, 24, &config.Config{}, logger)
@@ -125,7 +131,7 @@ func TestSettingsModelUpdate_ConfigLoading(t *testing.T) {
 	model := NewSettingsModel(ctx)
 
 	// Test successful config loading
-	testConfig := &config.Config{StorageDir: "/test/path"}
+	testConfig := createTestConfigWithPath("/test/path")
 	configMsg := config.LoadConfigMsg{Config: testConfig, Error: nil}
 
 	updatedModel, cmd := model.Update(configMsg)
@@ -140,7 +146,7 @@ func TestSettingsModelUpdate_ConfigLoading(t *testing.T) {
 	}
 
 	if settingsModel.textInput.Value() != "/test/path" {
-		t.Errorf("Text input should be set to config storage dir, got %s", settingsModel.textInput.Value())
+		t.Errorf("Text input should be set to config central path, got %s", settingsModel.textInput.Value())
 	}
 
 	// Test config loading error
@@ -271,7 +277,7 @@ func TestSettingsModelChangeDetection(t *testing.T) {
 	ctx := helpers.NewUIContext(80, 24, &config.Config{}, logger)
 
 	model := NewSettingsModel(ctx)
-	model.currentConfig = &config.Config{StorageDir: "/original/path"}
+	model.currentConfig = createTestConfigWithPath("/original/path")
 	model.textInput.SetValue("/original/path")
 
 	// Test no changes

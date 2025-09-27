@@ -96,7 +96,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	nameInput.CharLimit = 255
 	nameInput.Width = 50
 
-	fm, err := filemanager.NewFileManager(ctx.Config.StorageDir, ctx.Logger)
+	fm, err := filemanager.NewFileManager(ctx.Config.Central.Path, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
 	}

@@ -7,8 +7,12 @@ import (
 	"rulem/internal/logging"
 )
 
+func createTestConfigWithPath(path string) *config.Config {
+	return &config.Config{Central: config.CentralRepositoryConfig{Path: path}}
+}
+
 func TestNewMainModel(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -31,7 +35,7 @@ func TestNewMainModel(t *testing.T) {
 }
 
 func TestMainModelInit(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -44,7 +48,7 @@ func TestMainModelInit(t *testing.T) {
 }
 
 func TestGetUIContext(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -71,7 +75,7 @@ func TestGetUIContext(t *testing.T) {
 }
 
 func TestHasValidDimensions(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -104,7 +108,7 @@ func TestHasValidDimensions(t *testing.T) {
 }
 
 func TestModelReinitialization(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -122,7 +126,7 @@ func TestModelReinitialization(t *testing.T) {
 }
 
 func TestReturnToMenu(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -154,7 +158,7 @@ func TestReturnToMenu(t *testing.T) {
 }
 
 func TestGetOrInitializeModel(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -187,7 +191,7 @@ func TestGetOrInitializeModel(t *testing.T) {
 }
 
 func TestFreshModelGeneration(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)
@@ -213,7 +217,7 @@ func TestFreshModelGeneration(t *testing.T) {
 }
 
 func TestViewMethods(t *testing.T) {
-	cfg := &config.Config{StorageDir: "/test/path"}
+	cfg := createTestConfigWithPath("/test/path")
 	logger, _ := logging.NewTestLogger()
 
 	model := NewMainModel(cfg, logger)

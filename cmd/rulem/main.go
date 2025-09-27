@@ -160,7 +160,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("configuration is nil after loading")
 	}
 
-	appLogger.Info("Configuration loaded successfully", "storage_dir", cfg.StorageDir, "init_time", cfg.InitTime)
+	appLogger.Info("Configuration loaded successfully", "central_path", cfg.Central.Path, "init_time", cfg.InitTime)
 
 	// Initialize TUI application with panic recovery
 	model := tui.NewMainModel(cfg, appLogger)
@@ -278,7 +278,7 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("configuration is nil after loading")
 	}
 
-	appLogger.Info("Starting MCP server", "storage_dir", cfg.StorageDir)
+	appLogger.Info("Starting MCP server", "central_path", cfg.Central.Path)
 
 	// Create and start MCP server
 	server := mcp.NewServer(cfg, appLogger)

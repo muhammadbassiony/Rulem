@@ -102,7 +102,7 @@ func TestSettingsMenuChangeDetection(t *testing.T) {
 	ctx := helpers.NewUIContext(80, 24, &config.Config{}, logger)
 
 	model := NewSettingsModel(ctx)
-	model.currentConfig = &config.Config{StorageDir: "/original"}
+	model.currentConfig = createTestConfigWithPath("/original")
 	model.textInput.SetValue("/original")
 
 	// No changes initially
@@ -126,7 +126,7 @@ func TestSettingsMenuConfigLoading(t *testing.T) {
 	model := NewSettingsModel(ctx)
 
 	// Test successful config loading
-	testConfig := &config.Config{StorageDir: "/test/path"}
+	testConfig := createTestConfigWithPath("/test/path")
 	configMsg := config.LoadConfigMsg{Config: testConfig, Error: nil}
 
 	updatedModel, cmd := model.Update(configMsg)

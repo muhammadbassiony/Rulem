@@ -42,41 +42,86 @@ func TestConfigPath(t *testing.T) {
 	t.Logf("Primary config path: %s", primary)
 }
 
-func TestConfigSaveLoad(t *testing.T) {
-	t.Log("Testing Config Saving and Loading")
+func TestConfigCentralScenarios(t *testing.T) {
+	t.Log("Testing Config persistence and migration for central repo settings")
 
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
 
-	// Create test config
-	originalConfig := Config{
-		StorageDir: "/test/storage",
-		Version:    "1.0",
-		InitTime:   time.Now().Unix(),
+	cases := []struct {
+		name    string
+		prepare func(path string) error
+		assert  func(t *testing.T, cfg *Config)
+	}{
+		{
+			name: "default config round-trip",
+			prepare: func(path string) error {
+				cfg := DefaultConfig()
+				cfg.InitTime = time.Now().Unix()
+				return cfg.SaveTo(path)
+			},
+			assert: func(t *testing.T, cfg *Config) {
+				if cfg.Central.Path == "" {
+					t.Error("expected central path to be set")
+				}
+				if cfg.Central.RemoteURL != nil {
+					t.Errorf("expected remote URL to be nil, got %v", *cfg.Central.RemoteURL)
+				}
+				if cfg.Central.Branch != nil {
+					t.Errorf("expected branch to be nil, got %v", *cfg.Central.Branch)
+				}
+				if cfg.Central.LastSyncTime != nil && *cfg.Central.LastSyncTime == 0 {
+					t.Error("last sync time should be nil or non-zero when set")
+				}
+			},
+		},
+		{
+			name: "remote settings persistence",
+			prepare: func(path string) error {
+				branch := "main"
+				remote := "git@github.com:owner/repo.git"
+				lastSync := time.Now().Unix()
+				cfg := Config{
+					Version: "2.0",
+					Central: CentralRepositoryConfig{
+						Path:         "/tmp/rules/cache",
+						RemoteURL:    &remote,
+						Branch:       &branch,
+						LastSyncTime: &lastSync,
+					},
+				}
+				return cfg.SaveTo(path)
+			},
+			assert: func(t *testing.T, cfg *Config) {
+				if cfg.Central.Path != "/tmp/rules/cache" {
+					t.Errorf("expected central path /tmp/rules/cache, got %s", cfg.Central.Path)
+				}
+				if cfg.Central.RemoteURL == nil || *cfg.Central.RemoteURL != "git@github.com:owner/repo.git" {
+					t.Errorf("expected remote URL to persist, got %+v", cfg.Central.RemoteURL)
+				}
+				if cfg.Central.Branch == nil || *cfg.Central.Branch != "main" {
+					t.Errorf("expected branch to persist, got %+v", cfg.Central.Branch)
+				}
+				if cfg.Central.LastSyncTime == nil || *cfg.Central.LastSyncTime == 0 {
+					t.Errorf("expected last sync time to persist, got %+v", cfg.Central.LastSyncTime)
+				}
+			},
+		},
 	}
 
-	// Test Save
-	if err := originalConfig.SaveTo(configPath); err != nil {
-		t.Fatalf("Failed to save config: %s", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configPath := filepath.Join(tempDir, tc.name+".yaml")
+			if err := tc.prepare(configPath); err != nil {
+				t.Fatalf("failed to prepare config file: %v", err)
+			}
 
-	// Test Load
-	loadedConfig, err := LoadFrom(configPath)
-	if err != nil {
-		t.Fatalf("Failed to load config: %s", err)
-	}
+			cfg, err := LoadFrom(configPath)
+			if err != nil {
+				t.Fatalf("failed to load config: %v", err)
+			}
 
-	// Verify content
-	if loadedConfig.StorageDir != originalConfig.StorageDir {
-		t.Errorf("StorageDir mismatch: expected %s, got %s", originalConfig.StorageDir, loadedConfig.StorageDir)
-	}
-
-	if loadedConfig.Version != originalConfig.Version {
-		t.Errorf("Version mismatch: expected %s, got %s", originalConfig.Version, loadedConfig.Version)
-	}
-
-	if loadedConfig.InitTime != originalConfig.InitTime {
-		t.Errorf("InitTime mismatch: expected %d, got %d", originalConfig.InitTime, loadedConfig.InitTime)
+			tc.assert(t, cfg)
+		})
 	}
 }
 
@@ -87,8 +132,10 @@ func TestConfigInitTime(t *testing.T) {
 	configPath := filepath.Join(tempDir, "config.yaml")
 
 	config := Config{
-		StorageDir: "/test",
-		Version:    "1.0",
+		Version: "1.0",
+		Central: CentralRepositoryConfig{
+			Path: "/test",
+		},
 		// InitTime not set (0)
 	}
 
@@ -132,8 +179,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("Default config should have a version")
 	}
 
-	if config.StorageDir == "" {
-		t.Error("Default config should have a storage directory")
+	if config.Central.Path == "" {
+		t.Error("Default config should have a central path")
 	}
 
 	if config.InitTime != 0 {

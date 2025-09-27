@@ -155,7 +155,7 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	s.Style = styles.SpinnerStyle
 	s.Spinner = spinner.Pulse
 
-	fm, err := filemanager.NewFileManager(ctx.Config.StorageDir, ctx.Logger)
+	fm, err := filemanager.NewFileManager(ctx.Config.Central.Path, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
 	}

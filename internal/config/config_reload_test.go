@@ -30,11 +30,13 @@ func TestReloadConfig(t *testing.T) {
 	}
 
 	// Create initial config with valid path under home
-	initialStorageDir := filepath.Join(homeDir, "test-rulem-initial")
+	initialCentralPath := filepath.Join(homeDir, "test-rulem-initial")
 	initialConfig := Config{
-		StorageDir: initialStorageDir,
-		Version:    "1.0",
-		InitTime:   time.Now().Unix(),
+		Version:  "1.0",
+		InitTime: time.Now().Unix(),
+		Central: CentralRepositoryConfig{
+			Path: initialCentralPath,
+		},
 	}
 
 	// Save initial config
@@ -68,8 +70,8 @@ func TestReloadConfig(t *testing.T) {
 		t.Fatal("ReloadConfig returned nil config")
 	}
 
-	if reloadMsg.Config.StorageDir != initialStorageDir {
-		t.Errorf("Expected StorageDir '%s', got '%s'", initialStorageDir, reloadMsg.Config.StorageDir)
+	if reloadMsg.Config.Central.Path != initialCentralPath {
+		t.Errorf("Expected central path '%s', got '%s'", initialCentralPath, reloadMsg.Config.Central.Path)
 	}
 
 	if reloadMsg.Config.Version != "1.0" {
@@ -78,11 +80,13 @@ func TestReloadConfig(t *testing.T) {
 
 	// Test reload after config modification
 	// Modify config on disk
-	modifiedStorageDir := filepath.Join(homeDir, "test-rulem-modified")
+	modifiedCentralPath := filepath.Join(homeDir, "test-rulem-modified")
 	modifiedConfig := Config{
-		StorageDir: modifiedStorageDir,
-		Version:    "1.1",
-		InitTime:   initialConfig.InitTime,
+		Version:  "1.1",
+		InitTime: initialConfig.InitTime,
+		Central: CentralRepositoryConfig{
+			Path: modifiedCentralPath,
+		},
 	}
 
 	err = modifiedConfig.SaveTo(configPath)
@@ -100,8 +104,8 @@ func TestReloadConfig(t *testing.T) {
 		t.Fatalf("ReloadConfig returned error on second load: %v", reloadMsg2.Error)
 	}
 
-	if reloadMsg2.Config.StorageDir != modifiedStorageDir {
-		t.Errorf("Expected modified StorageDir '%s', got '%s'", modifiedStorageDir, reloadMsg2.Config.StorageDir)
+	if reloadMsg2.Config.Central.Path != modifiedCentralPath {
+		t.Errorf("Expected modified central path '%s', got '%s'", modifiedCentralPath, reloadMsg2.Config.Central.Path)
 	}
 
 	if reloadMsg2.Config.Version != "1.1" {
@@ -169,9 +173,9 @@ func TestReloadConfigIntegration(t *testing.T) {
 	}
 
 	// Create initial config (simulating main model startup)
-	originalStorageDir := filepath.Join(homeDir, "test-rulem-original")
+	originalCentralPath := filepath.Join(homeDir, "test-rulem-original")
 	initialConfig := DefaultConfig()
-	initialConfig.StorageDir = originalStorageDir
+	initialConfig.Central.Path = originalCentralPath
 	err = initialConfig.Save()
 	if err != nil {
 		t.Fatalf("Failed to save initial config: %v", err)
@@ -184,13 +188,13 @@ func TestReloadConfigIntegration(t *testing.T) {
 	}
 
 	// Verify loaded config
-	if loadedConfig.StorageDir != originalStorageDir {
-		t.Errorf("Expected loaded StorageDir '%s', got '%s'", originalStorageDir, loadedConfig.StorageDir)
+	if loadedConfig.Central.Path != originalCentralPath {
+		t.Errorf("Expected loaded central path '%s', got '%s'", originalCentralPath, loadedConfig.Central.Path)
 	}
 
 	// Update config (simulating settings menu update)
-	updatedStorageDir := filepath.Join(homeDir, "test-rulem-updated")
-	err = UpdateStorageDir(loadedConfig, updatedStorageDir)
+	updatedCentralPath := filepath.Join(homeDir, "test-rulem-updated")
+	err = UpdateCentralPath(loadedConfig, updatedCentralPath)
 	if err != nil {
 		t.Fatalf("Failed to update storage dir: %v", err)
 	}
@@ -205,12 +209,12 @@ func TestReloadConfigIntegration(t *testing.T) {
 	}
 
 	// Verify the reloaded config has the updated values
-	if reloadMsg.Config.StorageDir != updatedStorageDir {
-		t.Errorf("Expected reloaded StorageDir '%s', got '%s'", updatedStorageDir, reloadMsg.Config.StorageDir)
+	if reloadMsg.Config.Central.Path != updatedCentralPath {
+		t.Errorf("Expected reloaded central path '%s', got '%s'", updatedCentralPath, reloadMsg.Config.Central.Path)
 	}
 
-	// Verify the original config object was updated by UpdateStorageDir
-	if loadedConfig.StorageDir != updatedStorageDir {
-		t.Errorf("Original config should have been updated by UpdateStorageDir, got '%s'", loadedConfig.StorageDir)
+	// Verify the original config object was updated by UpdateCentralPath
+	if loadedConfig.Central.Path != updatedCentralPath {
+		t.Errorf("Original config central path should have been updated, got '%s'", loadedConfig.Central.Path)
 	}
 }

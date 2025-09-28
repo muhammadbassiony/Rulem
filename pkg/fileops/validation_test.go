@@ -829,6 +829,100 @@ func TestValidateStoragePath(t *testing.T) {
 	}
 }
 
+func TestIsDirEmpty(t *testing.T) {
+	tempDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		setup   func() string
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "empty directory",
+			setup: func() string {
+				emptyPath := filepath.Join(tempDir, "empty")
+				err := os.MkdirAll(emptyPath, 0755)
+				if err != nil {
+					t.Fatalf("Failed to create directory: %v", err)
+				}
+				return emptyPath
+			},
+			want: true,
+		},
+		{
+			name: "directory with files",
+			setup: func() string {
+				filledPath := filepath.Join(tempDir, "filled")
+				err := os.MkdirAll(filledPath, 0755)
+				if err != nil {
+					t.Fatalf("Failed to create directory: %v", err)
+				}
+				f, err := os.Create(filepath.Join(filledPath, "file.txt"))
+				if err != nil {
+					t.Fatalf("Failed to create file: %v", err)
+				}
+				f.Close()
+				return filledPath
+			},
+			want: false,
+		},
+		{
+			name: "directory with subdirectories",
+			setup: func() string {
+				parentPath := filepath.Join(tempDir, "parent")
+				err := os.MkdirAll(filepath.Join(parentPath, "subdir"), 0755)
+				if err != nil {
+					t.Fatalf("Failed to create subdirectory: %v", err)
+				}
+				return parentPath
+			},
+			want: false,
+		},
+		{
+			name: "nonexistent directory",
+			setup: func() string {
+				return filepath.Join(tempDir, "nonexistent")
+			},
+			want:    false,
+			wantErr: true,
+		},
+		{
+			name: "path is a file",
+			setup: func() string {
+				filePath := filepath.Join(tempDir, "notadir")
+				f, err := os.Create(filePath)
+				if err != nil {
+					t.Fatalf("Failed to create file: %v", err)
+				}
+				f.Close()
+				return filePath
+			},
+			want:    false,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := tt.setup()
+			got, err := IsDirEmpty(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("IsDirEmpty() expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("IsDirEmpty() unexpected error: %v", err)
+				}
+				if got != tt.want {
+					t.Errorf("IsDirEmpty() = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 // Tests for ValidateContentSecurity
 
 func TestValidateContentSecurity(t *testing.T) {

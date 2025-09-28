@@ -49,30 +49,38 @@ type AppLogger struct {
 var (
 	defaultLogger *AppLogger
 	once          sync.Once
+	debugMode     bool
 )
 
-// GetDefault returns the default logger instance (singleton-like for convenience)
+// Initialize sets up the debug mode for the global logger.
+// This should be called once at application startup before any logging occurs.
+func Initialize(debug bool) {
+	debugMode = debug
+}
+
+// GetDefault returns the default logger instance (singleton).
+// Uses sync.Once to ensure thread-safe initialization.
 func GetDefault() *AppLogger {
 	once.Do(func() {
-		defaultLogger = NewAppLogger()
+		defaultLogger = newAppLoggerWithDebugMode(debugMode)
 	})
 	return defaultLogger
 }
 
 // Package-level convenience functions for quick logging
-func Info(msg string, keyvals ...interface{}) {
+func Info(msg string, keyvals ...any) {
 	GetDefault().Info(msg, keyvals...)
 }
 
-func Warn(msg string, keyvals ...interface{}) {
+func Warn(msg string, keyvals ...any) {
 	GetDefault().Warn(msg, keyvals...)
 }
 
-func Error(msg string, keyvals ...interface{}) {
+func Error(msg string, keyvals ...any) {
 	GetDefault().Error(msg, keyvals...)
 }
 
-func Debug(msg string, keyvals ...interface{}) {
+func Debug(msg string, keyvals ...any) {
 	GetDefault().Debug(msg, keyvals...)
 }
 
@@ -82,16 +90,6 @@ func LogMessage(msg tea.Msg) {
 
 func LogPerformance(operation string, start time.Time) {
 	GetDefault().LogPerformance(operation, start)
-}
-
-func NewAppLogger() *AppLogger {
-	debug := os.Getenv("DEBUG") != ""
-	return newAppLoggerWithDebugMode(debug)
-}
-
-// NewAppLoggerWithDebug creates a new logger with debug mode explicitly enabled
-func NewAppLoggerWithDebug() *AppLogger {
-	return newAppLoggerWithDebugMode(true)
 }
 
 func newAppLoggerWithDebugMode(debug bool) *AppLogger {
@@ -145,19 +143,19 @@ func newAppLoggerWithDebugMode(debug bool) *AppLogger {
 }
 
 // Log application events
-func (al *AppLogger) Info(msg string, keyvals ...interface{}) {
+func (al *AppLogger) Info(msg string, keyvals ...any) {
 	al.logger.Info(msg, keyvals...)
 }
 
-func (al *AppLogger) Warn(msg string, keyvals ...interface{}) {
+func (al *AppLogger) Warn(msg string, keyvals ...any) {
 	al.logger.Warn(msg, keyvals...)
 }
 
-func (al *AppLogger) Error(msg string, keyvals ...interface{}) {
+func (al *AppLogger) Error(msg string, keyvals ...any) {
 	al.logger.Error(msg, keyvals...)
 }
 
-func (al *AppLogger) Debug(msg string, keyvals ...interface{}) {
+func (al *AppLogger) Debug(msg string, keyvals ...any) {
 	if al.debug {
 		al.logger.Debug(msg, keyvals...)
 	}
@@ -176,7 +174,7 @@ func (al *AppLogger) LogMessage(msg tea.Msg) {
 }
 
 // Pretty print any object (replaces spew)
-func (al *AppLogger) DebugObject(name string, obj interface{}) {
+func (al *AppLogger) DebugObject(name string, obj any) {
 	if al.debug {
 		al.logger.Debug("Object dump", "name", name, "object", fmt.Sprintf("%+v", obj))
 	}

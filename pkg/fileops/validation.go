@@ -2,6 +2,7 @@ package fileops
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -812,4 +813,27 @@ func ValidateFileSizeLimit(filePath string, maxSize int64) error {
 	}
 
 	return nil
+}
+
+// IsDirEmpty checks if a directory is empty.
+// This function safely opens a directory and checks if it contains any entries.
+//
+// Parameters:
+//   - path: Directory path to check
+//
+// Returns:
+//   - bool: true if directory is empty, false otherwise
+//   - error: File system access errors
+func IsDirEmpty(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	_, err = f.Readdirnames(1)
+	if err == io.EOF {
+		return true, nil
+	}
+	return false, err
 }

@@ -13,6 +13,18 @@
 // All sources resolve to a local filesystem path that can be used by the FileManager for
 // consistent file operations, maintaining the existing public API contracts.
 //
+// # Credential Management
+//
+// For GitHub repository authentication, this package provides secure credential management:
+//   - CredentialManager: Handles GitHub Personal Access Token (PAT) storage and retrieval
+//   - OS credential store integration using go-keyring library
+//   - Cross-platform support (Keychain on macOS, libsecret on Linux, Credential Manager on Windows)
+//   - Token format validation for GitHub PATs (ghp_, github_pat_, gho_, ghu_, ghs_ prefixes)
+//
+// Credentials are stored securely in the OS credential store with service name "rulem" and key "github_pat".
+// The credential manager provides clear error messages directing users to Settings → GitHub Authentication
+// for token management and troubleshooting.
+//
 // # Path Resolution
 //
 // For remote Git repositories, this package provides simple, user-friendly path derivation:
@@ -41,10 +53,11 @@
 // # Usage Flow
 //
 //  1. Configuration specifies either local path or remote Git URL
-//  2. Appropriate Source implementation is created
-//  3. Source.Prepare() is called to resolve to local path
-//  4. Local path is passed to FileManager for normal operations
-//  5. All subsequent file operations work transparently
+//  2. For Git sources, retrieve Personal Access Token from credential store
+//  3. Appropriate Source implementation is created
+//  4. Source.Prepare() is called to resolve to local path
+//  5. Local path is passed to FileManager for normal operations
+//  6. All subsequent file operations work transparently
 //
 // # Design Goals
 //
@@ -54,6 +67,7 @@
 //   - Use simple, user-friendly repository paths for easy external management
 //   - Handle directory conflicts explicitly and safely
 //   - Support both local and remote repository sources seamlessly
+//   - Secure credential management with clear error messaging
 //
 // See the contracts/ directory for detailed interface specifications and expected behaviors.
 package repository

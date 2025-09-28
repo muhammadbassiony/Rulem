@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"rulem/internal/config"
-	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
@@ -131,7 +131,7 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput.Placeholder = m.currentConfig.Central.Path
 		} else {
 			// Fallback to system default if no config exists
-			defaultDir := filemanager.GetDefaultStorageDir()
+			defaultDir := repository.GetDefaultStorageDir()
 			m.textInput.SetValue(defaultDir)
 			m.textInput.Placeholder = defaultDir
 		}
@@ -163,7 +163,7 @@ func (m *SettingsModel) updateTextInput(msg tea.Msg) (*SettingsModel, tea.Cmd) {
 	if m.currentConfig != nil {
 		m.hasChanges = strings.TrimSpace(m.textInput.Value()) != m.currentConfig.Central.Path
 	} else {
-		m.hasChanges = strings.TrimSpace(m.textInput.Value()) != filemanager.GetDefaultStorageDir()
+		m.hasChanges = strings.TrimSpace(m.textInput.Value()) != repository.GetDefaultStorageDir()
 	}
 
 	return m, cmd

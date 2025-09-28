@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/internal/tui/helpers"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,7 +37,7 @@ func TestNewSetupModel(t *testing.T) {
 			assert.Equal(t, tt.want, model.state)
 			assert.False(t, model.Cancelled)
 			assert.Empty(t, model.StorageDir)
-			assert.Equal(t, filemanager.GetDefaultStorageDir(), model.textInput.Placeholder)
+			assert.Equal(t, repository.GetDefaultStorageDir(), model.textInput.Placeholder)
 			assert.True(t, model.textInput.Focused())
 			assert.Equal(t, ctx.Logger, model.logger)
 		})

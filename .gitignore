@@ -1,5 +1,7 @@
 .github/copilot-instructions.md
 .github/instructions
+.github/prompts
+.github/.specify
 
 tasks/
 todo.md
@@ -12,5 +14,5 @@ rulem
 # Added by goreleaser init:
 dist/
 
-.kiro/*
-.vscode/*
+.kiro/
+.vscode/

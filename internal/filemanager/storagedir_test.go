@@ -3,6 +3,7 @@ package filemanager
 import (
 	"os"
 	"path/filepath"
+	"rulem/internal/repository"
 	"rulem/pkg/fileops"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 
 // TestGetDefaultStorageDir tests the GetDefaultStorageDir function
 func TestGetDefaultStorageDir(t *testing.T) {
-	result := GetDefaultStorageDir()
+	result := repository.GetDefaultStorageDir()
 
 	// Should not be empty
 	if result == "" {
@@ -206,7 +207,7 @@ func TestCreateSecureStorageRoot(t *testing.T) {
 func TestIntegrationWorkflow(t *testing.T) {
 	t.Run("complete workflow", func(t *testing.T) {
 		// Step 1: Get default directory
-		defaultDir := GetDefaultStorageDir()
+		defaultDir := repository.GetDefaultStorageDir()
 		if defaultDir == "" {
 			t.Fatal("GetDefaultStorageDir returned empty string")
 		}
@@ -267,6 +268,6 @@ func TestIntegrationWorkflow(t *testing.T) {
 func BenchmarkGetDefaultStorageDir(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		GetDefaultStorageDir()
+		repository.GetDefaultStorageDir()
 	}
 }

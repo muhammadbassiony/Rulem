@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"time"
 
 	"github.com/adrg/xdg"
@@ -188,7 +189,7 @@ func IsFirstRun() bool {
 // Returns:
 //   - Config: A configuration struct with default values set
 func DefaultConfig() Config {
-	path := filemanager.GetDefaultStorageDir()
+	path := repository.GetDefaultStorageDir()
 	logging.Debug("Using default storage directory", "path", path)
 
 	cfg := Config{

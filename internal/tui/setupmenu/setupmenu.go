@@ -2,15 +2,14 @@ package setupmenu
 
 import (
 	"fmt"
-	"strings"
-
 	"rulem/internal/config"
-	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
 	"rulem/pkg/fileops"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -47,7 +46,7 @@ type SetupModel struct {
 
 func NewSetupModel(ctx helpers.UIContext) *SetupModel {
 	ti := textinput.New()
-	ti.Placeholder = filemanager.GetDefaultStorageDir()
+	ti.Placeholder = repository.GetDefaultStorageDir()
 	ti.Focus()
 	ti.CharLimit = 256
 
@@ -178,7 +177,7 @@ func (m *SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 // State transition helpers
 func (m *SetupModel) transitionToStorageInput() (*SetupModel, tea.Cmd) {
 	m.state = SetupStateStorageInput
-	m.textInput.SetValue(filemanager.GetDefaultStorageDir())
+	m.textInput.SetValue(repository.GetDefaultStorageDir())
 	m.textInput.Focus()
 	m.layout = m.layout.ClearError()
 	return m, textinput.Blink

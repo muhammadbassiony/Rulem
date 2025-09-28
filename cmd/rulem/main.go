@@ -122,11 +122,14 @@ func init() {
 
 // initLogger initializes the logger based on debug mode
 func initLogger() {
+	// Initialize the global singleton logger
+	logging.Initialize(debugMode)
+
+	// Get reference to the singleton for local use
+	appLogger = logging.GetDefault()
+
 	if debugMode {
-		appLogger = logging.NewAppLoggerWithDebug()
 		appLogger.Debug("Debug mode enabled")
-	} else {
-		appLogger = logging.NewAppLogger()
 	}
 }
 

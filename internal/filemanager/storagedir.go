@@ -11,11 +11,6 @@ import (
 	"github.com/adrg/xdg"
 )
 
-// GetDefaultStorageDir returns default storage in user's data directory
-func GetDefaultStorageDir() string {
-	return filepath.Join(xdg.DataHome, "rulem")
-}
-
 // CreateSecureStorageRoot creates a storage root confined to user's home directory
 func CreateSecureStorageRoot(userPath string) (*os.Root, error) {
 	if strings.TrimSpace(userPath) == "" {

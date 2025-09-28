@@ -19,7 +19,7 @@ func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string) {
 	}
 
 	cfg := createTestConfigWithPath(tempDir)
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	fileManager, err := filemanager.NewFileManager(cfg.Central.Path, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
@@ -30,7 +30,7 @@ func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string) {
 }
 
 func TestNewRuleFileProcessor(t *testing.T) {
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	fileManager, _ := filemanager.NewFileManager("/tmp", logger)
 
 	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
@@ -1292,7 +1292,7 @@ func TestProcessRuleFileEnhancedValidation(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	fileManager, err := filemanager.NewFileManager(tempDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
@@ -1409,7 +1409,7 @@ func TestProcessRuleFileSymlinkValidation(t *testing.T) {
 	}
 	defer os.RemoveAll(outsideDir)
 
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	fileManager, err := filemanager.NewFileManager(tempDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
@@ -1454,7 +1454,7 @@ func TestProcessRuleFileDirectoryBoundaryValidation(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	fileManager, err := filemanager.NewFileManager(tempDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)

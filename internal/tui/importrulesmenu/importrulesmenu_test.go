@@ -26,7 +26,8 @@ func createTestConfigWithPath(path string) *config.Config {
 // Test utilities and fixtures
 
 func createTestLogger() *logging.AppLogger {
-	return logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
+	return logger
 }
 
 func createTestStorageDir(t *testing.T) string {

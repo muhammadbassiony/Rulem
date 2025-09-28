@@ -78,7 +78,7 @@ func createTestServer(tb testing.TB) (*Server, string) {
 	})
 
 	cfg := createTestConfigWithPath(tempDir)
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	server := NewServer(cfg, logger)
 
 	return server, tempDir
@@ -122,7 +122,7 @@ func TestServer_Construction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := createTestConfigWithPath(tt.storageDir)
-			logger := logging.NewAppLogger()
+			logger, _ := logging.NewTestLogger()
 
 			server := NewServer(cfg, logger)
 
@@ -170,7 +170,7 @@ func TestServer_ComponentInitialization(t *testing.T) {
 			name: "invalid storage directory",
 			setupFunc: func(t testing.TB) *Server {
 				cfg := createTestConfigWithPath("/non/existent/directory")
-				logger := logging.NewAppLogger()
+				logger, _ := logging.NewTestLogger()
 				return NewServer(cfg, logger)
 			},
 			wantError: true,
@@ -609,7 +609,7 @@ func TestServer_ErrorConditions(t *testing.T) {
 			name: "missing storage directory",
 			setupFunc: func(t testing.TB) *Server {
 				cfg := createTestConfigWithPath("/this/path/does/not/exist")
-				logger := logging.NewAppLogger()
+				logger, _ := logging.NewTestLogger()
 				return NewServer(cfg, logger)
 			},
 			operation:   "InitializeComponents",

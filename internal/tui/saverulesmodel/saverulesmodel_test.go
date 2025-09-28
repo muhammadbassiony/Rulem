@@ -23,7 +23,8 @@ func createTestConfigWithPath(path string) *config.Config {
 // Test utilities
 
 func createTestLogger() *logging.AppLogger {
-	return logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
+	return logger
 }
 
 func createTestStorageDir(t *testing.T) string {
@@ -1502,7 +1503,7 @@ func BenchmarkSaveRulesModel_Update(b *testing.B) {
 	os.Chdir(workDir)
 
 	cfg := createTestConfigWithPath(storageDir)
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(80, 24, cfg, logger)
 	model := NewSaveRulesModel(ctx)
 
@@ -1541,7 +1542,7 @@ func BenchmarkSaveRulesModel_ScanForFiles(b *testing.B) {
 	defer os.RemoveAll(storageDir)
 
 	cfg := createTestConfigWithPath(storageDir)
-	logger := logging.NewAppLogger()
+	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(80, 24, cfg, logger)
 	model := NewSaveRulesModel(ctx)
 

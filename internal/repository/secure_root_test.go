@@ -1,33 +1,13 @@
-package filemanager
+package repository
 
 import (
 	"os"
 	"path/filepath"
-	"rulem/internal/repository"
-	"rulem/pkg/fileops"
 	"strings"
 	"testing"
+
+	"rulem/pkg/fileops"
 )
-
-// TestGetDefaultStorageDir tests the GetDefaultStorageDir function
-func TestGetDefaultStorageDir(t *testing.T) {
-	result := repository.GetDefaultStorageDir()
-
-	// Should not be empty
-	if result == "" {
-		t.Error("GetDefaultStorageDir returned empty string")
-	}
-
-	// Should contain rulem
-	if !strings.Contains(result, "rulem") {
-		t.Errorf("GetDefaultStorageDir should contain 'rulem', got: %s", result)
-	}
-
-	// Should be an absolute path (in most cases)
-	if !filepath.IsAbs(result) && !strings.HasPrefix(result, ".rulem") {
-		t.Errorf("GetDefaultStorageDir should return absolute path or .rulem fallback, got: %s", result)
-	}
-}
 
 // TestExpandPath tests the ExpandPath function
 func TestExpandPath(t *testing.T) {
@@ -140,9 +120,9 @@ func TestExpandPathEdgeCases(t *testing.T) {
 	}
 }
 
-// TestCreateSecureStorageRoot tests the CreateSecureStorageRoot function
-func TestCreateSecureStorageRoot(t *testing.T) {
-	tempDir := createTempTestDir(t, "secure-root-test-")
+// TestEnsureLocalStorageDirectory tests the EnsureLocalStorageDirectory function
+func TestEnsureLocalStorageDirectory(t *testing.T) {
+	tempDir := createTempTestDir(t, "local-storage-test-")
 
 	tests := []struct {
 		name      string
@@ -177,37 +157,37 @@ func TestCreateSecureStorageRoot(t *testing.T) {
 				defer cleanup()
 			}
 
-			root, err := CreateSecureStorageRoot(tt.input)
+			root, err := EnsureLocalStorageDirectory(tt.input)
 			if root != nil {
 				defer root.Close()
 			}
 
 			if tt.wantError {
 				if err == nil {
-					t.Errorf("CreateSecureStorageRoot(%q) expected error but got none", tt.input)
+					t.Errorf("EnsureLocalStorageDirectory(%q) expected error but got none", tt.input)
 					return
 				}
 				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("CreateSecureStorageRoot(%q) error = %v, want error containing %q",
+					t.Errorf("EnsureLocalStorageDirectory(%q) error = %v, want error containing %q",
 						tt.input, err, tt.errorMsg)
 				}
 			} else {
 				if err != nil {
-					t.Errorf("CreateSecureStorageRoot(%q) unexpected error: %v", tt.input, err)
+					t.Errorf("EnsureLocalStorageDirectory(%q) unexpected error: %v", tt.input, err)
 				}
 				if root == nil {
-					t.Errorf("CreateSecureStorageRoot(%q) returned nil root without error", tt.input)
+					t.Errorf("EnsureLocalStorageDirectory(%q) returned nil root without error", tt.input)
 				}
 			}
 		})
 	}
 }
 
-// Integration test for complete workflow
-func TestIntegrationWorkflow(t *testing.T) {
-	t.Run("complete workflow", func(t *testing.T) {
+// Integration test for complete local storage workflow
+func TestLocalStorageIntegrationWorkflow(t *testing.T) {
+	t.Run("complete local storage workflow", func(t *testing.T) {
 		// Step 1: Get default directory
-		defaultDir := repository.GetDefaultStorageDir()
+		defaultDir := GetDefaultStorageDir()
 		if defaultDir == "" {
 			t.Fatal("GetDefaultStorageDir returned empty string")
 		}
@@ -260,14 +240,34 @@ func TestIntegrationWorkflow(t *testing.T) {
 			t.Errorf("File content mismatch: got %q, want %q", readContent, testContent)
 		}
 
-		// Cleanup
-		os.RemoveAll(testDir)
+		// Clean up
+		if err := os.RemoveAll(testDir); err != nil {
+			t.Logf("Warning: Failed to clean up test directory: %v", err)
+		}
 	})
 }
 
-func BenchmarkGetDefaultStorageDir(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		repository.GetDefaultStorageDir()
+// Helper function to get home directory for tests
+func getHomeDir(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("Failed to get home directory: %v", err)
 	}
+	return home
+}
+
+// Helper function to create temp test directory
+func createTempTestDir(t *testing.T, pattern string) string {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", pattern)
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Logf("Warning: Failed to clean up temp directory %s: %v", tempDir, err)
+		}
+	})
+	return tempDir
 }

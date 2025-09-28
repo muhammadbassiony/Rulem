@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
 	"time"
@@ -271,7 +270,7 @@ func UpdateCentralPath(cfg *Config, newPath string) error {
 	cfg.Central.Path = newPath
 
 	// Ensure central repository path exists with secure permissions
-	root, err := filemanager.CreateSecureStorageRoot(cfg.Central.Path)
+	root, err := repository.EnsureLocalStorageDirectory(cfg.Central.Path)
 	if err != nil {
 		return fmt.Errorf("failed to prepare central repository directory: %w", err)
 	}
@@ -293,7 +292,7 @@ func CreateNewConfig(storageDir string) error {
 	cfg.Central.Path = storageDir
 
 	// Ensure storage directory exists
-	root, err := filemanager.CreateSecureStorageRoot(cfg.Central.Path)
+	root, err := repository.EnsureLocalStorageDirectory(cfg.Central.Path)
 	if err != nil {
 		return fmt.Errorf("failed to create storage directory: %w", err)
 	}

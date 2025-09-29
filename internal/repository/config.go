@@ -1,7 +1,10 @@
 package repository
 
 import (
+	"path/filepath"
 	"rulem/internal/logging"
+
+	"github.com/adrg/xdg"
 )
 
 // CentralRepositoryConfig represents the configuration for the central rules repository.
@@ -16,6 +19,16 @@ type CentralRepositoryConfig struct {
 // IsRemote returns true if this configuration represents a remote Git repository.
 func (c CentralRepositoryConfig) IsRemote() bool {
 	return c.RemoteURL != nil && *c.RemoteURL != ""
+}
+
+// GetDefaultStorageDir returns the default storage directory in the user's data directory.
+// This function was moved from internal/filemanager/storagedir.go to avoid circular dependencies
+// when the repository package needs to reference the default storage location.
+//
+// Returns:
+//   - string: Absolute path to the default storage directory (e.g., ~/.local/share/rulem)
+func GetDefaultStorageDir() string {
+	return filepath.Join(xdg.DataHome, "rulem")
 }
 
 // PrepareRepository creates the appropriate source and prepares it for use.
@@ -55,16 +68,8 @@ func PrepareRepository(cfg CentralRepositoryConfig, logger *logging.AppLogger) (
 		// Local repository mode - use the configured path directly
 		source = NewLocalSource(cfg.Path)
 	} else {
-		// Git repository mode - will be implemented in Phase 3.6
-		// For now, return LocalSource as fallback (this will be replaced with GitSource)
-		// TODO: Implement GitSource in Phase 3.6
-		//
-		// Future implementation:
-		// source = NewGitSource(*cfg.RemoteURL, cfg.Branch, cfg.Path)
-
-		// Temporary fallback to LocalSource for Git configs
-		// This ensures the system works with current LocalSource implementation
-		source = NewLocalSource(cfg.Path)
+		// Git repository mode - use GitSource with PAT authentication
+		source = NewGitSource(*cfg.RemoteURL, cfg.Branch, cfg.Path)
 	}
 
 	return source.Prepare(logger)

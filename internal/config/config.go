@@ -77,29 +77,9 @@ const AppName = "rulem" // application name used for config directory
 //   - Version: Configuration schema version for handling upgrades
 //   - InitTime: Unix timestamp when the configuration was first created
 type Config struct {
-	Version  string                  `yaml:"version"`   // Track config version
-	InitTime int64                   `yaml:"init_time"` // Unix timestamp of first setup
-	Central  CentralRepositoryConfig `yaml:"central"`
-}
-
-// CentralRepositoryConfig defines the configuration for the central rule repository.
-//
-// This struct specifies the location and synchronization details for the authoritative
-// repository where rulem stores or clones rule files. It supports both local directories
-// and remote Git repositories, enabling flexible rule management and caching.
-// The configuration is persisted as YAML and used to manage the application's
-// rule storage and synchronization operations.
-//
-// Fields:
-//   - Path (required): The required directory path where rulem stores or clones rule files on disk. This is the path to the local cache, whether its local only or a clone of a remote repository.
-//   - RemoteURL: (Optional) Git remote URL used to populate and sync the local cache. If not set, the local path is used as-is without remote synchronization.
-//   - Branch: (Optional) Git branch name for the remote repository synchronization
-//   - LastSyncTime: (Optional) Unix timestamp of the last successful sync operation, used for freshness indicators
-type CentralRepositoryConfig struct {
-	Path         string  `yaml:"path"`
-	RemoteURL    *string `yaml:"remote_url,omitempty"`
-	Branch       *string `yaml:"branch,omitempty"`
-	LastSyncTime *int64  `yaml:"last_sync_time,omitempty"`
+	Version  string                             `yaml:"version"`   // Track config version
+	InitTime int64                              `yaml:"init_time"` // Unix timestamp of first setup
+	Central  repository.CentralRepositoryConfig `yaml:"central"`
 }
 
 // Path returns the standard config file paths for the current platform
@@ -194,7 +174,7 @@ func DefaultConfig() Config {
 	cfg := Config{
 		Version:  "1.0",
 		InitTime: 0, // Will be set during first save
-		Central: CentralRepositoryConfig{
+		Central: repository.CentralRepositoryConfig{
 			Path: path,
 		},
 	}

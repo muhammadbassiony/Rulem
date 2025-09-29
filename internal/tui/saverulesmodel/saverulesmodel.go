@@ -6,6 +6,7 @@ import (
 
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
@@ -96,7 +97,33 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	nameInput.CharLimit = 255
 	nameInput.Width = 50
 
-	fm, err := filemanager.NewFileManager(ctx.Config.Central.Path, ctx.Logger)
+	// Prepare repository and get local path
+	localPath, syncInfo, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
+	if err != nil {
+		ctx.Logger.Error("Failed to prepare repository", "error", err)
+		return SaveRulesModel{
+			logger:           ctx.Logger,
+			state:            StateError,
+			layout:           layout,
+			spinner:          s,
+			filePicker:       nil,
+			nameInput:        nameInput,
+			markdownFiles:    []filemanager.FileItem{},
+			selectedFile:     filemanager.FileItem{},
+			newFileName:      "",
+			destinationPath:  "",
+			err:              fmt.Errorf("repository preparation failed: %w", err),
+			isOverwriteError: false,
+			fileManager:      nil,
+		}
+	}
+
+	// Surface sync information if available
+	if syncInfo.Message != "" {
+		ctx.Logger.Info("Repository status", "message", syncInfo.Message)
+	}
+
+	fm, err := filemanager.NewFileManager(localPath, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
 	}

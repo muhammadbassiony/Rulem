@@ -11,10 +11,10 @@ package mcp
 import (
 	"context"
 	"fmt"
-
 	"rulem/internal/config"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -45,9 +45,18 @@ func (s *Server) Start() error {
 	// Create MCP server instance
 	s.mcpServer = server.NewMCPServer("rulem", "1.0.0", server.WithToolCapabilities(true))
 
-	// Initialize file manager for repository scanning
-	var err error
-	s.fileManager, err = filemanager.NewFileManager(s.config.Central.Path, s.logger)
+	// Prepare repository and initialize file manager for scanning
+	localPath, syncInfo, err := repository.PrepareRepository(s.config.Central, s.logger)
+	if err != nil {
+		return fmt.Errorf("failed to prepare repository: %w", err)
+	}
+
+	// Surface sync information to user if available
+	if syncInfo.Message != "" {
+		s.logger.Info("Repository status", "message", syncInfo.Message)
+	}
+
+	s.fileManager, err = filemanager.NewFileManager(localPath, s.logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize file manager: %w", err)
 	}
@@ -201,9 +210,18 @@ func (s *Server) getRulefileToolHandler(toolName string) (server.ToolHandlerFunc
 // Returns:
 //   - error: Initialization error if file manager creation fails
 func (s *Server) InitializeComponents() error {
-	// Initialize file manager for repository scanning
-	var err error
-	s.fileManager, err = filemanager.NewFileManager(s.config.Central.Path, s.logger)
+	// Prepare repository and initialize file manager for scanning
+	localPath, syncInfo, err := repository.PrepareRepository(s.config.Central, s.logger)
+	if err != nil {
+		return fmt.Errorf("failed to prepare repository: %w", err)
+	}
+
+	// Surface sync information to user if available
+	if syncInfo.Message != "" {
+		s.logger.Info("Repository status", "message", syncInfo.Message)
+	}
+
+	s.fileManager, err = filemanager.NewFileManager(localPath, s.logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize file manager: %w", err)
 	}

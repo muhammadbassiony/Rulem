@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"rulem/internal/repository"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,7 @@ func TestConfigCentralScenarios(t *testing.T) {
 				lastSync := time.Now().Unix()
 				cfg := Config{
 					Version: "2.0",
-					Central: CentralRepositoryConfig{
+					Central: repository.CentralRepositoryConfig{
 						Path:         "/tmp/rules/cache",
 						RemoteURL:    &remote,
 						Branch:       &branch,
@@ -133,7 +134,7 @@ func TestConfigInitTime(t *testing.T) {
 
 	config := Config{
 		Version: "1.0",
-		Central: CentralRepositoryConfig{
+		Central: repository.CentralRepositoryConfig{
 			Path: "/test",
 		},
 		// InitTime not set (0)

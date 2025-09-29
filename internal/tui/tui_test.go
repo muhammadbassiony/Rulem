@@ -5,10 +5,11 @@ import (
 
 	"rulem/internal/config"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 )
 
 func createTestConfigWithPath(path string) *config.Config {
-	return &config.Config{Central: config.CentralRepositoryConfig{Path: path}}
+	return &config.Config{Central: repository.CentralRepositoryConfig{Path: path}}
 }
 
 func TestNewMainModel(t *testing.T) {

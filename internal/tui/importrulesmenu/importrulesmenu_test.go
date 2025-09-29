@@ -8,6 +8,7 @@ import (
 	"rulem/internal/editors"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
 	"strings"
@@ -19,7 +20,7 @@ import (
 
 func createTestConfigWithPath(path string) *config.Config {
 	return &config.Config{
-		Central: config.CentralRepositoryConfig{Path: path},
+		Central: repository.CentralRepositoryConfig{Path: path},
 	}
 }
 
@@ -112,7 +113,14 @@ func createTestModel(t *testing.T) *ImportRulesModel {
 func createTestModelWithFiles(t *testing.T) (*ImportRulesModel, []filemanager.FileItem) {
 	ctx := createTestUIContext(t)
 	model := NewImportRulesModel(ctx)
-	files := createTestFiles(t, ctx.Config.Central.Path)
+
+	// Prepare repository and get local path
+	localPath, _, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repository: %v", err)
+	}
+
+	files := createTestFiles(t, localPath)
 	return model, files
 }
 
@@ -1433,8 +1441,14 @@ func TestImportRulesModel_RelativeToAbsoluteConversion(t *testing.T) {
 	ctx := createTestUIContext(t)
 	ctx.Config.Central.Path = storageDir
 
+	// Prepare repository and get local path
+	localPath, _, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repository: %v", err)
+	}
+
 	// Create FileManager directly to test the conversion
-	fm, err := filemanager.NewFileManager(storageDir, ctx.Logger)
+	fm, err := filemanager.NewFileManager(localPath, ctx.Logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -1527,7 +1541,7 @@ func TestImportRulesModel_BrokenSymlinkOverwrite(t *testing.T) {
 		Width:  80,
 		Height: 24,
 		Config: &config.Config{
-			Central: config.CentralRepositoryConfig{Path: storageDir},
+			Central: repository.CentralRepositoryConfig{Path: storageDir},
 		},
 		Logger: createTestLogger(),
 	}

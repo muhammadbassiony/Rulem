@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"rulem/internal/repository"
 	"testing"
 	"time"
 )
@@ -34,7 +35,7 @@ func TestReloadConfig(t *testing.T) {
 	initialConfig := Config{
 		Version:  "1.0",
 		InitTime: time.Now().Unix(),
-		Central: CentralRepositoryConfig{
+		Central: repository.CentralRepositoryConfig{
 			Path: initialCentralPath,
 		},
 	}
@@ -84,7 +85,7 @@ func TestReloadConfig(t *testing.T) {
 	modifiedConfig := Config{
 		Version:  "1.1",
 		InitTime: initialConfig.InitTime,
-		Central: CentralRepositoryConfig{
+		Central: repository.CentralRepositoryConfig{
 			Path: modifiedCentralPath,
 		},
 	}

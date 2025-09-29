@@ -5,6 +5,7 @@ import (
 	"rulem/internal/editors"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
@@ -155,15 +156,39 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	s.Style = styles.SpinnerStyle
 	s.Spinner = spinner.Pulse
 
-	fm, err := filemanager.NewFileManager(ctx.Config.Central.Path, ctx.Logger)
+	// Prepare repository and get local path
+	localPath, syncInfo, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
+	if err != nil {
+		ctx.Logger.Error("Failed to prepare repository", "error", err)
+		return &ImportRulesModel{
+			logger:           ctx.Logger,
+			state:            StateError,
+			layout:           layout,
+			spinner:          s,
+			filePicker:       nil,
+			importModeList:   importModeList,
+			editorList:       editorsList,
+			fileManager:      nil,
+			ruleFiles:        nil,
+			selectedFile:     filemanager.FileItem{},
+			isOverwriteError: false,
+			err:              fmt.Errorf("repository preparation failed: %w", err),
+		}
+	}
+
+	// Surface sync information if available
+	if syncInfo.Message != "" {
+		ctx.Logger.Info("Repository status", "message", syncInfo.Message)
+	}
+
+	fm, err := filemanager.NewFileManager(localPath, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
 	}
 
 	return &ImportRulesModel{
-		logger: ctx.Logger,
-		state:  StateLoading,
-		// editors:     editors,
+		logger:           ctx.Logger,
+		state:            StateLoading,
 		layout:           layout,
 		spinner:          s,
 		filePicker:       nil, // created after scan

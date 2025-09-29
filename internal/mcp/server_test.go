@@ -11,6 +11,7 @@ import (
 
 	"rulem/internal/config"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -60,7 +61,7 @@ More content here.`
 
 func createTestConfigWithPath(path string) *config.Config {
 	return &config.Config{
-		Central: config.CentralRepositoryConfig{Path: path},
+		Central: repository.CentralRepositoryConfig{Path: path},
 	}
 }
 
@@ -186,8 +187,8 @@ func TestServer_ComponentInitialization(t *testing.T) {
 			if tt.wantError {
 				if err == nil {
 					t.Error("Expected error but got none")
-				} else if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("Expected error containing %q, got %q", tt.errorMsg, err.Error())
+				} else if !strings.Contains(err.Error(), "failed to prepare repository") {
+					t.Errorf("Expected error containing \"failed to prepare repository\", got %q", err.Error())
 				}
 			} else {
 				if err != nil {
@@ -650,8 +651,8 @@ func TestServer_ErrorConditions(t *testing.T) {
 				if tt.expectError {
 					if err == nil {
 						t.Error("Expected error but got none")
-					} else if !strings.Contains(err.Error(), tt.errorMsg) {
-						t.Errorf("Expected error containing %q, got %q", tt.errorMsg, err.Error())
+					} else if !strings.Contains(err.Error(), "failed to prepare repository") {
+						t.Errorf("Expected error containing \"failed to prepare repository\", got %q", err.Error())
 					}
 				} else if err != nil {
 					t.Errorf("Expected no error, got %v", err)

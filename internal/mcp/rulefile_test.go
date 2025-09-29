@@ -8,6 +8,7 @@ import (
 
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 )
 
 func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string) {
@@ -20,7 +21,14 @@ func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string) {
 
 	cfg := createTestConfigWithPath(tempDir)
 	logger, _ := logging.NewTestLogger()
-	fileManager, err := filemanager.NewFileManager(cfg.Central.Path, logger)
+
+	// Prepare repository and get local path
+	localPath, _, err := repository.PrepareRepository(cfg.Central, logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repository: %v", err)
+	}
+
+	fileManager, err := filemanager.NewFileManager(localPath, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
 	}
@@ -705,7 +713,14 @@ This file has invalid YAML frontmatter.`,
 
 	// Create file manager and processor with test logger
 	cfg := createTestConfigWithPath(tempDir)
-	fileManager, err := filemanager.NewFileManager(cfg.Central.Path, logger)
+
+	// Prepare repository and get local path
+	localPath, _, err := repository.PrepareRepository(cfg.Central, logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repository: %v", err)
+	}
+
+	fileManager, err := filemanager.NewFileManager(localPath, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
 	}
@@ -788,7 +803,14 @@ Write comprehensive tests.`,
 
 	// Create file manager and processor with test logger
 	cfg := createTestConfigWithPath(tempDir)
-	fileManager, err := filemanager.NewFileManager(cfg.Central.Path, logger)
+
+	// Prepare repository and get local path
+	localPath, _, err := repository.PrepareRepository(cfg.Central, logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repository: %v", err)
+	}
+
+	fileManager, err := filemanager.NewFileManager(localPath, logger)
 	if err != nil {
 		t.Fatalf("Failed to create file manager: %v", err)
 	}

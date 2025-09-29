@@ -5,6 +5,7 @@ import (
 
 	"rulem/internal/config"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/internal/tui/helpers"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,7 +13,7 @@ import (
 
 func createTestConfigWithPath(path string) *config.Config {
 	return &config.Config{
-		Central: config.CentralRepositoryConfig{Path: path},
+		Central: repository.CentralRepositoryConfig{Path: path},
 	}
 }
 

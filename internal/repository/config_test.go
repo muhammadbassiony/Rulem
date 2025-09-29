@@ -105,33 +105,37 @@ func TestPrepareRepository_InvalidLocalPath(t *testing.T) {
 	}
 }
 
-func TestPrepareRepository_GitMode_FallbackBehavior(t *testing.T) {
+func TestPrepareRepository_GitMode_WithoutAuth(t *testing.T) {
 	tempDir := t.TempDir()
 	logger, _ := logging.NewTestLogger()
 
-	remoteURL := "https://github.com/user/repo.git"
+	// Use a public repository that should be accessible without authentication
+	remoteURL := "https://github.com/octocat/Hello-World.git"
 	cfg := CentralRepositoryConfig{
 		Path:      tempDir,
 		RemoteURL: &remoteURL, // Git mode
 	}
 
-	// Currently should fallback to LocalSource behavior
+	// Should use GitSource and succeed for public repository
 	localPath, syncInfo, err := PrepareRepository(cfg, logger)
 	if err != nil {
 		t.Fatalf("PrepareRepository failed: %v", err)
 	}
 
-	// Should return the configured path (LocalSource fallback behavior)
+	// Should return the configured path
 	if localPath != tempDir {
 		t.Errorf("Expected path '%s', got '%s'", tempDir, localPath)
 	}
 
-	// LocalSource fallback should not set sync flags
-	if syncInfo.Cloned || syncInfo.Updated || syncInfo.Dirty {
-		t.Errorf("LocalSource fallback should not set sync flags, got: %+v", syncInfo)
+	// GitSource should set clone flag for initial clone
+	if !syncInfo.Cloned {
+		t.Errorf("Expected Cloned=true for initial GitSource clone, got %+v", syncInfo)
 	}
 
-	// TODO: When GitSource is implemented, update this test to expect GitSource behavior
+	// Should have GitSource success message
+	if !strings.Contains(strings.ToLower(syncInfo.Message), "clone") {
+		t.Errorf("Expected clone message, got: %q", syncInfo.Message)
+	}
 }
 
 func TestPrepareRepository_WithNilLogger(t *testing.T) {
@@ -258,18 +262,19 @@ func TestNewGitSource_NilBranch(t *testing.T) {
 	}
 }
 
-func TestGitSource_Prepare_NotImplemented(t *testing.T) {
+func TestGitSource_Prepare_RequiresAuth(t *testing.T) {
 	source := NewGitSource("https://github.com/user/repo.git", nil, "/tmp/test")
 	logger, _ := logging.NewTestLogger()
 
 	_, _, err := source.Prepare(logger)
 	if err == nil {
-		t.Error("GitSource.Prepare should return error as it's not implemented yet")
+		t.Error("GitSource.Prepare should require authentication")
 	}
 
-	expectedMsg := "GitSource not yet implemented - will be available in Phase 3.6"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error message %q, got %q", expectedMsg, err.Error())
+	// Should mention authentication requirement
+	errStr := strings.ToLower(err.Error())
+	if !strings.Contains(errStr, "auth") && !strings.Contains(errStr, "token") {
+		t.Errorf("Expected error to mention authentication, got: %v", err)
 	}
 }
 

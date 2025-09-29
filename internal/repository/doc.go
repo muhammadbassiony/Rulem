@@ -24,6 +24,34 @@
 //	// Use syncInfo.Message for UI feedback
 //	fm := filemanager.NewFileManager(localPath, logger)
 //
+// # Git Repository Integration
+//
+// The GitSource implementation provides comprehensive Git repository support:
+//
+// **Authentication Strategy:**
+//   - Public repositories: No authentication required (tries public access first)
+//   - Private repositories: Uses GitHub Personal Access Tokens via go-keyring OS credential store
+//   - Automatic fallback: Public access → PAT authentication → clear error messages
+//   - Token validation: Supports all GitHub PAT formats (ghp_, github_pat_, gho_, ghu_, ghs_)
+//
+// **Repository Operations:**
+//   - Initial clone: Shallow clone (depth=1) for performance, with branch-specific support
+//   - Updates: Fetch + reset approach for clean synchronization without merge conflicts
+//   - Dirty detection: Preserves local changes and provides user guidance for manual resolution
+//   - URL normalization: Automatic SSH → HTTPS conversion for consistent authentication
+//
+// **Security and Conflict Resolution:**
+//   - Directory validation: Prevents overwrites of different repositories
+//   - Path security: All paths validated through pkg/fileops security functions
+//   - Explicit conflict handling: Manual resolution required for directory conflicts
+//   - Safe operations: No automatic deletion of user data or uncommitted changes
+//
+// **Error Handling:**
+//   - User-friendly messages: Technical errors translated to actionable guidance
+//   - Settings integration: Authentication errors direct users to Settings → GitHub Authentication
+//   - Offline support: Network failures allow continued operation with cached repositories
+//   - Recovery guidance: Clear instructions for resolving common issues
+//
 // LocalSource behavior:
 //   - Validates non-empty path, expands "~/" and cleans it
 //   - Enforces security and suitability using fileops.ValidateStoragePath
@@ -83,12 +111,20 @@
 //   - OS credential store integration using go-keyring library
 //   - Cross-platform support (Keychain on macOS, libsecret on Linux, Credential Manager on Windows)
 //   - Token format validation for GitHub PATs (ghp_, github_pat_, gho_, ghu_, ghs_ prefixes)
+//   - Graceful degradation when OS credential store is unavailable
 //
 // Credentials are stored securely in the OS credential store with service name "rulem" and key "github_pat".
 // The credential manager provides clear error messages directing users to Settings → GitHub Authentication
 // for token management and troubleshooting.
 //
-// # Path Resolution
+// Authentication flow:
+//  1. Check if PAT exists in credential store
+//  2. If no PAT, attempt public repository access
+//  3. If authentication required, prompt user for PAT configuration
+//  4. Store PAT securely for subsequent operations
+//  5. Validate PAT format and permissions before storage
+//
+// # Path Resolution and URL Handling
 //
 // For remote Git repositories, this package provides simple, user-friendly path derivation:
 //   - Clone path: <DefaultStorageDir>/<repo>
@@ -99,19 +135,42 @@
 // This simple structure makes repositories directly visible and manageable by users outside the tool.
 // Repository name conflicts are handled explicitly rather than through complex nested directory structures.
 //
+// **URL Processing:**
+//   - SSH → HTTPS conversion: git@github.com:user/repo.git → https://github.com/user/repo.git
+//   - Consistent .git suffix: Ensures reliable remote URL comparison
+//   - URL validation: Supports GitHub, GitLab, and custom Git servers
+//   - Component extraction: parseGitURL extracts host, owner, and repository name
+//
+// **Directory Conflict Resolution:**
+//   - Empty directory: Safe to clone
+//   - Same repository: Safe to fetch/pull updates
+//   - Different repository: Manual resolution required
+//   - Non-git content: Manual resolution required
+//   - Validation uses go-git library for reliable repository detection
+//
 // # Security
 //
 // All path operations leverage the existing pkg/fileops security validators to prevent:
-//   - Path traversal attacks
-//   - Access to system/reserved directories
+//   - Path traversal attacks (../, symbolic links)
+//   - Access to system/reserved directories (/etc, /sys, /proc)
 //   - Symlink security vulnerabilities
+//   - Invalid or malicious path specifications
 //
-// Directory conflicts are resolved explicitly:
+// **Git-specific Security:**
+//   - Directory validation: Two-phase approach with security validation + Git conflict detection
+//   - Path isolation: Parent directories created with restricted permissions (0755)
+//   - URL validation: parseGitURL prevents malformed or malicious repository URLs
+//   - Credential isolation: PATs stored in OS credential store with service-specific keys
+//
+// **Conflict Resolution Strategy:**
 //   - If target directory exists, validate it's a git repository with the same remote URL
 //   - If not the same repository, error and ask user to resolve manually
+//   - If directory contains non-git content, require manual cleanup
 //   - This approach prioritizes safety and user control over automatic conflict resolution
+//   - No automatic deletion or overwriting of existing user data
 //
-// The package maintains the security-first approach established in the application architecture.
+// The package maintains the security-first approach established in the application architecture,
+// with additional protections specific to Git repository operations and credential management.
 //
 // # Usage Flow
 //
@@ -133,6 +192,15 @@
 //   - Handle directory conflicts explicitly and safely
 //   - Support both local and remote repository sources seamlessly
 //   - Secure credential management with clear error messaging
+//   - Comprehensive Git integration with shallow cloning and conflict detection
+//   - Robust error handling with actionable user guidance
 //
 // See the contracts/ directory for detailed interface specifications and expected behaviors.
+// Implementation spans multiple files:
+//   - source.go: Core interfaces and LocalSource implementation
+//   - git.go: GitSource implementation with full Git lifecycle management
+//   - credentials.go: Secure PAT management via OS credential store
+//   - path.go: URL parsing, path derivation, and directory conflict resolution
+//   - config.go: Configuration management and repository preparation
+//   - secure_root.go: Local storage directory management with security boundaries
 package repository

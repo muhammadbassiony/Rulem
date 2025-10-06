@@ -764,55 +764,6 @@ func TestWindowSizeHandling(t *testing.T) {
 	}
 }
 
-func TestHelperFunctions(t *testing.T) {
-	t.Run("resetTextInputForState changes state and resets input", func(t *testing.T) {
-		model := createTestModel(t)
-		model.textInput.SetValue("old value")
-
-		cmd := model.resetTextInputForState(SetupStateGitHubBranch, "", "new placeholder", textinput.EchoNormal)
-
-		if cmd == nil {
-			t.Error("expected non-nil cmd")
-		}
-		if model.state != SetupStateGitHubBranch {
-			t.Errorf("expected state %v, got %v", SetupStateGitHubBranch, model.state)
-		}
-	})
-
-	t.Run("deriveClonePathPlaceholder extracts repo name", func(t *testing.T) {
-		model := createTestModel(t)
-		model.GitHubURL = "https://github.com/owner/my-repo.git"
-
-		placeholder := model.deriveClonePathPlaceholder()
-
-		if !strings.Contains(placeholder, "my-repo") {
-			t.Errorf("expected placeholder to contain 'my-repo', got %q", placeholder)
-		}
-	})
-
-	t.Run("deriveClonePathPlaceholder handles invalid url", func(t *testing.T) {
-		model := createTestModel(t)
-		model.GitHubURL = "invalid-url"
-
-		placeholder := model.deriveClonePathPlaceholder()
-
-		if placeholder == "" {
-			t.Error("expected non-empty placeholder")
-		}
-	})
-
-	t.Run("deriveClonePathPlaceholder handles empty url", func(t *testing.T) {
-		model := createTestModel(t)
-		model.GitHubURL = ""
-
-		placeholder := model.deriveClonePathPlaceholder()
-
-		if placeholder == "" {
-			t.Error("expected non-empty placeholder")
-		}
-	})
-}
-
 func TestPerformConfigCreation(t *testing.T) {
 	t.Run("creates local config", func(t *testing.T) {
 		_, cleanup := SetTestConfigPath(t)

@@ -23,12 +23,12 @@ package setupmenu
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"rulem/internal/config"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
+	"rulem/internal/tui/helpers/settingshelpers"
 	"rulem/internal/tui/styles"
 	"rulem/pkg/fileops"
 	"strings"
@@ -252,9 +252,13 @@ func (m *SetupModel) handleRepositoryTypeKeys(msg tea.KeyMsg) (*SetupModel, tea.
 		m.repositoryType = RepositoryType(m.repositoryTypeIndex)
 		if m.repositoryType == RepositoryTypeLocal {
 			defaultPath := repository.GetDefaultStorageDir()
-			return m, m.resetTextInputForState(SetupStateStorageInput, defaultPath, defaultPath, textinput.EchoNormal)
+			m.state = SetupStateStorageInput
+			m.layout = m.layout.ClearError()
+			return m, settingshelpers.ResetTextInputForState(&m.textInput, defaultPath, defaultPath, textinput.EchoNormal)
 		} else {
-			return m, m.resetTextInputForState(SetupStateGitHubURL, "", "https://github.com/user/repo.git", textinput.EchoNormal)
+			m.state = SetupStateGitHubURL
+			m.layout = m.layout.ClearError()
+			return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "https://github.com/user/repo.git", textinput.EchoNormal)
 		}
 	case "esc", "q":
 		return m.handleQuit()
@@ -309,19 +313,15 @@ func (m *SetupModel) handleGitHubURLKeys(msg tea.KeyMsg) (*SetupModel, tea.Cmd) 
 		input := strings.TrimSpace(m.textInput.Value())
 		m.logger.Debug("Validating GitHub URL", "url", input)
 
-		if input == "" {
-			return m, func() tea.Msg { return setupErrorMsg{fmt.Errorf("repository URL cannot be empty")} }
-		}
-
-		// Basic URL format validation
-		if !strings.HasPrefix(input, "http://") && !strings.HasPrefix(input, "https://") && !strings.HasPrefix(input, "git@") {
-			return m, func() tea.Msg {
-				return setupErrorMsg{fmt.Errorf("invalid repository URL format - must start with https://, http://, or git@")}
-			}
+		if err := settingshelpers.ValidateGitHubURL(input); err != nil {
+			m.logger.Warn("GitHub URL validation failed", "error", err)
+			return m, func() tea.Msg { return setupErrorMsg{err} }
 		}
 
 		m.GitHubURL = input
-		return m, m.resetTextInputForState(SetupStateGitHubBranch, "", "main (leave empty for default)", textinput.EchoNormal)
+		m.state = SetupStateGitHubBranch
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "main (leave empty for default)", textinput.EchoNormal)
 
 	case "esc":
 		m.state = SetupStateRepositoryType
@@ -342,9 +342,17 @@ func (m *SetupModel) handleGitHubBranchKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 	case "enter":
 		m.GitHubBranch = strings.TrimSpace(m.textInput.Value())
 		m.logger.LogUserAction("github_branch_submit", m.GitHubBranch)
-		return m, m.resetTextInputForState(SetupStateGitHubPath, "", m.deriveClonePathPlaceholder(), textinput.EchoNormal)
+		placeholder := settingshelpers.DeriveClonePath(m.GitHubURL)
+		if placeholder == "" {
+			placeholder = repository.GetDefaultStorageDir()
+		}
+		m.state = SetupStateGitHubPath
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", placeholder, textinput.EchoNormal)
 	case "esc":
-		return m, m.resetTextInputForState(SetupStateGitHubURL, "", "https://github.com/user/repo.git", textinput.EchoNormal)
+		m.state = SetupStateGitHubURL
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "https://github.com/user/repo.git", textinput.EchoNormal)
 	default:
 		return m.updateTextInput(msg)
 	}
@@ -369,10 +377,14 @@ func (m *SetupModel) handleGitHubPathKeys(msg tea.KeyMsg) (*SetupModel, tea.Cmd)
 		}
 
 		m.GitHubPath = fileops.ExpandPath(input)
-		return m, m.resetTextInputForState(SetupStateGitHubPAT, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
+		m.state = SetupStateGitHubPAT
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
 
 	case "esc":
-		return m, m.resetTextInputForState(SetupStateGitHubBranch, "", "main (leave empty for default)", textinput.EchoNormal)
+		m.state = SetupStateGitHubBranch
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "main (leave empty for default)", textinput.EchoNormal)
 	default:
 		return m.updateTextInput(msg)
 	}
@@ -418,7 +430,13 @@ func (m *SetupModel) handleGitHubPATKeys(msg tea.KeyMsg) (*SetupModel, tea.Cmd) 
 		return m, nil
 
 	case "esc":
-		return m, m.resetTextInputForState(SetupStateGitHubPath, "", m.deriveClonePathPlaceholder(), textinput.EchoNormal)
+		placeholder := settingshelpers.DeriveClonePath(m.GitHubURL)
+		if placeholder == "" {
+			placeholder = repository.GetDefaultStorageDir()
+		}
+		m.state = SetupStateGitHubPath
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", placeholder, textinput.EchoNormal)
 	default:
 		return m.updateTextInput(msg)
 	}
@@ -435,9 +453,13 @@ func (m *SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 		m.logger.LogUserAction("confirmation_reject", "going back")
 		if m.repositoryType == RepositoryTypeLocal {
 			defaultPath := repository.GetDefaultStorageDir()
-			return m, m.resetTextInputForState(SetupStateStorageInput, defaultPath, defaultPath, textinput.EchoNormal)
+			m.state = SetupStateStorageInput
+			m.layout = m.layout.ClearError()
+			return m, settingshelpers.ResetTextInputForState(&m.textInput, defaultPath, defaultPath, textinput.EchoNormal)
 		} else {
-			return m, m.resetTextInputForState(SetupStateGitHubPAT, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
+			m.state = SetupStateGitHubPAT
+			m.layout = m.layout.ClearError()
+			return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
 		}
 	case "y", "Y", "enter":
 		m.logger.LogUserAction("confirmation_accept", "creating config")
@@ -448,9 +470,13 @@ func (m *SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 		// Go back to previous screen based on repository type
 		if m.repositoryType == RepositoryTypeLocal {
 			defaultPath := repository.GetDefaultStorageDir()
-			return m, m.resetTextInputForState(SetupStateStorageInput, defaultPath, defaultPath, textinput.EchoNormal)
+			m.state = SetupStateStorageInput
+			m.layout = m.layout.ClearError()
+			return m, settingshelpers.ResetTextInputForState(&m.textInput, defaultPath, defaultPath, textinput.EchoNormal)
 		} else {
-			return m, m.resetTextInputForState(SetupStateGitHubPAT, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
+			m.state = SetupStateGitHubPAT
+			m.layout = m.layout.ClearError()
+			return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
 		}
 	}
 	return m, nil
@@ -803,40 +829,4 @@ func (m *SetupModel) viewCancelled() string {
 	content := `Setup was cancelled. Rulem has not been configured and will need to be set up before you can use it.`
 
 	return m.layout.Render(content)
-}
-
-// Helper functions
-
-// resetTextInputForState is a helper function that resets the text input and transitions to a new state.
-// This reduces code duplication across state transition logic.
-//
-// Parameters:
-//   - state: The target state to transition to
-//   - value: The initial value for the text input
-//   - placeholder: The placeholder text to display
-//   - echoMode: The echo mode (Normal or Password) for the input
-//
-// Returns a Bubble Tea command for the text input blink animation.
-func (m *SetupModel) resetTextInputForState(state SetupState, value, placeholder string, echoMode textinput.EchoMode) tea.Cmd {
-	m.state = state
-	m.textInput.Reset()
-	m.textInput.SetValue(value)
-	m.textInput.Placeholder = placeholder
-	m.textInput.EchoMode = echoMode
-	m.textInput.Focus()
-	m.layout = m.layout.ClearError()
-	return textinput.Blink
-}
-
-// deriveClonePathPlaceholder returns a smart default clone path based on the repository URL.
-// It extracts the repository name from the URL and creates a path in the default storage directory.
-// If URL parsing fails, it returns the default storage directory.
-func (m *SetupModel) deriveClonePathPlaceholder() string {
-	defaultPath := repository.GetDefaultStorageDir()
-	if m.GitHubURL != "" {
-		if info, err := repository.ParseGitURL(m.GitHubURL); err == nil && info.Repo != "" {
-			return filepath.Join(repository.GetDefaultStorageDir(), info.Repo)
-		}
-	}
-	return defaultPath
 }

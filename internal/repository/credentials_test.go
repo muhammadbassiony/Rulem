@@ -94,7 +94,7 @@ func TestValidateTokenFormat(t *testing.T) {
 	}
 }
 
-func TestCredentialManager_StoreGitHubToken(t *testing.T) {
+func TestCredentialManager_ValidateGitHubToken(t *testing.T) {
 	cm := NewCredentialManager()
 
 	tests := []struct {
@@ -115,14 +115,14 @@ func TestCredentialManager_StoreGitHubToken(t *testing.T) {
 			errMsg:  "token cannot be empty",
 		},
 		{
-			name:    "whitespace token",
-			token:   "   \t\n  ",
+			name:    "whitespace only token",
+			token:   "   ",
 			wantErr: true,
 			errMsg:  "token cannot be empty",
 		},
 		{
-			name:    "invalid format",
-			token:   "invalid_token_format_that_is_long_enough_but_wrong",
+			name:    "invalid prefix",
+			token:   "invalid_1234567890abcdef1234567890abcdef12345678",
 			wantErr: true,
 			errMsg:  "invalid token format",
 		},
@@ -130,13 +130,64 @@ func TestCredentialManager_StoreGitHubToken(t *testing.T) {
 			name:    "too short",
 			token:   "ghp_short",
 			wantErr: true,
-			errMsg:  "invalid token format",
+			errMsg:  "token too short",
+		},
+		{
+			name:    "fine-grained PAT",
+			token:   "github_pat_11AAAAAAA0aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789abcdef",
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := cm.StoreGitHubToken(tt.token)
+			err := cm.ValidateGitHubToken(tt.token)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ValidateGitHubToken() expected error but got none for token: %q", tt.token)
+				} else if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateGitHubToken() error = %v, want error containing %q", err, tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateGitHubToken() unexpected error for valid token: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCredentialManager_StoreGitHubToken(t *testing.T) {
+	cm := NewCredentialManager()
+
+	tests := []struct {
+		name    string
+		token   string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "valid token",
+			token:   "ghp_1234567890abcdef1234567890abcdef12345678",
+			wantErr: false,
+		},
+		{
+			name:    "fine-grained PAT",
+			token:   "github_pat_11AAAAAAA0aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789abcdef",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Pre-validate the token first (this is now the expected workflow)
+			err := cm.ValidateGitHubToken(tt.token)
+			if err != nil {
+				t.Errorf("ValidateGitHubToken() failed for valid token: %v", err)
+				return
+			}
+
+			err = cm.StoreGitHubToken(tt.token)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("StoreGitHubToken() expected error but got none for token: %q", tt.token)
@@ -218,7 +269,7 @@ func TestCredentialManager_UpdateGitHubToken(t *testing.T) {
 			name:    "invalid token update",
 			token:   "invalid_token",
 			wantErr: true,
-			errMsg:  "failed to update token",
+			errMsg:  "failed to validate new token",
 		},
 	}
 
@@ -283,8 +334,14 @@ func TestCredentialManager_FullFlow(t *testing.T) {
 		t.Error("HasGitHubToken() should return false initially")
 	}
 
-	// Store token (may fail in test environment)
-	err := cm.StoreGitHubToken(testToken)
+	// Validate and store token (may fail in test environment)
+	err := cm.ValidateGitHubToken(testToken)
+	if err != nil {
+		t.Errorf("ValidateGitHubToken() failed: %v", err)
+		return
+	}
+
+	err = cm.StoreGitHubToken(testToken)
 	if err != nil {
 		t.Logf("StoreGitHubToken() failed in test environment (expected): %v", err)
 		return // Skip rest of test if keyring unavailable
@@ -351,8 +408,14 @@ func TestCredentialManager_KeyringUnavailable(t *testing.T) {
 		if !available {
 			t.Logf("Keyring unavailable in test environment: %v", status["error"])
 
-			// Test that operations fail gracefully
-			err := cm.StoreGitHubToken("ghp_1234567890abcdef1234567890abcdef12345678")
+			// Test that validation still works (doesn't require keyring)
+			err := cm.ValidateGitHubToken("ghp_1234567890abcdef1234567890abcdef12345678")
+			if err != nil {
+				t.Errorf("ValidateGitHubToken() should work even when keyring unavailable: %v", err)
+			}
+
+			// Test that storage operations fail gracefully
+			err = cm.StoreGitHubToken("ghp_1234567890abcdef1234567890abcdef12345678")
 			if err == nil {
 				t.Error("StoreGitHubToken() should fail when keyring unavailable")
 			}

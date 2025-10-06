@@ -1,9 +1,15 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/config"
+	"github.com/go-git/go-git/v6/plumbing/transport/http"
+	"github.com/go-git/go-git/v6/storage/memory"
 	"github.com/zalando/go-keyring"
 )
 
@@ -26,15 +32,14 @@ func NewCredentialManager() *CredentialManager {
 	}
 }
 
-// StoreGitHubToken securely stores a GitHub Personal Access Token in the OS credential store.
-// The token is validated before storage to ensure it has the required format.
+// ValidateGitHubToken validates a GitHub Personal Access Token format without storing it.
 //
 // Parameters:
-//   - token: GitHub Personal Access Token to store
+//   - token: GitHub Personal Access Token to validate
 //
 // Returns:
-//   - error: Storage errors or validation failures
-func (cm *CredentialManager) StoreGitHubToken(token string) error {
+//   - error: Validation errors if token format is invalid
+func (cm *CredentialManager) ValidateGitHubToken(token string) error {
 	if strings.TrimSpace(token) == "" {
 		return fmt.Errorf("token cannot be empty")
 	}
@@ -44,6 +49,93 @@ func (cm *CredentialManager) StoreGitHubToken(token string) error {
 		return fmt.Errorf("invalid token format: %w", err)
 	}
 
+	return nil
+}
+
+// ValidateGitHubTokenWithRepo validates a GitHub Personal Access Token by attempting to access a repository.
+// This verifies that the token is valid, not expired, and has access to the specified repository using go-git.
+//
+// Parameters:
+//   - ctx: Context for the operation
+//   - token: GitHub Personal Access Token to validate
+//   - repoURL: Repository URL to validate access (required for validation)
+//
+// Returns:
+//   - error: Validation errors if token is invalid or doesn't have access to the repository
+func (cm *CredentialManager) ValidateGitHubTokenWithRepo(ctx context.Context, token string, repoURL string) error {
+	// First validate token format
+	if err := cm.ValidateGitHubToken(token); err != nil {
+		return err
+	}
+
+	// Repository URL is required for validation
+	if repoURL == "" {
+		return fmt.Errorf("repository URL is required for token validation")
+	}
+
+	// Parse and validate the repository URL
+	_, err := ParseGitURL(repoURL)
+	if err != nil {
+		return fmt.Errorf("invalid repository URL: %w", err)
+	}
+
+	// Create authentication with the token
+	auth := &http.BasicAuth{
+		Username: "token",
+		Password: token,
+	}
+
+	// Set a reasonable timeout for the operation
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Attempt to list references (ls-remote) which is a lightweight operation
+	// that validates both token validity and repository access
+	remote := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{repoURL},
+	})
+
+	// Create a custom context-aware list options
+	listOpts := &git.ListOptions{
+		Auth: auth,
+	}
+
+	// Attempt to list remote references
+	_, err = remote.ListContext(ctxWithTimeout, listOpts)
+	if err != nil {
+		// Use existing error handling from git.go
+		gs := GitSource{RemoteURL: repoURL}
+
+		// Check for authentication errors using established pattern
+		if gs.isAuthenticationError(err) {
+			return fmt.Errorf("token is invalid or expired")
+		}
+
+		// Check for timeout
+		errStr := err.Error()
+		if strings.Contains(errStr, "context deadline exceeded") ||
+			strings.Contains(errStr, "timeout") {
+			return fmt.Errorf("timeout while validating token - please check your network connection")
+		}
+
+		// Use translateCloneError for consistent error messages
+		return gs.translateCloneError(err)
+	}
+
+	// Successfully listed references - token is valid and has access
+	return nil
+}
+
+// StoreGitHubToken securely stores a GitHub Personal Access Token in the OS credential store.
+// The token should be validated using ValidateGitHubToken before calling this function.
+//
+// Parameters:
+//   - token: GitHub Personal Access Token to store (should be pre-validated)
+//
+// Returns:
+//   - error: Storage errors
+func (cm *CredentialManager) StoreGitHubToken(token string) error {
 	// Store in OS credential store
 	if err := keyring.Set(cm.service, githubTokenKey, token); err != nil {
 		return fmt.Errorf("failed to store token in credential store: %w", err)
@@ -97,7 +189,7 @@ func (cm *CredentialManager) HasGitHubToken() bool {
 }
 
 // UpdateGitHubToken replaces the existing stored token with a new one.
-// This is equivalent to calling StoreGitHubToken with proper validation.
+// This validates the token first, then stores it if validation passes.
 //
 // Parameters:
 //   - newToken: New GitHub Personal Access Token to store
@@ -106,8 +198,12 @@ func (cm *CredentialManager) HasGitHubToken() bool {
 //   - error: Update errors or validation failures
 func (cm *CredentialManager) UpdateGitHubToken(newToken string) error {
 	// Validate new token before attempting to replace
+	if err := cm.ValidateGitHubToken(newToken); err != nil {
+		return fmt.Errorf("failed to validate new token: %w", err)
+	}
+
 	if err := cm.StoreGitHubToken(newToken); err != nil {
-		return fmt.Errorf("failed to update token: %w", err)
+		return fmt.Errorf("failed to store new token: %w", err)
 	}
 	return nil
 }

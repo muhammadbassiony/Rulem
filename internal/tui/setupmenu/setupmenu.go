@@ -275,16 +275,17 @@ func (m *SetupModel) handleStorageInputKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 	case "enter":
 		m.logger.LogUserAction("storage_input_submit", m.textInput.Value())
 
-		// Validate local storage path
-		input := strings.TrimSpace(m.textInput.Value())
+		// Validate and expand local storage path using shared helper
+		input := m.textInput.Value()
 		m.logger.Debug("Validating storage directory", "path", input)
 
-		if err := fileops.ValidateStoragePath(input); err != nil {
+		expandedPath, err := settingshelpers.ValidateAndExpandLocalPath(input)
+		if err != nil {
 			m.logger.Warn("Storage directory validation failed", "error", err)
 			return m, func() tea.Msg { return setupErrorMsg{err} }
 		}
 
-		m.StorageDir = fileops.ExpandPath(input)
+		m.StorageDir = expandedPath
 		m.logger.LogStateTransition("SetupModel", "SetupStateStorageInput", "SetupStateConfirmation")
 		m.state = SetupStateConfirmation
 		m.layout = m.layout.ClearError()

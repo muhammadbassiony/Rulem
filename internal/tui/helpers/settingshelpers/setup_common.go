@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"rulem/internal/repository"
+	"rulem/pkg/fileops"
 )
 
 // RepositoryTypeOption represents a repository type choice in the UI.
@@ -260,4 +261,32 @@ func ResetTextInputForState(textInput *textinput.Model, value, placeholder strin
 	textInput.EchoMode = echoMode
 	textInput.Focus()
 	return textinput.Blink
+}
+
+// ValidateAndExpandLocalPath validates a local storage path and expands it to an absolute path.
+// This is used by both setup and settings flows to ensure consistent path validation.
+//
+// The function:
+//   - Trims whitespace from input
+//   - Validates path security and accessibility using fileops.ValidateStoragePath
+//   - Expands path shortcuts like ~/ to absolute paths
+//
+// Parameters:
+//   - path: The path to validate and expand
+//
+// Returns:
+//   - string: The expanded absolute path
+//   - error: Validation error if the path is invalid
+func ValidateAndExpandLocalPath(path string) (string, error) {
+	input := strings.TrimSpace(path)
+
+	// Validate the storage path
+	if err := fileops.ValidateStoragePath(input); err != nil {
+		return "", err
+	}
+
+	// Expand the path (handles ~/ and other shortcuts)
+	expandedPath := fileops.ExpandPath(input)
+
+	return expandedPath, nil
 }

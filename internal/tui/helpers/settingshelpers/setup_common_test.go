@@ -526,3 +526,73 @@ func TestResetTextInputForState_PasswordMode(t *testing.T) {
 		t.Error("Expected command to be returned")
 	}
 }
+
+func TestValidateAndExpandLocalPath(t *testing.T) {
+	// Create a temporary directory for testing
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		path        string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "valid absolute path",
+			path:    tmpDir,
+			wantErr: false,
+		},
+		{
+			name:        "empty path",
+			path:        "",
+			wantErr:     true,
+			errContains: "cannot be empty",
+		},
+		{
+			name:        "whitespace only",
+			path:        "   ",
+			wantErr:     true,
+			errContains: "cannot be empty",
+		},
+		{
+			name:        "relative path without home",
+			path:        "relative/path",
+			wantErr:     true,
+			errContains: "must be absolute",
+		},
+		{
+			name:        "parent does not exist",
+			path:        "/nonexistent/parent/directory",
+			wantErr:     true,
+			errContains: "parent directory does not exist",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expanded, err := ValidateAndExpandLocalPath(tt.path)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error containing '%s', got nil", tt.errContains)
+				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Expected error containing '%s', got '%s'", tt.errContains, err.Error())
+				}
+				if expanded != "" {
+					t.Error("Expected empty path on error")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got: %v", err)
+				}
+				if expanded == "" {
+					t.Error("Expected non-empty expanded path")
+				}
+				// For valid paths, the expanded path should be absolute
+				if !strings.HasPrefix(expanded, "/") && !strings.Contains(expanded, ":") {
+					t.Errorf("Expected absolute path, got: %s", expanded)
+				}
+			}
+		})
+	}
+}

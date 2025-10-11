@@ -70,10 +70,6 @@ func TestNewSettingsModel(t *testing.T) {
 		t.Error("Credential manager not properly set")
 	}
 
-	if len(model.repositoryOptions) != 2 {
-		t.Errorf("Expected 2 repository options, got %d", len(model.repositoryOptions))
-	}
-
 	if model.textInput.CharLimit != 256 {
 		t.Errorf("Expected char limit to be 256, got %d", model.textInput.CharLimit)
 	}
@@ -96,7 +92,6 @@ func TestSettingsState_String(t *testing.T) {
 		{SettingsStateMainMenu, "MainMenu"},
 		{SettingsStateSelectChange, "SelectChange"},
 		{SettingsStateConfirmTypeChange, "ConfirmTypeChange"},
-		{SettingsStateRepositoryTypeSelect, "RepositoryTypeSelect"},
 		{SettingsStateUpdateLocalPath, "UpdateLocalPath"},
 		{SettingsStateUpdateGitHubPAT, "UpdateGitHubPAT"},
 		{SettingsStateUpdateGitHubURL, "UpdateGitHubURL"},
@@ -425,73 +420,6 @@ func TestHandleSelectChangeKeys_Selection(t *testing.T) {
 	}
 }
 
-func TestHandleConfirmTypeChangeKeys(t *testing.T) {
-	tests := []struct {
-		name          string
-		keyType       tea.KeyType
-		runes         []rune
-		expectedState SettingsState
-	}{
-		{"yes confirms", tea.KeyRunes, []rune("y"), SettingsStateRepositoryTypeSelect},
-		{"Y confirms", tea.KeyRunes, []rune("Y"), SettingsStateRepositoryTypeSelect},
-		{"enter confirms", tea.KeyEnter, nil, SettingsStateRepositoryTypeSelect},
-		{"no cancels", tea.KeyRunes, []rune("n"), SettingsStateSelectChange},
-		{"N cancels", tea.KeyRunes, []rune("N"), SettingsStateSelectChange},
-		{"esc cancels", tea.KeyEsc, nil, SettingsStateSelectChange},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			model := createTestModel(t)
-			model.state = SettingsStateConfirmTypeChange
-
-			var keyMsg tea.KeyMsg
-			if tt.runes != nil {
-				keyMsg = tea.KeyMsg{Type: tt.keyType, Runes: tt.runes}
-			} else {
-				keyMsg = tea.KeyMsg{Type: tt.keyType}
-			}
-
-			updatedModel, _ := model.handleConfirmTypeChangeKeys(keyMsg)
-
-			if updatedModel.state != tt.expectedState {
-				t.Errorf("Expected state %v, got %v", tt.expectedState, updatedModel.state)
-			}
-		})
-	}
-}
-
-func TestHandleRepositoryTypeSelectKeys(t *testing.T) {
-	model := createTestModel(t)
-	model.state = SettingsStateRepositoryTypeSelect
-
-	// Test selecting local repository
-	model.selectedOption = 0 // Local is first
-	keyMsg := tea.KeyMsg{Type: tea.KeyEnter}
-	updatedModel, _ := model.handleRepositoryTypeSelectKeys(keyMsg)
-
-	if updatedModel.newRepositoryType != "local" {
-		t.Errorf("Expected newRepositoryType to be 'local', got %v", updatedModel.newRepositoryType)
-	}
-
-	if updatedModel.state != SettingsStateUpdateLocalPath {
-		t.Errorf("Expected state to be UpdateLocalPath, got %v", updatedModel.state)
-	}
-
-	// Test selecting GitHub repository
-	model.selectedOption = 1 // GitHub is second
-	keyMsg = tea.KeyMsg{Type: tea.KeyEnter}
-	updatedModel, _ = model.handleRepositoryTypeSelectKeys(keyMsg)
-
-	if updatedModel.newRepositoryType != "github" {
-		t.Errorf("Expected newRepositoryType to be 'github', got %v", updatedModel.newRepositoryType)
-	}
-
-	if updatedModel.state != SettingsStateUpdateGitHubURL {
-		t.Errorf("Expected state to be UpdateGitHubURL, got %v", updatedModel.state)
-	}
-}
-
 func TestHandleUpdateLocalPathKeys(t *testing.T) {
 	model := createTestModel(t)
 	model.state = SettingsStateUpdateLocalPath
@@ -727,7 +655,6 @@ func TestViewRendering(t *testing.T) {
 		{"main menu", SettingsStateMainMenu},
 		{"select change", SettingsStateSelectChange},
 		{"confirm type change", SettingsStateConfirmTypeChange},
-		{"repository type select", SettingsStateRepositoryTypeSelect},
 		{"update local path", SettingsStateUpdateLocalPath},
 		{"update github pat", SettingsStateUpdateGitHubPAT},
 		{"update github url", SettingsStateUpdateGitHubURL},

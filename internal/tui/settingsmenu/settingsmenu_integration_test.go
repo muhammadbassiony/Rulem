@@ -156,14 +156,14 @@ func TestCompleteFlow_RepositoryTypeSwitch_LocalToGitHub(t *testing.T) {
 	updatedModel, _ = model.Update(yesMsg)
 	model = updatedModel.(*SettingsModel)
 
-	if model.state != SettingsStateRepositoryTypeSelect {
-		t.Fatalf("Expected RepositoryTypeSelect state, got %v", model.state)
-	}
+	// if model.state != SettingsStateRepositoryTypeSelect {
+	// 	t.Fatalf("Expected RepositoryTypeSelect state, got %v", model.state)
+	// }
 
-	// Select GitHub (index 1)
-	model.selectedOption = 1
-	updatedModel, _ = model.Update(enterMsg)
-	model = updatedModel.(*SettingsModel)
+	// // Select GitHub (index 1)
+	// model.selectedOption = 1
+	// updatedModel, _ = model.Update(enterMsg)
+	// model = updatedModel.(*SettingsModel)
 
 	if model.state != SettingsStateUpdateGitHubURL {
 		t.Fatalf("Expected UpdateGitHubURL state, got %v", model.state)
@@ -201,14 +201,14 @@ func TestCompleteFlow_RepositoryTypeSwitch_GitHubToLocal(t *testing.T) {
 	updatedModel, _ = model.Update(yesMsg)
 	model = updatedModel.(*SettingsModel)
 
-	if model.state != SettingsStateRepositoryTypeSelect {
-		t.Fatalf("Expected RepositoryTypeSelect state, got %v", model.state)
-	}
+	// if model.state != SettingsStateRepositoryTypeSelect {
+	// 	t.Fatalf("Expected RepositoryTypeSelect state, got %v", model.state)
+	// }
 
-	// Select Local (index 0)
-	model.selectedOption = 0
-	updatedModel, _ = model.Update(enterMsg)
-	model = updatedModel.(*SettingsModel)
+	// // Select Local (index 0)
+	// model.selectedOption = 0
+	// updatedModel, _ = model.Update(enterMsg)
+	// model = updatedModel.(*SettingsModel)
 
 	if model.state != SettingsStateUpdateLocalPath {
 		t.Fatalf("Expected UpdateLocalPath state, got %v", model.state)
@@ -460,7 +460,6 @@ func TestViewsRenderWithoutPanic(t *testing.T) {
 		SettingsStateMainMenu,
 		SettingsStateSelectChange,
 		SettingsStateConfirmTypeChange,
-		SettingsStateRepositoryTypeSelect,
 		SettingsStateUpdateLocalPath,
 		SettingsStateUpdateGitHubPAT,
 		SettingsStateUpdateGitHubURL,

@@ -8,7 +8,6 @@
 //   - MainMenu: Display current configuration with available options
 //   - SelectChange: Choose what setting to modify
 //   - ConfirmTypeChange: Confirm repository type switch (destructive operation)
-//   - RepositoryTypeSelect: Select new repository type
 //   - UpdateLocalPath: Modify local directory path
 //   - UpdateGitHubPAT: Update or remove GitHub Personal Access Token
 //   - UpdateGitHubURL: Change GitHub repository URL
@@ -57,7 +56,6 @@ const (
 
 	// Repository type change flow
 	SettingsStateConfirmTypeChange
-	SettingsStateRepositoryTypeSelect
 
 	// Granular update states
 	SettingsStateUpdateLocalPath
@@ -85,8 +83,6 @@ func (s SettingsState) String() string {
 		return "SelectChange"
 	case SettingsStateConfirmTypeChange:
 		return "ConfirmTypeChange"
-	case SettingsStateRepositoryTypeSelect:
-		return "RepositoryTypeSelect"
 	case SettingsStateUpdateLocalPath:
 		return "UpdateLocalPath"
 	case SettingsStateUpdateGitHubPAT:
@@ -198,8 +194,7 @@ type SettingsModel struct {
 	layout    components.LayoutModel
 
 	// Selection state
-	selectedOption    int
-	repositoryOptions []settingshelpers.RepositoryTypeOption
+	selectedOption int
 
 	// Change tracking
 	hasChanges bool
@@ -237,14 +232,13 @@ func NewSettingsModel(ctx helpers.UIContext) *SettingsModel {
 	}
 
 	return &SettingsModel{
-		state:             SettingsStateMainMenu,
-		textInput:         ti,
-		layout:            layout,
-		logger:            ctx.Logger,
-		credManager:       repository.NewCredentialManager(),
-		ctx:               ctx,
-		context:           context.Background(),
-		repositoryOptions: settingshelpers.GetRepositoryTypeOptions(),
+		state:       SettingsStateMainMenu,
+		textInput:   ti,
+		layout:      layout,
+		logger:      ctx.Logger,
+		credManager: repository.NewCredentialManager(),
+		ctx:         ctx,
+		context:     context.Background(),
 	}
 }
 
@@ -368,8 +362,6 @@ func (m *SettingsModel) handleKeyPress(msg tea.KeyMsg) (*SettingsModel, tea.Cmd)
 		return m.handleSelectChangeKeys(msg)
 	case SettingsStateConfirmTypeChange:
 		return m.handleConfirmTypeChangeKeys(msg)
-	case SettingsStateRepositoryTypeSelect:
-		return m.handleRepositoryTypeSelectKeys(msg)
 	case SettingsStateUpdateLocalPath:
 		return m.handleUpdateLocalPathKeys(msg)
 	case SettingsStateUpdateGitHubPAT:
@@ -451,37 +443,26 @@ func (m *SettingsModel) handleSelectChangeKeys(msg tea.KeyMsg) (*SettingsModel, 
 func (m *SettingsModel) handleConfirmTypeChangeKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y", "enter":
-		m.logger.LogUserAction("settings_type_change_confirmed", "proceeding to type selection")
-		return m.transitionTo(SettingsStateRepositoryTypeSelect), nil
-	case "n", "N", "esc":
-		m.logger.LogUserAction("settings_type_change_cancelled", "returning to menu")
-		return m.transitionTo(SettingsStateSelectChange), nil
-	}
-	return m, nil
-}
+		// check current repo type to determine new type
+		newType := "github"
+		if m.isGitHubRepo() {
+			newType = "local"
+		}
 
-func (m *SettingsModel) handleRepositoryTypeSelectKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		if m.selectedOption > 0 {
-			m.selectedOption--
-		}
-	case "down", "j":
-		if m.selectedOption < len(m.repositoryOptions)-1 {
-			m.selectedOption++
-		}
-	case "enter", " ":
-		selected := m.repositoryOptions[m.selectedOption]
-		m.newRepositoryType = selected.Type
-		m.logger.LogUserAction("settings_new_repo_type_selected", selected.Type)
+		m.logger.LogUserAction("settings_type_change_confirmed - new repo type", newType)
+
+		// confirm change type is now repository type
+		m.newRepositoryType = newType
+		m.changeType = ChangeOptionRepositoryType
 
 		// Transition to appropriate setup flow
-		if selected.Type == "local" {
+		if newType == "local" {
 			return m.transitionToUpdateLocalPath()
 		}
 		return m.transitionToUpdateGitHubURL()
-	case "esc":
-		return m.transitionTo(SettingsStateConfirmTypeChange), nil
+	case "n", "N", "esc":
+		m.logger.LogUserAction("settings_type_change_cancelled", "returning to menu")
+		return m.transitionTo(SettingsStateSelectChange), nil
 	}
 	return m, nil
 }
@@ -494,7 +475,7 @@ func (m *SettingsModel) handleUpdateLocalPathKeys(msg tea.KeyMsg) (*SettingsMode
 	case "esc":
 		m.resetTemporaryChanges()
 		if m.changeType == ChangeOptionRepositoryType {
-			return m.transitionTo(SettingsStateRepositoryTypeSelect), nil
+			return m.transitionTo(SettingsStateConfirmTypeChange), nil
 		}
 		return m.transitionTo(SettingsStateSelectChange), nil
 	default:
@@ -544,7 +525,6 @@ func (m *SettingsModel) handleUpdateGitHubURLKeys(msg tea.KeyMsg) (*SettingsMode
 			return m, func() tea.Msg { return settingsErrorMsg{err} }
 		}
 		m.newGitHubURL = input
-		// TODO: Optionally test repository accessibility before proceeding
 
 		// If changing repository type, continue setup flow
 		if m.changeType == ChangeOptionRepositoryType {
@@ -555,7 +535,7 @@ func (m *SettingsModel) handleUpdateGitHubURLKeys(msg tea.KeyMsg) (*SettingsMode
 	case "esc":
 		m.resetTemporaryChanges()
 		if m.changeType == ChangeOptionRepositoryType {
-			return m.transitionTo(SettingsStateRepositoryTypeSelect), nil
+			return m.transitionTo(SettingsStateConfirmTypeChange), nil
 		}
 		return m.transitionTo(SettingsStateSelectChange), nil
 	default:
@@ -964,8 +944,6 @@ func (m *SettingsModel) View() string {
 		return m.viewSelectChange()
 	case SettingsStateConfirmTypeChange:
 		return m.viewConfirmTypeChange()
-	case SettingsStateRepositoryTypeSelect:
-		return m.viewRepositoryTypeSelect()
 	case SettingsStateUpdateLocalPath:
 		return m.viewUpdateLocalPath()
 	case SettingsStateUpdateGitHubPAT:
@@ -1039,11 +1017,16 @@ func (m *SettingsModel) viewConfirmTypeChange() string {
 	})
 
 	currentType := "Local Directory"
+	newType := "GitHub Repository"
 	if m.isGitHubRepo() {
 		currentType = "GitHub Repository"
+		newType = "Local Directory"
 	}
 
 	warning := fmt.Sprintf(`You are about to change your repository type from:
+  %s
+
+  to:
   %s
 
 This will require you to reconfigure your repository settings.
@@ -1052,31 +1035,10 @@ This will require you to reconfigure your repository settings.
 
 Are you sure you want to proceed? (y/N)`,
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#5fd7ff")).Render(currentType),
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#5fd7ff")).Render(newType),
 		m.getCleanupWarning())
 
 	return m.layout.Render(warning)
-}
-
-func (m *SettingsModel) viewRepositoryTypeSelect() string {
-	m.layout = m.layout.SetConfig(components.LayoutConfig{
-		Title:    "📁 Select Repository Type",
-		Subtitle: "Choose your new repository type",
-		HelpText: "↑/↓ to navigate • Enter to select • Esc to go back",
-	})
-
-	var content strings.Builder
-
-	for i, opt := range m.repositoryOptions {
-		prefix := "  "
-		if i == m.selectedOption {
-			prefix = "▶ "
-		}
-
-		content.WriteString(fmt.Sprintf("%s%s\n", prefix, opt.Title))
-		content.WriteString(fmt.Sprintf("  %s\n\n", lipgloss.NewStyle().Faint(true).Render(opt.Desc)))
-	}
-
-	return m.layout.Render(content.String())
 }
 
 func (m *SettingsModel) viewUpdateLocalPath() string {

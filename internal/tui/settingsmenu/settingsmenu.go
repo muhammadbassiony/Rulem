@@ -478,9 +478,8 @@ func (m *SettingsModel) handleRepositoryTypeSelectKeys(msg tea.KeyMsg) (*Setting
 		// Transition to appropriate setup flow
 		if selected.Type == "local" {
 			return m.transitionToUpdateLocalPath()
-		} else {
-			return m.transitionToUpdateGitHubURL()
 		}
+		return m.transitionToUpdateGitHubURL()
 	case "esc":
 		return m.transitionTo(SettingsStateConfirmTypeChange), nil
 	}
@@ -763,17 +762,34 @@ func (m *SettingsModel) transitionToUpdateGitHubPath() (*SettingsModel, tea.Cmd)
 
 // Validation helpers
 
+// validateAndProceedLocalPath validates the entered local path and proceeds to confirmation
+// if the path is valid and different from the current path.
 func (m *SettingsModel) validateAndProceedLocalPath() (*SettingsModel, tea.Cmd) {
-	input := strings.TrimSpace(m.textInput.Value())
+	input := m.textInput.Value()
 	m.logger.Debug("Validating local path", "path", input)
 
-	if err := fileops.ValidateStoragePath(input); err != nil {
+	// Validate and expand the storage path using shared helper
+	expandedPath, err := settingshelpers.ValidateAndExpandLocalPath(input)
+	if err != nil {
 		m.logger.Warn("Local path validation failed", "error", err)
 		return m, func() tea.Msg { return settingsErrorMsg{err} }
 	}
 
-	m.newStorageDir = fileops.ExpandPath(input)
-	// TODO: Check if path change requires data migration
+	m.newStorageDir = expandedPath
+
+	// Check if the path has actually changed
+	currentPath := m.currentConfig.Central.Path
+	if expandedPath == currentPath {
+		m.logger.Info("Path unchanged, returning to main menu")
+		m.resetTemporaryChanges()
+		return m.transitionTo(SettingsStateMainMenu), nil
+	}
+
+	// Mark that we have changes to save
+	m.hasChanges = true
+	m.logger.LogStateTransition("SettingsModel", "UpdateLocalPath", "Confirmation")
+	m.logger.Info("Local path validated and changed", "old", currentPath, "new", expandedPath)
+
 	return m.transitionTo(SettingsStateConfirmation), nil
 }
 
@@ -783,23 +799,131 @@ func (m *SettingsModel) saveChanges() tea.Cmd {
 	return func() tea.Msg {
 		m.logger.Info("Saving settings changes", "change_type", m.changeType)
 
-		// TODO: Implement actual save logic based on changeType
-		// TODO: For ChangeOptionRepositoryType - perform full repository migration
-		// TODO: For ChangeOptionLocalPath - update config.Central.Path
-		// TODO: For ChangeOptionGitHubURL - update config.Central.RemoteURL
-		// TODO: For ChangeOptionGitHubBranch - update config.Central.Branch
-		// TODO: For ChangeOptionGitHubPath - update config.Central.Path
-		// TODO: For ChangeOptionGitHubPAT - call m.storePAT() or m.removePAT()
-		//
-		// Example:
-		// if err := m.performConfigUpdate(); err != nil {
-		// 	m.logger.Error("Settings update failed", "error", err)
-		// 	return settingsErrorMsg{err}
-		// }
+		if !m.hasChanges {
+			m.logger.Info("No changes to save, returning to main menu")
+			return settingsCompleteMsg{}
+		}
+
+		// Perform the actual config update based on change type
+		if err := m.performConfigUpdate(); err != nil {
+			m.logger.Error("Settings update failed", "error", err)
+			return settingsErrorMsg{err}
+		}
 
 		m.logger.Info("Settings updated successfully")
 		return settingsCompleteMsg{}
 	}
+}
+
+// performConfigUpdate performs the actual configuration update based on the change type.
+// It loads the current config, applies the changes, and saves it back.
+func (m *SettingsModel) performConfigUpdate() error {
+	// Load current config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	switch m.changeType {
+	case ChangeOptionLocalPath:
+		return m.updateLocalPath(cfg)
+
+	case ChangeOptionGitHubPAT:
+		return m.updateGitHubPAT(cfg)
+
+	case ChangeOptionGitHubURL:
+		return m.updateGitHubURL(cfg)
+
+	case ChangeOptionGitHubBranch:
+		return m.updateGitHubBranch(cfg)
+
+	case ChangeOptionGitHubPath:
+		return m.updateGitHubPath(cfg)
+
+	case ChangeOptionRepositoryType:
+		return m.updateRepositoryType(cfg)
+
+	default:
+		return fmt.Errorf("unknown change type: %v", m.changeType)
+	}
+}
+
+// updateLocalPath updates the local storage path in the configuration.
+func (m *SettingsModel) updateLocalPath(cfg *config.Config) error {
+	m.logger.Info("Updating local path", "old", cfg.Central.Path, "new", m.newStorageDir)
+
+	// Use the config helper to update the path, which also ensures the directory exists
+	if err := config.UpdateCentralPath(cfg, m.newStorageDir); err != nil {
+		return fmt.Errorf("failed to update local path: %w", err)
+	}
+
+	m.logger.Info("Local path updated successfully", "path", m.newStorageDir)
+	return nil
+}
+
+// updateGitHubPAT updates or removes the GitHub Personal Access Token.
+func (m *SettingsModel) updateGitHubPAT(cfg *config.Config) error {
+	m.logger.Info("Updating GitHub PAT", "action", m.patAction)
+
+	// TODO Implement PAT update logic
+
+	return nil
+}
+
+// updateGitHubURL updates the GitHub repository URL in the configuration.
+func (m *SettingsModel) updateGitHubURL(cfg *config.Config) error {
+	m.logger.Info("Updating GitHub URL", "old", cfg.Central.RemoteURL, "new", m.newGitHubURL)
+
+	// TODO: Implement GitHub URL update
+	// This will require:
+	// 1. Validate the new URL
+	// 2. Update cfg.Central.RemoteURL
+	// 3. Possibly update clone path
+	// 4. Save config
+	// 5. May require re-cloning the repository
+
+	return fmt.Errorf("GitHub URL update not yet implemented")
+}
+
+// updateGitHubBranch updates the GitHub branch in the configuration.
+func (m *SettingsModel) updateGitHubBranch(cfg *config.Config) error {
+	m.logger.Info("Updating GitHub branch", "old", cfg.Central.Branch, "new", m.newGitHubBranch)
+
+	// TODO: Implement GitHub branch update
+	// This will require:
+	// 1. Validate the new branch
+	// 2. Update cfg.Central.Branch
+	// 3. Save config
+	// 4. May require checking out the new branch
+
+	return fmt.Errorf("GitHub branch update not yet implemented")
+}
+
+// updateGitHubPath updates the path within the GitHub repository in the configuration.
+func (m *SettingsModel) updateGitHubPath(cfg *config.Config) error {
+	m.logger.Info("Updating GitHub path", "old", cfg.Central.Path, "new", m.newGitHubPath)
+
+	// TODO: Implement GitHub path update
+	// This will require:
+	// 1. Validate the new path
+	// 2. Update cfg.Central.Path
+	// 3. Save config
+
+	return fmt.Errorf("GitHub path update not yet implemented")
+}
+
+// updateRepositoryType performs a full repository type switch (local <-> GitHub).
+func (m *SettingsModel) updateRepositoryType(cfg *config.Config) error {
+	m.logger.Info("Switching repository type", "old", cfg.Central.RemoteURL != nil, "new", m.newRepositoryType)
+
+	// TODO: Implement repository type switching
+	// This is a complex operation that requires:
+	// 1. If switching to local: remove remote config, update path
+	// 2. If switching to GitHub: add remote config, clone repository
+	// 3. Handle data migration
+	// 4. Clean up old repository (with user confirmation)
+
+	return fmt.Errorf("repository type switching not yet implemented")
 }
 
 func (m *SettingsModel) triggerRefresh() tea.Cmd {

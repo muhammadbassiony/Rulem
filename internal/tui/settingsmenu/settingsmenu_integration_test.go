@@ -1,6 +1,8 @@
 package settingsmenu
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"rulem/internal/config"
@@ -41,11 +43,21 @@ func TestSettingsMenuBasicFlow(t *testing.T) {
 }
 
 func TestCompleteFlow_LocalPathUpdate(t *testing.T) {
+	// Create temporary directories for testing
+	tmpDir := t.TempDir()
+	originalPath := filepath.Join(tmpDir, "original")
+	newPath := filepath.Join(tmpDir, "new")
+
+	// Create both directories
+	if err := os.MkdirAll(originalPath, 0755); err != nil {
+		t.Fatalf("Failed to create original test directory: %v", err)
+	}
+
 	logger, _ := logging.NewTestLogger()
 	ctx := helpers.NewUIContext(80, 24, &config.Config{}, logger)
 
 	model := NewSettingsModel(ctx)
-	model.currentConfig = createLocalConfig("/original/path")
+	model.currentConfig = createLocalConfig(originalPath)
 
 	// Start at main menu
 	if model.state != SettingsStateMainMenu {
@@ -74,13 +86,43 @@ func TestCompleteFlow_LocalPathUpdate(t *testing.T) {
 		t.Errorf("Expected changeType LocalPath, got %v", model.changeType)
 	}
 
-	// Enter new path
-	model.textInput.SetValue("/new/path")
+	// Enter new path (use valid path that exists)
+	model.textInput.SetValue(newPath)
 	updatedModel, _ = model.Update(enterMsg)
 	model = updatedModel.(*SettingsModel)
 
-	// Should attempt validation - may fail but that's OK for this test
-	// The key is that the flow progresses correctly
+	// Should transition to confirmation after successful validation
+	if model.state != SettingsStateConfirmation {
+		t.Fatalf("Expected Confirmation state after validation, got %v", model.state)
+	}
+
+	// Verify that hasChanges flag is set
+	if !model.hasChanges {
+		t.Error("Expected hasChanges to be true")
+	}
+
+	// Verify new path is stored
+	if model.newStorageDir != newPath {
+		t.Errorf("Expected newStorageDir to be %s, got %s", newPath, model.newStorageDir)
+	}
+
+	// Confirm the change
+	yesMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")}
+	updatedModel, cmd := model.Update(yesMsg)
+	model = updatedModel.(*SettingsModel)
+	if model.state != SettingsStateConfirmation {
+		t.Fatalf("Expected Confirmation state after saving, got %v", model.state)
+	}
+
+	// Command should be returned to save changes
+	if cmd == nil {
+		t.Error("Expected command to be returned for saving changes")
+	}
+
+	// We cannot simulate save completion
+	// as it involves file system operations and t.TempDir creates outside home dir
+	// which breaks our security checks
+
 }
 
 func TestCompleteFlow_RepositoryTypeSwitch_LocalToGitHub(t *testing.T) {

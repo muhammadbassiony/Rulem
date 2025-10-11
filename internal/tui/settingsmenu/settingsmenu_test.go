@@ -1,6 +1,8 @@
 package settingsmenu
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"rulem/internal/config"
@@ -513,6 +515,99 @@ func TestHandleUpdateLocalPathKeys(t *testing.T) {
 
 	if updatedModel.state != SettingsStateSelectChange {
 		t.Errorf("Escape should return to SelectChange, got %v", updatedModel.state)
+	}
+}
+
+func TestValidateAndProceedLocalPath(t *testing.T) {
+	// Create a temporary directory for testing
+	tmpDir := t.TempDir()
+
+	// Create subdirectories for testing
+	testPath1 := filepath.Join(tmpDir, "test-path-1")
+	testPath2 := filepath.Join(tmpDir, "test-path-2")
+
+	if err := os.MkdirAll(testPath1, 0755); err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
+	}
+	if err := os.MkdirAll(testPath2, 0755); err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		currentPath   string
+		newPath       string
+		expectState   SettingsState
+		expectChanges bool
+		expectError   bool
+	}{
+		{
+			name:          "unchanged path returns to main menu",
+			currentPath:   testPath1,
+			newPath:       testPath1,
+			expectState:   SettingsStateMainMenu,
+			expectChanges: false,
+			expectError:   false,
+		},
+		{
+			name:          "changed path proceeds to confirmation",
+			currentPath:   testPath1,
+			newPath:       testPath2,
+			expectState:   SettingsStateConfirmation,
+			expectChanges: true,
+			expectError:   false,
+		},
+		{
+			name:          "empty path returns error",
+			currentPath:   testPath1,
+			newPath:       "",
+			expectState:   SettingsStateUpdateLocalPath,
+			expectChanges: false,
+			expectError:   true,
+		},
+		{
+			name:          "whitespace-only path returns error",
+			currentPath:   testPath1,
+			newPath:       "   ",
+			expectState:   SettingsStateUpdateLocalPath,
+			expectChanges: false,
+			expectError:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := createTestModelWithConfig(t, createLocalConfig(tt.currentPath))
+			model.state = SettingsStateUpdateLocalPath
+			model.changeType = ChangeOptionLocalPath
+			model.textInput.SetValue(tt.newPath)
+
+			updatedModel, cmd := model.validateAndProceedLocalPath()
+
+			if updatedModel == nil {
+				t.Fatal("validateAndProceedLocalPath should return a model")
+			}
+
+			if updatedModel.state != tt.expectState {
+				t.Errorf("Expected state %v, got %v", tt.expectState, updatedModel.state)
+			}
+
+			if updatedModel.hasChanges != tt.expectChanges {
+				t.Errorf("Expected hasChanges %v, got %v", tt.expectChanges, updatedModel.hasChanges)
+			}
+
+			if tt.expectError && cmd == nil {
+				t.Error("Expected error command, got nil")
+			}
+
+			if !tt.expectError && !tt.expectChanges && updatedModel.newStorageDir != "" {
+				t.Error("Expected newStorageDir to be cleared when no changes")
+			}
+
+			if tt.expectChanges && updatedModel.newStorageDir == "" {
+				t.Error("Expected newStorageDir to be set when path changed")
+			}
+		})
 	}
 }
 

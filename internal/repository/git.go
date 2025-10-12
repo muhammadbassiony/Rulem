@@ -239,6 +239,93 @@ func (gs GitSource) normalizeRemoteURL() (string, error) {
 	return normalizedURL, nil
 }
 
+// FetchUpdates performs a fetch/pull operation on an existing repository.
+// This is the public API for manually refreshing a repository.
+//
+// Unlike Prepare(), this function:
+//   - Only fetches updates (does not clone if missing)
+//   - Checks for dirty working tree before updating
+//   - Attempts public fetch first, then falls back to PAT authentication
+//   - Returns detailed sync information about what was updated
+//
+// This function is designed for user-initiated refresh operations where:
+//   - The repository is already cloned
+//   - We want to sync with the remote without modifying local structure
+//   - We need to preserve local changes (blocks update if dirty)
+//
+// Parameters:
+//   - logger: Application logger for operation tracking
+//
+// Returns:
+//   - SyncInfo: Information about the sync operation (updated, dirty, etc.)
+//   - error: Any error that occurred during fetch
+//
+// Example:
+//
+//	source := repository.NewGitSource(url, &branch, path)
+//	syncInfo, err := source.FetchUpdates(logger)
+//	if err != nil {
+//	    return fmt.Errorf("failed to fetch updates: %w", err)
+//	}
+//	if syncInfo.Dirty {
+//	    log.Warn("Repository has uncommitted changes")
+//	}
+func (gs GitSource) FetchUpdates(logger *logging.AppLogger) (SyncInfo, error) {
+	if logger != nil {
+		logger.Info("Manual fetch requested", "url", gs.RemoteURL, "path", gs.Path)
+	}
+
+	// Validate that the repository exists
+	if _, err := os.Stat(gs.Path); os.IsNotExist(err) {
+		return SyncInfo{}, fmt.Errorf("repository does not exist at %s - cannot fetch updates", gs.Path)
+	}
+
+	// Use the existing performFetchWithAuth method which handles auth fallback
+	return gs.performFetchWithAuth(gs.Path, logger)
+}
+
+// CheckGithubRepositoryStatus checks if the repository at the given path has uncommitted changes.
+// Returns true if there are uncommitted changes (dirty), false if clean.
+//
+// This function is useful for detecting whether a repository has local modifications
+// before performing operations that might conflict with those changes (like branch
+// switches or fetches).
+//
+// Parameters:
+//   - repoPath: Local filesystem path to the git repository
+//
+// Returns:
+//   - bool: true if repository has uncommitted changes, false if clean
+//   - error: error if repository cannot be opened or status cannot be determined
+//
+// Example:
+//
+//	isDirty, err := repository.CheckGithubRepositoryStatus("/path/to/repo")
+//	if err != nil {
+//	    return fmt.Errorf("failed to check repo status: %w", err)
+//	}
+//	if isDirty {
+//	    return fmt.Errorf("repository has uncommitted changes")
+//	}
+func CheckGithubRepositoryStatus(repoPath string) (bool, error) {
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return false, fmt.Errorf("failed to get working tree: %w", err)
+	}
+
+	status, err := worktree.Status()
+	if err != nil {
+		return false, fmt.Errorf("failed to get repository status: %w", err)
+	}
+
+	return !status.IsClean(), nil
+}
+
 // validateLocalPath validates and cleans the local clone path.
 //
 // This function performs essential security validation that is NOT redundant with

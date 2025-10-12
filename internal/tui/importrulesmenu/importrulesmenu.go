@@ -203,6 +203,12 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 }
 
 func (m *ImportRulesModel) Init() tea.Cmd {
+	// If constructor already put us in an error state (e.g., repo preparation failed),
+	// preserve that error and do nothing further.
+	if m.state == StateError {
+		return nil
+	}
+
 	if m.fileManager == nil {
 		return func() tea.Msg {
 			return ImportFileErrorMsg{

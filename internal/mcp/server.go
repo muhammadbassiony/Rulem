@@ -48,7 +48,15 @@ func (s *Server) Start() error {
 	// Prepare repository and initialize file manager for scanning
 	localPath, syncInfo, err := repository.PrepareRepository(s.config.Central, s.logger)
 	if err != nil {
-		return fmt.Errorf("failed to prepare repository: %w", err)
+		// Log the original low-level error for diagnostics
+		s.logger.Error("Repository preparation failed", "error", err)
+
+		// Return a clearer, user-facing message to avoid misleading low-level details
+		return fmt.Errorf(
+			"Cannot prepare the central repository at '%s'. The location may be read-only or not writable. Choose a writable directory and try again. Suggested location: %s",
+			s.config.Central.Path,
+			repository.GetDefaultStorageDir(),
+		)
 	}
 
 	// Surface sync information to user if available
@@ -213,7 +221,15 @@ func (s *Server) InitializeComponents() error {
 	// Prepare repository and initialize file manager for scanning
 	localPath, syncInfo, err := repository.PrepareRepository(s.config.Central, s.logger)
 	if err != nil {
-		return fmt.Errorf("failed to prepare repository: %w", err)
+		// Log the original low-level error for diagnostics
+		s.logger.Error("Repository preparation failed", "error", err)
+
+		// Return a clearer, user-facing message to avoid misleading low-level details
+		return fmt.Errorf(
+			"Cannot prepare the central repository at '%s'. The location may be read-only or not writable. Choose a writable directory and try again. Suggested location: %s",
+			s.config.Central.Path,
+			repository.GetDefaultStorageDir(),
+		)
 	}
 
 	// Surface sync information to user if available

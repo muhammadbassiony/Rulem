@@ -290,13 +290,6 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return settingsErrorMsg{msg.Error} }
 		}
 		m.currentConfig = msg.Config
-		// Load last sync info if GitHub repo
-		if m.isGitHubRepo() {
-			m.lastSyncInfo = &repository.SyncInfo{
-				// TODO: Load actual sync info from repository
-				// For now, placeholder
-			}
-		}
 		return m, nil
 
 	case refreshCompleteMsg:
@@ -308,7 +301,6 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastSyncInfo = msg.syncInfo
 		m.state = SettingsStateMainMenu
 		m.layout = m.layout.ClearError()
-		// TODO: Update config.Central.LastSyncTime after successful refresh
 		return m, nil
 
 	case dirtyStateMsg:
@@ -316,8 +308,28 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.logger.Warn("Dirty state check failed", "error", msg.err)
 		}
-		// TODO: Display dirty state warning in UI if isDirty is true
-		// TODO: Prevent certain operations (like URL change) if repository is dirty
+		if m.isDirty {
+			// Repository is dirty, show error and go back
+			m.state = SettingsStateError
+			m.layout = m.layout.SetError(fmt.Errorf("repository has uncommitted changes - please commit or stash them before proceeding"))
+			return m, nil
+		}
+
+		// Repository is clean, proceed with the operation based on context
+		// If we were in UpdateGitHubBranch state during URL or type change flow, go to path
+		if m.state == SettingsStateUpdateGitHubBranch {
+			if m.changeType == ChangeOptionRepositoryType || m.changeType == ChangeOptionGitHubURL {
+				return m.transitionToUpdateGitHubPath()
+			}
+			// Standalone branch change goes to confirmation
+			m.changeType = ChangeOptionGitHubBranch
+			return m.transitionTo(SettingsStateConfirmation), nil
+		}
+
+		// If we were in ManualRefresh state, proceed with refresh
+		if m.state == SettingsStateManualRefresh {
+			return m, m.triggerRefresh()
+		}
 		return m, nil
 	}
 
@@ -483,38 +495,6 @@ func (m *SettingsModel) handleUpdateLocalPathKeys(msg tea.KeyMsg) (*SettingsMode
 	}
 }
 
-func (m *SettingsModel) handleUpdateGitHubPATKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+d":
-		// Remove PAT
-		m.logger.LogUserAction("settings_pat_remove", "user requested PAT removal")
-		m.patAction = PATActionRemove
-		m.newGitHubPAT = ""
-		// TODO: Validate that removing PAT won't break repository access
-		return m.transitionTo(SettingsStateConfirmation), nil
-	case "enter":
-		m.logger.LogUserAction("settings_pat_submit", "PAT provided")
-		input := strings.TrimSpace(m.textInput.Value())
-		if input == "" {
-			return m, func() tea.Msg {
-				return settingsErrorMsg{fmt.Errorf("PAT cannot be empty (use Ctrl+D to remove)")}
-			}
-		}
-		// TODO: Validate PAT format using credManager.ValidateGitHubToken()
-		m.patAction = PATActionUpdate
-		m.newGitHubPAT = input
-		return m.transitionTo(SettingsStateConfirmation), nil
-	case "esc":
-		m.resetTemporaryChanges()
-		if m.changeType == ChangeOptionRepositoryType {
-			return m.transitionToUpdateGitHubPath()
-		}
-		return m.transitionTo(SettingsStateSelectChange), nil
-	default:
-		return m.updateTextInput(msg)
-	}
-}
-
 func (m *SettingsModel) handleUpdateGitHubURLKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -526,12 +506,12 @@ func (m *SettingsModel) handleUpdateGitHubURLKeys(msg tea.KeyMsg) (*SettingsMode
 		}
 		m.newGitHubURL = input
 
-		// If changing repository type, continue setup flow
-		if m.changeType == ChangeOptionRepositoryType {
-			return m.transitionToUpdateGitHubBranch()
+		// When updating GitHub URL, we need to update branch and path as well
+		// Continue to branch input (which will then go to path)
+		if m.changeType != ChangeOptionRepositoryType {
+			m.changeType = ChangeOptionGitHubURL
 		}
-		// Otherwise, go to confirmation
-		return m.transitionTo(SettingsStateConfirmation), nil
+		return m.transitionToUpdateGitHubBranch()
 	case "esc":
 		m.resetTemporaryChanges()
 		if m.changeType == ChangeOptionRepositoryType {
@@ -553,16 +533,13 @@ func (m *SettingsModel) handleUpdateGitHubBranchKeys(msg tea.KeyMsg) (*SettingsM
 			return m, func() tea.Msg { return settingsErrorMsg{err} }
 		}
 		m.newGitHubBranch = input
+		m.hasChanges = true
 
-		// If changing repository type, continue setup flow
-		if m.changeType == ChangeOptionRepositoryType {
-			return m.transitionToUpdateGitHubPath()
-		}
-		// Otherwise, go to confirmation
-		return m.transitionTo(SettingsStateConfirmation), nil
+		// Check for dirty state before branch change (could require checkout)
+		return m, m.checkDirtyState()
 	case "esc":
 		m.resetTemporaryChanges()
-		if m.changeType == ChangeOptionRepositoryType {
+		if m.changeType == ChangeOptionRepositoryType || m.changeType == ChangeOptionGitHubURL {
 			return m.transitionToUpdateGitHubURL()
 		}
 		return m.transitionTo(SettingsStateSelectChange), nil
@@ -576,22 +553,107 @@ func (m *SettingsModel) handleUpdateGitHubPathKeys(msg tea.KeyMsg) (*SettingsMod
 	case "enter":
 		m.logger.LogUserAction("settings_github_path_submit", m.textInput.Value())
 		input := strings.TrimSpace(m.textInput.Value())
+
+		placeholder := settingshelpers.DeriveClonePath(m.newGitHubURL)
+		if placeholder == "" {
+			placeholder = repository.GetDefaultStorageDir()
+		}
+
+		if input == "" {
+			input = placeholder
+		}
+
 		if err := fileops.ValidateStoragePath(input); err != nil {
 			m.logger.Warn("Path validation failed", "error", err)
 			return m, func() tea.Msg { return settingsErrorMsg{err} }
 		}
 		m.newGitHubPath = fileops.ExpandPath(input)
+		m.hasChanges = true
 
 		// If changing repository type, continue setup flow
 		if m.changeType == ChangeOptionRepositoryType {
 			return m.transitionToUpdateGitHubPAT()
 		}
-		// Otherwise, go to confirmation
+		// If updating URL, set changeType and go to confirmation
+		if m.changeType == ChangeOptionGitHubURL {
+			// changeType is already set to ChangeOptionGitHubURL
+			return m.transitionTo(SettingsStateConfirmation), nil
+		}
+		// Otherwise, this is a standalone path change
+		m.changeType = ChangeOptionGitHubPath
+		return m.transitionTo(SettingsStateConfirmation), nil
+	case "esc":
+		m.resetTemporaryChanges()
+		if m.changeType == ChangeOptionRepositoryType || m.changeType == ChangeOptionGitHubURL {
+			return m.transitionToUpdateGitHubBranch()
+		}
+		return m.transitionTo(SettingsStateSelectChange), nil
+	default:
+		return m.updateTextInput(msg)
+	}
+}
+
+func (m *SettingsModel) handleUpdateGitHubPATKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
+	switch msg.String() {
+	// TODO for now PAT removal is not enabled
+	// will enable with multiple repo support, and after checking none are github repos
+	// will also need to validate that removing PAT won't break access for other TUI menus
+
+	// case "ctrl+d":
+	// 	// Remove PAT
+	// 	m.logger.LogUserAction("settings_pat_remove", "user requested PAT removal")
+	// 	m.patAction = PATActionRemove
+	// 	m.newGitHubPAT = ""
+	// 	return m.transitionTo(SettingsStateConfirmation), nil
+	case "enter":
+		m.logger.LogUserAction("settings_pat_submit", "PAT provided")
+		input := strings.TrimSpace(m.textInput.Value())
+		if input == "" {
+			return m, func() tea.Msg {
+				return settingsErrorMsg{fmt.Errorf("PAT cannot be empty (use Ctrl+D to remove)")}
+			}
+		}
+
+		m.logger.Debug("Validating GitHub PAT")
+		// Validate token format
+		if err := m.credManager.ValidateGitHubToken(input); err != nil {
+			m.logger.Warn("GitHub PAT format validation failed", "error", err)
+			return m, func() tea.Msg { return settingsErrorMsg{err} }
+		}
+
+		// get github repo url to validate PAT against
+		githubRepoUrl := m.ctx.Config.Central.RemoteURL
+		if m.changeType == ChangeOptionRepositoryType {
+			githubRepoUrl = &m.newGitHubURL
+		}
+		if githubRepoUrl == nil || *githubRepoUrl == "" {
+			m.logger.Warn("GitHub URL is not set, cannot validate PAT with repository")
+			return m, func() tea.Msg {
+				return settingsErrorMsg{fmt.Errorf("GitHub URL is not set, cannot validate PAT with repository")}
+			}
+		}
+
+		// Validate token works with repository using go-git
+		m.logger.Info("Validating GitHub PAT with repository", "repo_url", githubRepoUrl)
+		ctx := context.Background()
+		if err := m.credManager.ValidateGitHubTokenWithRepo(ctx, input, *githubRepoUrl); err != nil {
+			m.logger.Warn("GitHub PAT repository validation failed", "error", err)
+			return m, func() tea.Msg { return settingsErrorMsg{err} }
+		}
+
+		m.logger.Debug("GitHub PAT validated successfully")
+
+		m.patAction = PATActionUpdate
+		m.newGitHubPAT = input
+		m.hasChanges = true
+		if m.changeType != ChangeOptionRepositoryType {
+			m.changeType = ChangeOptionGitHubPAT
+		}
 		return m.transitionTo(SettingsStateConfirmation), nil
 	case "esc":
 		m.resetTemporaryChanges()
 		if m.changeType == ChangeOptionRepositoryType {
-			return m.transitionToUpdateGitHubBranch()
+			return m.transitionToUpdateGitHubPath()
 		}
 		return m.transitionTo(SettingsStateSelectChange), nil
 	default:
@@ -603,7 +665,8 @@ func (m *SettingsModel) handleManualRefreshKeys(msg tea.KeyMsg) (*SettingsModel,
 	switch msg.String() {
 	case "y", "Y", "enter":
 		m.logger.LogUserAction("settings_manual_refresh_confirmed", "triggering refresh")
-		return m, m.triggerRefresh()
+		// Check for dirty state before refresh
+		return m, m.checkDirtyState()
 	case "n", "N", "esc":
 		m.logger.LogUserAction("settings_manual_refresh_cancelled", "returning to menu")
 		return m.transitionTo(SettingsStateSelectChange), nil
@@ -767,6 +830,9 @@ func (m *SettingsModel) validateAndProceedLocalPath() (*SettingsModel, tea.Cmd) 
 
 	// Mark that we have changes to save
 	m.hasChanges = true
+	m.changeType = ChangeOptionLocalPath
+
+	// Proceed to confirmation
 	m.logger.LogStateTransition("SettingsModel", "UpdateLocalPath", "Confirmation")
 	m.logger.Info("Local path validated and changed", "old", currentPath, "new", expandedPath)
 
@@ -804,12 +870,14 @@ func (m *SettingsModel) performConfigUpdate() error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	m.logger.Debug("Current config loaded for update.", "config", cfg, "change_type", m.changeType)
+
 	switch m.changeType {
 	case ChangeOptionLocalPath:
 		return m.updateLocalPath(cfg)
 
 	case ChangeOptionGitHubPAT:
-		return m.updateGitHubPAT(cfg)
+		return m.updateGitHubPAT()
 
 	case ChangeOptionGitHubURL:
 		return m.updateGitHubURL(cfg)
@@ -833,6 +901,9 @@ func (m *SettingsModel) updateLocalPath(cfg *config.Config) error {
 	m.logger.Info("Updating local path", "old", cfg.Central.Path, "new", m.newStorageDir)
 
 	// Use the config helper to update the path, which also ensures the directory exists
+	cfg.Central.Path = m.newStorageDir
+	cfg.Central.RemoteURL = nil
+	cfg.Central.Branch = nil
 	if err := config.UpdateCentralPath(cfg, m.newStorageDir); err != nil {
 		return fmt.Errorf("failed to update local path: %w", err)
 	}
@@ -842,10 +913,24 @@ func (m *SettingsModel) updateLocalPath(cfg *config.Config) error {
 }
 
 // updateGitHubPAT updates or removes the GitHub Personal Access Token.
-func (m *SettingsModel) updateGitHubPAT(cfg *config.Config) error {
+func (m *SettingsModel) updateGitHubPAT() error {
 	m.logger.Info("Updating GitHub PAT", "action", m.patAction)
 
-	// TODO Implement PAT update logic
+	switch m.patAction {
+	case PATActionUpdate:
+		if m.newGitHubPAT == "" {
+			return fmt.Errorf("no PAT provided for update")
+		}
+		m.logger.Debug("Storing GitHub PAT in keyring")
+		if err := m.credManager.StoreGitHubToken(m.newGitHubPAT); err != nil {
+			return fmt.Errorf("failed to store GitHub token: %w", err)
+		}
+		m.logger.Info("GitHub PAT updated successfully")
+
+	case PATActionRemove:
+	default:
+		return fmt.Errorf("unknown PAT action: %v", m.patAction)
+	}
 
 	return nil
 }
@@ -853,57 +938,137 @@ func (m *SettingsModel) updateGitHubPAT(cfg *config.Config) error {
 // updateGitHubURL updates the GitHub repository URL in the configuration.
 func (m *SettingsModel) updateGitHubURL(cfg *config.Config) error {
 	m.logger.Info("Updating GitHub URL", "old", cfg.Central.RemoteURL, "new", m.newGitHubURL)
+	m.logger.Info("Updating GitHub path along with URL", "old", cfg.Central.Path, "new", m.newGitHubPath)
+	if m.newGitHubURL == "" {
+		return fmt.Errorf("no GitHub URL provided")
+	}
 
-	// TODO: Implement GitHub URL update
-	// This will require:
-	// 1. Validate the new URL
-	// 2. Update cfg.Central.RemoteURL
-	// 3. Possibly update clone path
-	// 4. Save config
-	// 5. May require re-cloning the repository
+	// Update the remote URL in config
+	cfg.Central.RemoteURL = &m.newGitHubURL
+	cfg.Central.Path = m.newGitHubPath
+	if m.newGitHubBranch != "" {
+		cfg.Central.Branch = &m.newGitHubBranch
+	}
 
-	return fmt.Errorf("GitHub URL update not yet implemented")
+	// no need to check if isDirty here as we do not destroy existing repo
+
+	// Save the config
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save GitHub repository configuration: %w", err)
+	}
+
+	return nil
 }
 
 // updateGitHubBranch updates the GitHub branch in the configuration.
 func (m *SettingsModel) updateGitHubBranch(cfg *config.Config) error {
 	m.logger.Info("Updating GitHub branch", "old", cfg.Central.Branch, "new", m.newGitHubBranch)
 
-	// TODO: Implement GitHub branch update
-	// This will require:
-	// 1. Validate the new branch
-	// 2. Update cfg.Central.Branch
-	// 3. Save config
-	// 4. May require checking out the new branch
+	if m.newGitHubBranch == "" {
+		// Empty branch means use default
+		cfg.Central.Branch = nil
+	} else {
+		cfg.Central.Branch = &m.newGitHubBranch
+	}
 
-	return fmt.Errorf("GitHub branch update not yet implemented")
+	// Save the config
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save GitHub branch configuration: %w", err)
+	}
+
+	// Note: Actual branch checkout will happen on next sync/refresh
+	// The repository will fetch and checkout to the new branch
+
+	return nil
 }
 
-// updateGitHubPath updates the path within the GitHub repository in the configuration.
+// updateGitHubPath updates the local clone path for the GitHub repository in the configuration.
 func (m *SettingsModel) updateGitHubPath(cfg *config.Config) error {
 	m.logger.Info("Updating GitHub path", "old", cfg.Central.Path, "new", m.newGitHubPath)
 
-	// TODO: Implement GitHub path update
-	// This will require:
-	// 1. Validate the new path
-	// 2. Update cfg.Central.Path
-	// 3. Save config
+	if m.newGitHubPath == "" {
+		return fmt.Errorf("no GitHub path provided")
+	}
 
-	return fmt.Errorf("GitHub path update not yet implemented")
+	// Update the path in config
+	cfg.Central.Path = m.newGitHubPath
+
+	// Save the config
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save GitHub path configuration: %w", err)
+	}
+
+	// Note: Repository will be re-cloned to new path on next sync
+	m.logger.Info("GitHub path updated, repository will be cloned to new path on next sync")
+
+	return nil
 }
 
 // updateRepositoryType performs a full repository type switch (local <-> GitHub).
 func (m *SettingsModel) updateRepositoryType(cfg *config.Config) error {
-	m.logger.Info("Switching repository type", "old", cfg.Central.RemoteURL != nil, "new", m.newRepositoryType)
+	isCurrentlyGitHub := cfg.Central.RemoteURL != nil
+	isTargetGitHub := m.newRepositoryType == "github"
 
-	// TODO: Implement repository type switching
-	// This is a complex operation that requires:
-	// 1. If switching to local: remove remote config, update path
-	// 2. If switching to GitHub: add remote config, clone repository
-	// 3. Handle data migration
-	// 4. Clean up old repository (with user confirmation)
+	m.logger.Info("Switching repository type",
+		"from", map[bool]string{true: "GitHub", false: "Local"}[isCurrentlyGitHub],
+		"to", map[bool]string{true: "GitHub", false: "Local"}[isTargetGitHub])
 
-	return fmt.Errorf("repository type switching not yet implemented")
+	if isTargetGitHub {
+		// Switching TO GitHub repository
+		if m.newGitHubURL == "" {
+			return fmt.Errorf("GitHub URL is required")
+		}
+		if m.newGitHubPath == "" {
+			return fmt.Errorf("GitHub clone path is required")
+		}
+
+		// Update config for GitHub
+		cfg.Central.RemoteURL = &m.newGitHubURL
+		cfg.Central.Path = m.newGitHubPath
+		if m.newGitHubBranch != "" {
+			cfg.Central.Branch = &m.newGitHubBranch
+		} else {
+			cfg.Central.Branch = nil
+		}
+
+		// Store PAT if provided
+		if m.newGitHubPAT != "" {
+			m.logger.Debug("Storing GitHub PAT in keyring")
+			if err := m.credManager.StoreGitHubToken(m.newGitHubPAT); err != nil {
+				return fmt.Errorf("failed to store GitHub token: %w", err)
+			}
+		}
+
+		// Save the config
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("failed to save GitHub repository configuration: %w", err)
+		}
+
+		// Note: Repository will be cloned on next sync/app start
+		m.logger.Info("GitHub repository configuration saved, will clone on next sync")
+
+	} else {
+		// Switching TO Local repository
+		if m.newStorageDir == "" {
+			return fmt.Errorf("local storage directory is required")
+		}
+
+		// Update config for local
+		cfg.Central.Path = m.newStorageDir
+		cfg.Central.RemoteURL = nil
+		cfg.Central.Branch = nil
+
+		// Use config.UpdateCentralPath to ensure proper setup
+		if err := config.UpdateCentralPath(cfg, m.newStorageDir); err != nil {
+			return fmt.Errorf("failed to create local repository configuration: %w", err)
+		}
+
+		// Optionally remove PAT from keyring (user might want to keep it)
+		// For now, we keep the PAT in case they switch back
+		m.logger.Info("Switched to local repository, GitHub PAT retained in keyring")
+	}
+
+	return nil
 }
 
 func (m *SettingsModel) triggerRefresh() tea.Cmd {
@@ -913,25 +1078,58 @@ func (m *SettingsModel) triggerRefresh() tea.Cmd {
 	return func() tea.Msg {
 		m.logger.Info("Triggering manual refresh")
 
-		// TODO: Implement actual refresh logic
-		// TODO: Call GitSource.Prepare() or equivalent sync operation
-		// TODO: Handle authentication with stored PAT
-		// TODO: Detect and report dirty state before refresh
-		// TODO: Handle merge conflicts if any
-		//
-		// Example:
-		// source := repository.NewGitSource(
-		//     *m.currentConfig.Central.RemoteURL,
-		//     m.currentConfig.Central.Branch,
-		//     m.currentConfig.Central.Path,
-		// )
-		// _, syncInfo, err := source.Prepare(m.logger)
-		// return refreshCompleteMsg{syncInfo: &syncInfo, err: err}
-
-		return refreshCompleteMsg{
-			syncInfo: &repository.SyncInfo{},
-			err:      nil,
+		// Verify we have a GitHub repository configured
+		if m.currentConfig.Central.RemoteURL == nil {
+			return refreshCompleteMsg{
+				syncInfo: nil,
+				err:      fmt.Errorf("cannot refresh: not a GitHub repository"),
+			}
 		}
+
+		// Create GitSource to perform fetch
+		source := repository.NewGitSource(
+			*m.currentConfig.Central.RemoteURL,
+			m.currentConfig.Central.Branch,
+			m.currentConfig.Central.Path,
+		)
+
+		// Use FetchUpdates for manual refresh (only fetches, doesn't clone)
+		syncInfo, err := source.FetchUpdates(m.logger)
+		if err != nil {
+			m.logger.Error("Manual refresh failed", "error", err)
+			return refreshCompleteMsg{syncInfo: nil, err: err}
+		}
+
+		m.logger.Info("Manual refresh completed", "updated", syncInfo.Updated, "dirty", syncInfo.Dirty)
+		return refreshCompleteMsg{syncInfo: &syncInfo, err: nil}
+	}
+}
+
+// checkDirtyState checks if the repository has uncommitted changes before performing operations.
+// It returns a tea.Cmd that will emit a dirtyStateMsg with the result.
+// The Update handler will then proceed with the appropriate operation based on the current state.
+func (m *SettingsModel) checkDirtyState() tea.Cmd {
+	return func() tea.Msg {
+		// Only check for GitHub repositories
+		if m.currentConfig == nil || m.currentConfig.Central.RemoteURL == nil {
+			// Not a GitHub repo, return clean state
+			return dirtyStateMsg{isDirty: false, err: nil}
+		}
+
+		// Use repository package's CheckRepositoryStatus function
+		isDirty, err := repository.CheckGithubRepositoryStatus(m.currentConfig.Central.Path)
+		if err != nil {
+			m.logger.Warn("Failed to check repository status", "error", err)
+			return dirtyStateMsg{isDirty: false, err: err}
+		}
+
+		if isDirty {
+			m.logger.Warn("Repository has uncommitted changes")
+			return dirtyStateMsg{isDirty: true, err: nil}
+		}
+
+		// Repository is clean
+		return dirtyStateMsg{isDirty: false, err: nil}
 	}
 }
 
@@ -1260,10 +1458,6 @@ func (m *SettingsModel) formatCurrentConfig() string {
 		}
 		content.WriteString(fmt.Sprintf("PAT:             %s\n", highlightStyle.Render(patStatus)))
 
-		// Last sync info
-		if m.lastSyncInfo != nil {
-			content.WriteString(fmt.Sprintf("\n%s\n", m.formatLastSync()))
-		}
 	}
 
 	return content.String()
@@ -1326,15 +1520,6 @@ func (m *SettingsModel) getMenuOptions() []ChangeOptionInfo {
 	})
 
 	return options
-}
-
-func (m *SettingsModel) formatLastSync() string {
-	if m.lastSyncInfo == nil {
-		return lipgloss.NewStyle().Faint(true).Render("No sync information available")
-	}
-
-	// TODO: Format actual sync info
-	return lipgloss.NewStyle().Faint(true).Render("Last synced: Never")
 }
 
 func (m *SettingsModel) formatChangesSummary() string {
@@ -1401,10 +1586,3 @@ func (m *SettingsModel) getCleanupWarning() string {
 
 will NOT be automatically deleted. You may want to clean it up manually.`, m.currentConfig.Central.Path))
 }
-
-// func pluralize(count int, singular, plural string) string {
-// 	if count == 1 {
-// 		return fmt.Sprintf("%d %s", count, singular)
-// 	}
-// 	return fmt.Sprintf("%d %s", count, plural)
-// }

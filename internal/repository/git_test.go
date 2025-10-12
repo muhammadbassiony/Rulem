@@ -935,3 +935,83 @@ func TestGetDefaultStorageDirConsistency(t *testing.T) {
 		t.Errorf("default storage dir should contain 'rulem', got %v", first)
 	}
 }
+
+func TestCheckRepositoryStatus(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+
+	t.Run("NonExistentRepository", func(t *testing.T) {
+		// Test with non-existent path
+		_, err := CheckGithubRepositoryStatus("/nonexistent/path")
+		if err == nil {
+			t.Error("Expected error for non-existent repository")
+		}
+	})
+
+	t.Run("NotAGitRepository", func(t *testing.T) {
+		// Test with a directory that's not a git repo
+		tempDir := t.TempDir()
+		_, err := CheckGithubRepositoryStatus(tempDir)
+		if err == nil {
+			t.Error("Expected error for non-git directory")
+		}
+	})
+
+	t.Run("CleanRepository", func(t *testing.T) {
+		// Clone a real repository for testing
+		tempDir := t.TempDir()
+		clonePath := filepath.Join(tempDir, "clean-repo")
+		remoteURL := "https://github.com/octocat/Hello-World.git"
+
+		gs := NewGitSource(remoteURL, nil, clonePath)
+		_, _, err := gs.Prepare(logger)
+		if err != nil {
+			t.Skipf("Cannot clone repository for testing (network issue?): %v", err)
+		}
+
+		// Check status - should be clean
+		isDirty, err := CheckGithubRepositoryStatus(clonePath)
+		if err != nil {
+			t.Fatalf("Failed to check repository status: %v", err)
+		}
+
+		if isDirty {
+			t.Error("Expected clean repository, but got dirty status")
+		}
+	})
+
+	t.Run("DirtyRepository", func(t *testing.T) {
+		// Clone a repository and modify it
+		tempDir := t.TempDir()
+		clonePath := filepath.Join(tempDir, "dirty-repo")
+		remoteURL := "https://github.com/octocat/Hello-World.git"
+
+		gs := NewGitSource(remoteURL, nil, clonePath)
+		_, _, err := gs.Prepare(logger)
+		if err != nil {
+			t.Skipf("Cannot clone repository for testing (network issue?): %v", err)
+		}
+
+		// Modify a file to make it dirty
+		testFile := filepath.Join(clonePath, "README")
+		content, err := os.ReadFile(testFile)
+		if err != nil {
+			t.Fatalf("Failed to read test file: %v", err)
+		}
+
+		// Append some content
+		newContent := append(content, []byte("\nTest modification")...)
+		if err := os.WriteFile(testFile, newContent, 0644); err != nil {
+			t.Fatalf("Failed to modify test file: %v", err)
+		}
+
+		// Check status - should be dirty
+		isDirty, err := CheckGithubRepositoryStatus(clonePath)
+		if err != nil {
+			t.Fatalf("Failed to check repository status: %v", err)
+		}
+
+		if !isDirty {
+			t.Error("Expected dirty repository, but got clean status")
+		}
+	})
+}

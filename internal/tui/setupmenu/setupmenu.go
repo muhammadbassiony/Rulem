@@ -343,13 +343,13 @@ func (m *SetupModel) handleGitHubBranchKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 	case "enter":
 		m.GitHubBranch = strings.TrimSpace(m.textInput.Value())
 		m.logger.LogUserAction("github_branch_submit", m.GitHubBranch)
-		placeholder := settingshelpers.DeriveClonePath(m.GitHubURL)
-		if placeholder == "" {
-			placeholder = repository.GetDefaultStorageDir()
+		nextStatePlaceholder := settingshelpers.DeriveClonePath(m.GitHubURL)
+		if nextStatePlaceholder == "" {
+			nextStatePlaceholder = repository.GetDefaultStorageDir()
 		}
 		m.state = SetupStateGitHubPath
 		m.layout = m.layout.ClearError()
-		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", placeholder, textinput.EchoNormal)
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", nextStatePlaceholder, textinput.EchoNormal)
 	case "esc":
 		m.state = SetupStateGitHubURL
 		m.layout = m.layout.ClearError()
@@ -371,6 +371,15 @@ func (m *SetupModel) handleGitHubPathKeys(msg tea.KeyMsg) (*SetupModel, tea.Cmd)
 		// Validate clone path
 		input := strings.TrimSpace(m.textInput.Value())
 		m.logger.Debug("Validating GitHub clone path", "path", input)
+
+		placeholder := settingshelpers.DeriveClonePath(m.GitHubURL)
+		if placeholder == "" {
+			placeholder = repository.GetDefaultStorageDir()
+		}
+
+		if input == "" {
+			input = placeholder
+		}
 
 		if err := fileops.ValidateStoragePath(input); err != nil {
 			m.logger.Warn("GitHub clone path validation failed", "error", err)

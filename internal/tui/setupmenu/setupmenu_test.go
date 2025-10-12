@@ -463,9 +463,36 @@ func TestGitHubPathInput(t *testing.T) {
 		}
 	})
 
+	t.Run("empty input accepts placeholder and proceeds", func(t *testing.T) {
+		model := createModelInState(t, SetupStateGitHubPath)
+		model.GitHubURL = "https://github.com/user/repo.git"
+		// Leave textInput empty to test placeholder acceptance
+		model.textInput.SetValue("")
+
+		key := tea.KeyMsg{Type: tea.KeyEnter}
+		updatedModel, _ := model.Update(key)
+		model = updatedModel.(*SetupModel)
+
+		// Should advance to PAT input state with placeholder path
+		if model.state != SetupStateGitHubPAT {
+			t.Errorf("expected state %v, got %v", SetupStateGitHubPAT, model.state)
+		}
+
+		// GitHubPath should be set to derived path or default
+		if model.GitHubPath == "" {
+			t.Error("expected GitHubPath to be set from placeholder")
+		}
+
+		// Should be in expanded form
+		if !strings.HasPrefix(model.GitHubPath, "/") && !strings.HasPrefix(model.GitHubPath, "~") {
+			t.Logf("GitHubPath set to: %s", model.GitHubPath)
+		}
+	})
+
 	t.Run("invalid path shows error", func(t *testing.T) {
 		model := createModelInState(t, SetupStateGitHubPath)
-		model.textInput.SetValue("")
+		// Set an invalid path that will fail validation
+		model.textInput.SetValue("/invalid/system/path/outside/home")
 
 		key := tea.KeyMsg{Type: tea.KeyEnter}
 		updatedModel, cmd := model.Update(key)
@@ -473,6 +500,23 @@ func TestGitHubPathInput(t *testing.T) {
 
 		if cmd == nil {
 			t.Error("expected non-nil cmd for error")
+		}
+
+		// Should remain in same state on error
+		if model.state != SetupStateGitHubPath {
+			t.Errorf("expected to remain in GitHubPath state, got %v", model.state)
+		}
+	})
+
+	t.Run("escape returns to branch input", func(t *testing.T) {
+		model := createModelInState(t, SetupStateGitHubPath)
+
+		key := tea.KeyMsg{Type: tea.KeyEsc}
+		updatedModel, _ := model.Update(key)
+		model = updatedModel.(*SetupModel)
+
+		if model.state != SetupStateGitHubBranch {
+			t.Errorf("expected state %v on escape, got %v", SetupStateGitHubBranch, model.state)
 		}
 	})
 }

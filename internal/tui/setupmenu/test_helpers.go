@@ -3,6 +3,7 @@ package setupmenu
 import (
 	"os"
 	"path/filepath"
+	"rulem/internal/config"
 	"testing"
 )
 
@@ -68,4 +69,10 @@ func CreateTempStorageDir(t *testing.T, prefix string) string {
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// LoadTestConfig loads the config from the test config path
+func LoadTestConfig(t *testing.T) (*config.Config, error) {
+	t.Helper()
+	return config.Load()
 }

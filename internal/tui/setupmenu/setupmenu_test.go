@@ -2,6 +2,8 @@ package setupmenu
 
 import (
 	"errors"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -562,9 +564,7 @@ func TestGitHubPATInput(t *testing.T) {
 		model.textInput.SetValue("invalid-token")
 
 		key := tea.KeyMsg{Type: tea.KeyEnter}
-		updatedModel, cmd := model.Update(key)
-		model = updatedModel.(*SetupModel)
-
+		_, cmd := model.Update(key)
 		if cmd == nil {
 			t.Error("expected non-nil cmd for error")
 		}
@@ -591,7 +591,11 @@ func TestGitHubPATInput(t *testing.T) {
 
 		key := tea.KeyMsg{Type: tea.KeyEnter}
 		updatedModel, cmd := model.Update(key)
-		model = updatedModel.(*SetupModel)
+		if m, ok := updatedModel.(*SetupModel); ok {
+			model = m
+		} else {
+			t.Fatal("expected SetupModel")
+		}
 
 		// Token format is valid, but repository validation will fail (no real GitHub repository)
 		if cmd == nil {
@@ -637,8 +641,7 @@ func TestConfirmationState(t *testing.T) {
 		model.StorageDir = t.TempDir()
 
 		key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")}
-		updatedModel, cmd := model.Update(key)
-		model = updatedModel.(*SetupModel)
+		_, cmd := model.Update(key)
 
 		if cmd == nil {
 			t.Error("expected non-nil cmd")
@@ -845,6 +848,351 @@ func TestPerformConfigCreation(t *testing.T) {
 	})
 }
 
+func TestLocalRepositorySetupCreatesCorrectRepositoryEntry(t *testing.T) {
+	_, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
+	model := createTestModel(t)
+	model.repositoryType = RepositoryTypeLocal
+
+	// Create a temp directory with a specific name we can verify
+	tempParent := t.TempDir()
+	model.StorageDir = filepath.Join(tempParent, "my-local-rules")
+
+	err := model.performConfigCreation()
+	if err != nil {
+		t.Fatalf("unexpected error creating config: %v", err)
+	}
+
+	// Load config and verify structure
+	cfg, err := LoadTestConfig(t)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Verify Repositories array exists and has single entry
+	if len(cfg.Repositories) != 1 {
+		t.Errorf("expected 1 repository, got %d", len(cfg.Repositories))
+	}
+
+	// Verify RepositoryEntry structure
+	repo := cfg.Repositories[0]
+	if repo.ID == "" {
+		t.Error("expected non-empty repository ID")
+	}
+	// Name should be extracted from directory path
+	if repo.Name != "my-local-rules" {
+		t.Errorf("expected name 'my-local-rules', got %q", repo.Name)
+	}
+	if repo.CreatedAt == 0 {
+		t.Error("expected non-zero CreatedAt timestamp")
+	}
+	if repo.Central.Path != model.StorageDir {
+		t.Errorf("expected path %q, got %q", model.StorageDir, repo.Central.Path)
+	}
+	if repo.Central.RemoteURL != nil {
+		t.Error("expected nil RemoteURL for local repository")
+	}
+}
+
+func TestGitHubRepositorySetupCreatesCorrectRepositoryEntry(t *testing.T) {
+	_, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
+	model := createTestModel(t)
+	model.repositoryType = RepositoryTypeGitHub
+	model.GitHubURL = "https://github.com/test/awesome-rules.git"
+	model.GitHubBranch = "main"
+	model.GitHubPath = t.TempDir()
+	model.GitHubPAT = "ghp_test"
+
+	err := model.performConfigCreation()
+	if err != nil {
+		t.Fatalf("unexpected error creating config: %v", err)
+	}
+
+	// Load config and verify structure
+	cfg, err := LoadTestConfig(t)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Verify Repositories array exists and has single entry
+	if len(cfg.Repositories) != 1 {
+		t.Errorf("expected 1 repository, got %d", len(cfg.Repositories))
+	}
+
+	// Verify RepositoryEntry structure
+	repo := cfg.Repositories[0]
+	if repo.ID == "" {
+		t.Error("expected non-empty repository ID")
+	}
+
+	// Name should be extracted from URL ("awesome-rules")
+	if repo.Name != "awesome-rules" {
+		t.Errorf("expected name 'awesome-rules', got %q", repo.Name)
+	}
+	if repo.CreatedAt == 0 {
+		t.Error("expected non-zero CreatedAt timestamp")
+	}
+	if repo.Central.Path != model.GitHubPath {
+		t.Errorf("expected path %q, got %q", model.GitHubPath, repo.Central.Path)
+	}
+	if repo.Central.RemoteURL == nil || *repo.Central.RemoteURL != model.GitHubURL {
+		t.Errorf("expected RemoteURL %q, got %v", model.GitHubURL, repo.Central.RemoteURL)
+	}
+	if repo.Central.Branch == nil || *repo.Central.Branch != model.GitHubBranch {
+		t.Errorf("expected branch %q, got %v", model.GitHubBranch, repo.Central.Branch)
+	}
+}
+
+func TestRepositoryIDGeneration(t *testing.T) {
+	_, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
+	model := createTestModel(t)
+	model.repositoryType = RepositoryTypeLocal
+
+	// Create a temp directory with a specific name we can verify
+	tempParent := t.TempDir()
+	model.StorageDir = filepath.Join(tempParent, "my-rules")
+
+	err := model.performConfigCreation()
+	if err != nil {
+		t.Fatalf("unexpected error creating config: %v", err)
+	}
+
+	cfg, err := LoadTestConfig(t)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	repo := cfg.Repositories[0]
+
+	// Verify ID format: "sanitized-name-timestamp"
+	idPattern := `^[a-z0-9-]+-\d+$`
+	matched, err := regexp.MatchString(idPattern, repo.ID)
+	if err != nil {
+		t.Fatalf("regex error: %v", err)
+	}
+	if !matched {
+		t.Errorf("repository ID %q does not match expected pattern %q", repo.ID, idPattern)
+	}
+
+	// Verify ID starts with sanitized name
+	if !strings.HasPrefix(repo.ID, "my-rules-") {
+		t.Errorf("expected ID to start with 'my-rules-', got %q", repo.ID)
+	}
+}
+
+func TestRepositoryNameDefaults(t *testing.T) {
+	tests := []struct {
+		name              string
+		repositoryType    RepositoryType
+		gitHubURL         string
+		localDirName      string
+		expectedNameRegex string
+	}{
+		{
+			name:              "local repository uses directory name",
+			repositoryType:    RepositoryTypeLocal,
+			localDirName:      "my-project-rules",
+			expectedNameRegex: "^my-project-rules$",
+		},
+		{
+			name:              "github with .git suffix extracts name",
+			repositoryType:    RepositoryTypeGitHub,
+			gitHubURL:         "https://github.com/user/project.git",
+			expectedNameRegex: "^project$",
+		},
+		{
+			name:              "github without .git suffix extracts name",
+			repositoryType:    RepositoryTypeGitHub,
+			gitHubURL:         "https://github.com/user/my-awesome-repo",
+			expectedNameRegex: "^my-awesome-repo$",
+		},
+		{
+			name:              "github ssh format extracts name",
+			repositoryType:    RepositoryTypeGitHub,
+			gitHubURL:         "git@github.com:user/cool-rules.git",
+			expectedNameRegex: "^cool-rules$",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, cleanup := SetTestConfigPath(t)
+			defer cleanup()
+
+			model := createTestModel(t)
+			model.repositoryType = tt.repositoryType
+
+			if tt.repositoryType == RepositoryTypeLocal {
+				tempParent := t.TempDir()
+				model.StorageDir = filepath.Join(tempParent, tt.localDirName)
+			} else {
+				model.GitHubURL = tt.gitHubURL
+				model.GitHubBranch = "main"
+				model.GitHubPath = t.TempDir()
+				model.GitHubPAT = "ghp_test"
+			}
+
+			err := model.performConfigCreation()
+			if err != nil {
+				t.Fatalf("unexpected error creating config: %v", err)
+			}
+
+			cfg, err := LoadTestConfig(t)
+			if err != nil {
+				t.Fatalf("failed to load config: %v", err)
+			}
+
+			repo := cfg.Repositories[0]
+			matched, err := regexp.MatchString(tt.expectedNameRegex, repo.Name)
+			if err != nil {
+				t.Fatalf("regex error: %v", err)
+			}
+			if !matched {
+				t.Errorf("repository name %q does not match expected pattern %q", repo.Name, tt.expectedNameRegex)
+			}
+		})
+	}
+}
+
+func TestConfigStructureIsRepositoriesArray(t *testing.T) {
+	_, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
+	model := createTestModel(t)
+	model.repositoryType = RepositoryTypeLocal
+	model.StorageDir = t.TempDir()
+
+	err := model.performConfigCreation()
+	if err != nil {
+		t.Fatalf("unexpected error creating config: %v", err)
+	}
+
+	cfg, err := LoadTestConfig(t)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Verify config has Repositories field (not Central field)
+	if cfg.Repositories == nil {
+		t.Error("expected Repositories array to exist")
+	}
+
+	// Verify it's an array/slice
+	if len(cfg.Repositories) == 0 {
+		t.Error("expected Repositories array to have at least one entry")
+	}
+}
+
+func TestGitHubBranchOptional(t *testing.T) {
+	t.Run("branch set when provided", func(t *testing.T) {
+		_, cleanup := SetTestConfigPath(t)
+		defer cleanup()
+
+		model := createTestModel(t)
+		model.repositoryType = RepositoryTypeGitHub
+		model.GitHubURL = "https://github.com/test/repo.git"
+		model.GitHubBranch = "develop"
+		model.GitHubPath = t.TempDir()
+		model.GitHubPAT = "ghp_test"
+
+		err := model.performConfigCreation()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		cfg, err := LoadTestConfig(t)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		repo := cfg.Repositories[0]
+		if repo.Central.Branch == nil {
+			t.Error("expected branch to be set")
+		} else if *repo.Central.Branch != "develop" {
+			t.Errorf("expected branch 'develop', got %q", *repo.Central.Branch)
+		}
+	})
+
+	t.Run("branch nil when empty", func(t *testing.T) {
+		_, cleanup := SetTestConfigPath(t)
+		defer cleanup()
+
+		model := createTestModel(t)
+		model.repositoryType = RepositoryTypeGitHub
+		model.GitHubURL = "https://github.com/test/repo.git"
+		model.GitHubBranch = "" // Empty branch
+		model.GitHubPath = t.TempDir()
+		model.GitHubPAT = "ghp_test"
+
+		err := model.performConfigCreation()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		cfg, err := LoadTestConfig(t)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		repo := cfg.Repositories[0]
+		if repo.Central.Branch != nil {
+			t.Errorf("expected branch to be nil, got %v", repo.Central.Branch)
+		}
+	})
+}
+
+// Integration test: full setup flow → verify config structure
+func TestFullSetupFlowCreatesValidConfig(t *testing.T) {
+	_, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
+	model := createTestModel(t)
+
+	// Simulate full setup flow for local repository
+	// 1. Welcome -> Repository Type
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// 2. Repository Type -> Local (already at index 0)
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// 3. Storage Input
+	model.textInput.SetValue(t.TempDir())
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// 4. Confirmation -> Create config
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+
+	// Execute the create config command
+	if model.state == SetupStateConfirmation {
+		cmd := model.createConfig()
+		if cmd != nil {
+			msg := cmd()
+			model.Update(msg)
+		}
+	}
+
+	// Verify config was created correctly
+	cfg, err := LoadTestConfig(t)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	if len(cfg.Repositories) != 1 {
+		t.Errorf("expected 1 repository, got %d", len(cfg.Repositories))
+	}
+
+	repo := cfg.Repositories[0]
+	if repo.ID == "" || repo.Name == "" || repo.CreatedAt == 0 {
+		t.Errorf("repository entry has missing fields: ID=%q, Name=%q, CreatedAt=%d",
+			repo.ID, repo.Name, repo.CreatedAt)
+	}
+}
+
 // Benchmarks
 
 func BenchmarkUpdate(b *testing.B) {
@@ -854,7 +1202,7 @@ func BenchmarkUpdate(b *testing.B) {
 	key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		model.Update(key)
 	}
 }
@@ -865,7 +1213,7 @@ func BenchmarkView(b *testing.B) {
 	model := NewSetupModel(ctx)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		model.View()
 	}
 }

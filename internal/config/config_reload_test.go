@@ -35,8 +35,15 @@ func TestReloadConfig(t *testing.T) {
 	initialConfig := Config{
 		Version:  "1.0",
 		InitTime: time.Now().Unix(),
-		Central: repository.CentralRepositoryConfig{
-			Path: initialCentralPath,
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "test-repo-123456",
+				Name:      "Test Repo",
+				CreatedAt: time.Now().Unix(),
+				Central: repository.CentralRepositoryConfig{
+					Path: initialCentralPath,
+				},
+			},
 		},
 	}
 
@@ -71,8 +78,12 @@ func TestReloadConfig(t *testing.T) {
 		t.Fatal("ReloadConfig returned nil config")
 	}
 
-	if reloadMsg.Config.Central.Path != initialCentralPath {
-		t.Errorf("Expected central path '%s', got '%s'", initialCentralPath, reloadMsg.Config.Central.Path)
+	if len(reloadMsg.Config.Repositories) == 0 {
+		t.Fatal("Expected at least one repository")
+	}
+
+	if reloadMsg.Config.Repositories[0].Central.Path != initialCentralPath {
+		t.Errorf("Expected central path '%s', got '%s'", initialCentralPath, reloadMsg.Config.Repositories[0].Central.Path)
 	}
 
 	if reloadMsg.Config.Version != "1.0" {
@@ -85,8 +96,15 @@ func TestReloadConfig(t *testing.T) {
 	modifiedConfig := Config{
 		Version:  "1.1",
 		InitTime: initialConfig.InitTime,
-		Central: repository.CentralRepositoryConfig{
-			Path: modifiedCentralPath,
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "test-repo-123456",
+				Name:      "Test Repo Modified",
+				CreatedAt: time.Now().Unix(),
+				Central: repository.CentralRepositoryConfig{
+					Path: modifiedCentralPath,
+				},
+			},
 		},
 	}
 
@@ -105,8 +123,12 @@ func TestReloadConfig(t *testing.T) {
 		t.Fatalf("ReloadConfig returned error on second load: %v", reloadMsg2.Error)
 	}
 
-	if reloadMsg2.Config.Central.Path != modifiedCentralPath {
-		t.Errorf("Expected modified central path '%s', got '%s'", modifiedCentralPath, reloadMsg2.Config.Central.Path)
+	if len(reloadMsg2.Config.Repositories) == 0 {
+		t.Fatal("Expected at least one repository in reloaded config")
+	}
+
+	if reloadMsg2.Config.Repositories[0].Central.Path != modifiedCentralPath {
+		t.Errorf("Expected modified central path '%s', got '%s'", modifiedCentralPath, reloadMsg2.Config.Repositories[0].Central.Path)
 	}
 
 	if reloadMsg2.Config.Version != "1.1" {
@@ -176,7 +198,16 @@ func TestReloadConfigIntegration(t *testing.T) {
 	// Create initial config (simulating main model startup)
 	originalCentralPath := filepath.Join(homeDir, "test-rulem-original")
 	initialConfig := DefaultConfig()
-	initialConfig.Central.Path = originalCentralPath
+	initialConfig.Repositories = []repository.RepositoryEntry{
+		{
+			ID:        "test-repo-123456",
+			Name:      "Original Repo",
+			CreatedAt: time.Now().Unix(),
+			Central: repository.CentralRepositoryConfig{
+				Path: originalCentralPath,
+			},
+		},
+	}
 	err = initialConfig.Save()
 	if err != nil {
 		t.Fatalf("Failed to save initial config: %v", err)
@@ -189,15 +220,20 @@ func TestReloadConfigIntegration(t *testing.T) {
 	}
 
 	// Verify loaded config
-	if loadedConfig.Central.Path != originalCentralPath {
-		t.Errorf("Expected loaded central path '%s', got '%s'", originalCentralPath, loadedConfig.Central.Path)
+	if len(loadedConfig.Repositories) == 0 {
+		t.Fatal("Expected at least one repository")
+	}
+	if loadedConfig.Repositories[0].Central.Path != originalCentralPath {
+		t.Errorf("Expected loaded central path '%s', got '%s'", originalCentralPath, loadedConfig.Repositories[0].Central.Path)
 	}
 
 	// Update config (simulating settings menu update)
 	updatedCentralPath := filepath.Join(homeDir, "test-rulem-updated")
-	err = UpdateCentralPath(loadedConfig, updatedCentralPath)
+	loadedConfig.Repositories[0].Central.Path = updatedCentralPath
+	loadedConfig.Repositories[0].Name = "Updated Repo"
+	err = loadedConfig.Save()
 	if err != nil {
-		t.Fatalf("Failed to update storage dir: %v", err)
+		t.Fatalf("Failed to save updated config: %v", err)
 	}
 
 	// Reload config (simulating main model receiving ReloadConfigMsg)
@@ -210,12 +246,13 @@ func TestReloadConfigIntegration(t *testing.T) {
 	}
 
 	// Verify the reloaded config has the updated values
-	if reloadMsg.Config.Central.Path != updatedCentralPath {
-		t.Errorf("Expected reloaded central path '%s', got '%s'", updatedCentralPath, reloadMsg.Config.Central.Path)
+	if len(reloadMsg.Config.Repositories) == 0 {
+		t.Fatal("Expected at least one repository in reloaded config")
 	}
-
-	// Verify the original config object was updated by UpdateCentralPath
-	if loadedConfig.Central.Path != updatedCentralPath {
-		t.Errorf("Original config central path should have been updated, got '%s'", loadedConfig.Central.Path)
+	if reloadMsg.Config.Repositories[0].Central.Path != updatedCentralPath {
+		t.Errorf("Expected reloaded central path '%s', got '%s'", updatedCentralPath, reloadMsg.Config.Repositories[0].Central.Path)
+	}
+	if reloadMsg.Config.Repositories[0].Name != "Updated Repo" {
+		t.Errorf("Expected reloaded repository name 'Updated Repo', got '%s'", reloadMsg.Config.Repositories[0].Name)
 	}
 }

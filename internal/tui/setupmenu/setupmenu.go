@@ -23,6 +23,8 @@ package setupmenu
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"rulem/internal/config"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
@@ -32,6 +34,7 @@ import (
 	"rulem/internal/tui/styles"
 	"rulem/pkg/fileops"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -255,11 +258,10 @@ func (m *SetupModel) handleRepositoryTypeKeys(msg tea.KeyMsg) (*SetupModel, tea.
 			m.state = SetupStateStorageInput
 			m.layout = m.layout.ClearError()
 			return m, settingshelpers.ResetTextInputForState(&m.textInput, defaultPath, defaultPath, textinput.EchoNormal)
-		} else {
-			m.state = SetupStateGitHubURL
-			m.layout = m.layout.ClearError()
-			return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "https://github.com/user/repo.git", textinput.EchoNormal)
 		}
+		m.state = SetupStateGitHubURL
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "https://github.com/user/repo.git", textinput.EchoNormal)
 	case "esc", "q":
 		return m.handleQuit()
 	}
@@ -466,11 +468,10 @@ func (m *SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 			m.state = SetupStateStorageInput
 			m.layout = m.layout.ClearError()
 			return m, settingshelpers.ResetTextInputForState(&m.textInput, defaultPath, defaultPath, textinput.EchoNormal)
-		} else {
-			m.state = SetupStateGitHubPAT
-			m.layout = m.layout.ClearError()
-			return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
 		}
+		m.state = SetupStateGitHubPAT
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
 	case "y", "Y", "enter":
 		m.logger.LogUserAction("confirmation_accept", "creating config")
 		return m, m.createConfig()
@@ -483,11 +484,10 @@ func (m *SetupModel) handleConfirmationKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 			m.state = SetupStateStorageInput
 			m.layout = m.layout.ClearError()
 			return m, settingshelpers.ResetTextInputForState(&m.textInput, defaultPath, defaultPath, textinput.EchoNormal)
-		} else {
-			m.state = SetupStateGitHubPAT
-			m.layout = m.layout.ClearError()
-			return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
 		}
+		m.state = SetupStateGitHubPAT
+		m.layout = m.layout.ClearError()
+		return m, settingshelpers.ResetTextInputForState(&m.textInput, "", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", textinput.EchoPassword)
 	}
 	return m, nil
 }
@@ -524,39 +524,89 @@ func (m *SetupModel) isQuitKey(msg tea.KeyMsg) bool {
 // For local repositories, it creates the directory and saves the config.
 // For GitHub repositories, it saves the config with remote settings and relies on
 // the credential manager to have already stored the PAT during validation.
+//
+// This function now creates a RepositoryEntry with generated ID and adds it to the
+// Repositories array in the new multi-repository config structure.
 func (m *SetupModel) performConfigCreation() error {
 	cfg := config.DefaultConfig()
 
+	// Generate repository entry with unique ID
+	timestamp := time.Now().Unix()
+
 	if m.repositoryType == RepositoryTypeLocal {
-		// Local repository setup
-		cfg.Central.Path = m.StorageDir
-		cfg.Central.RemoteURL = nil
-		cfg.Central.Branch = nil
-
-		if err := config.UpdateCentralPath(&cfg, m.StorageDir); err != nil {
-			return fmt.Errorf("failed to create local repository configuration: %w", err)
-		}
-	} else {
-		// GitHub repository setup
-		cfg.Central.Path = m.GitHubPath
-		cfg.Central.RemoteURL = &m.GitHubURL
-
-		if m.GitHubBranch != "" {
-			cfg.Central.Branch = &m.GitHubBranch
+		// Local repository setup - create RepositoryEntry
+		// Extract directory name from path for repository name
+		repoName := filepath.Base(m.StorageDir)
+		if repoName == "" || repoName == "." || repoName == "/" {
+			repoName = "My Rules" // Fallback if extraction fails
 		}
 
-		// Store the PAT in OS keyring (only done at final confirmation)
-		if m.GitHubPAT != "" {
-			m.logger.Debug("Storing GitHub PAT in keyring")
-			if err := m.credManager.StoreGitHubToken(m.GitHubPAT); err != nil {
-				return fmt.Errorf("failed to store GitHub token: %w", err)
-			}
+		entry := repository.RepositoryEntry{
+			ID:        config.GenerateRepositoryID(repoName, timestamp),
+			Name:      repoName,
+			CreatedAt: timestamp,
+			Central: repository.CentralRepositoryConfig{
+				Path:      m.StorageDir,
+				RemoteURL: nil,
+				Branch:    nil,
+			},
+		}
+
+		// Assign to Repositories array
+		cfg.Repositories = []repository.RepositoryEntry{entry}
+
+		// Ensure the storage directory exists
+		// Note: Path has already been validated by settingshelpers.ValidateAndExpandLocalPath
+		if err := os.MkdirAll(m.StorageDir, 0755); err != nil {
+			return fmt.Errorf("failed to create storage directory: %w", err)
 		}
 
 		// Save the config
 		if err := cfg.Save(); err != nil {
-			return fmt.Errorf("failed to save GitHub repository configuration: %w", err)
+			return fmt.Errorf("failed to save local repository configuration: %w", err)
 		}
+
+		return nil
+	}
+
+	// GitHub repository setup - create RepositoryEntry with GitHub info
+	// Extract repository name from URL using ParseGitURL
+	gitInfo, err := repository.ParseGitURL(m.GitHubURL)
+	if err != nil {
+		// Fallback to default name if parsing fails
+		m.logger.Warn("Failed to parse GitHub URL for name extraction", "error", err, "url", m.GitHubURL)
+		gitInfo.Repo = "GitHub Rules"
+	}
+
+	entry := repository.RepositoryEntry{
+		ID:        config.GenerateRepositoryID(gitInfo.Repo, timestamp),
+		Name:      gitInfo.Repo,
+		CreatedAt: timestamp,
+		Central: repository.CentralRepositoryConfig{
+			Path:      m.GitHubPath,
+			RemoteURL: &m.GitHubURL,
+		},
+	}
+
+	// Set branch if provided
+	if m.GitHubBranch != "" {
+		entry.Central.Branch = &m.GitHubBranch
+	}
+
+	// Assign to Repositories array
+	cfg.Repositories = []repository.RepositoryEntry{entry}
+
+	// Store the PAT in OS keyring (only done at final confirmation)
+	if m.GitHubPAT != "" {
+		m.logger.Debug("Storing GitHub PAT in keyring")
+		if err := m.credManager.StoreGitHubToken(m.GitHubPAT); err != nil {
+			return fmt.Errorf("failed to store GitHub token: %w", err)
+		}
+	}
+
+	// Save the config
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save GitHub repository configuration: %w", err)
 	}
 
 	return nil

@@ -7,6 +7,23 @@ import (
 	"github.com/adrg/xdg"
 )
 
+// RepositoryEntry represents a single configured central repository.
+// Each repository has a unique identifier, display name, and embedded configuration.
+// This is the domain entity for repositories - it belongs in the repository package
+// as it represents repository concepts, not configuration persistence concerns.
+//
+// Fields:
+//   - ID: Unique identifier in format "sanitized-name-timestamp" (e.g., "personal-rules-1728756432")
+//   - Name: User-provided display name for UI (e.g., "Personal Rules")
+//   - CreatedAt: Unix timestamp when repository was added (used for ordering and ID generation)
+//   - Central: Repository-specific configuration (path, type, GitHub info)
+type RepositoryEntry struct {
+	ID        string                   `yaml:"id"`         // Unique identifier (e.g., "personal-rules-1728756432")
+	Name      string                   `yaml:"name"`       // User-provided display name
+	CreatedAt int64                    `yaml:"created_at"` // Unix timestamp (for ordering and ID generation)
+	Central   CentralRepositoryConfig  `yaml:"central"`    // Repository configuration
+}
+
 // CentralRepositoryConfig represents the configuration for the central rules repository.
 // It supports both local directories and remote Git repositories.
 type CentralRepositoryConfig struct {

@@ -32,8 +32,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
+	"strings"
 	"time"
 
 	"github.com/adrg/xdg"
@@ -72,14 +74,16 @@ const AppName = "rulem" // application name used for config directory
 // The configuration is persisted as YAML and loaded at application startup.
 //
 // Fields:
-//   - Central.Path: The directory where rulem stores or clones rule files
-//   - Central.RemoteURL: Optional Git remote used to populate the local cache
-//   - Version: Configuration schema version for handling upgrades
+//   - Version: Configuration schema version (kept for informational purposes)
 //   - InitTime: Unix timestamp when the configuration was first created
+//   - Repositories: Array of configured repositories (replaces single Central field)
+//
+// Note: RepositoryEntry is defined in the repository package as it's a domain entity.
+// Config package consumes repository domain types for persistence.
 type Config struct {
-	Version  string                             `yaml:"version"`   // Track config version
-	InitTime int64                              `yaml:"init_time"` // Unix timestamp of first setup
-	Central  repository.CentralRepositoryConfig `yaml:"central"`
+	Version      string                       `yaml:"version"`      // Track config version (informational only)
+	InitTime     int64                        `yaml:"init_time"`    // Unix timestamp of first setup
+	Repositories []repository.RepositoryEntry `yaml:"repositories"` // Configured repositories (replaces Central)
 }
 
 // Path returns the standard config file paths for the current platform
@@ -162,23 +166,55 @@ func IsFirstRun() bool {
 }
 
 // DefaultConfig returns a Config with sensible defaults.
-// This creates a new configuration instance with platform-appropriate default values,
-// including a default storage directory determined by the filemanager package.
+// This creates a new configuration instance with an empty repositories array.
+// Repositories should be added through the setup wizard or settings menu.
 //
 // Returns:
 //   - Config: A configuration struct with default values set
 func DefaultConfig() Config {
-	path := repository.GetDefaultStorageDir()
-	logging.Debug("Using default storage directory", "path", path)
-
 	cfg := Config{
-		Version:  "1.0",
-		InitTime: 0, // Will be set during first save
-		Central: repository.CentralRepositoryConfig{
-			Path: path,
-		},
+		Version:      "1.0",
+		InitTime:     0,                              // Will be set during first save
+		Repositories: []repository.RepositoryEntry{}, // Empty array - repositories added through setup
 	}
 	return cfg
+}
+
+// FindRepositoryByID searches for a repository by its unique ID.
+// Uses linear search which is acceptable for the expected scale (≤10 repositories).
+//
+// Parameters:
+//   - id: The unique repository identifier to search for
+//
+// Returns:
+//   - *repository.RepositoryEntry: Pointer to the found repository entry
+//   - error: Error if repository is not found
+func (c *Config) FindRepositoryByID(id string) (*repository.RepositoryEntry, error) {
+	for i := range c.Repositories {
+		if c.Repositories[i].ID == id {
+			return &c.Repositories[i], nil
+		}
+	}
+	return nil, fmt.Errorf("repository not found: %s", id)
+}
+
+// FindRepositoryByName searches for a repository by its display name.
+// Uses case-insensitive matching for user convenience.
+//
+// Parameters:
+//   - name: The repository display name to search for (case-insensitive)
+//
+// Returns:
+//   - *repository.RepositoryEntry: Pointer to the found repository entry
+//   - error: Error if repository is not found
+func (c *Config) FindRepositoryByName(name string) (*repository.RepositoryEntry, error) {
+	lowerName := strings.ToLower(name)
+	for i := range c.Repositories {
+		if strings.ToLower(c.Repositories[i].Name) == lowerName {
+			return &c.Repositories[i], nil
+		}
+	}
+	return nil, fmt.Errorf("repository not found: %s", name)
 }
 
 // Save writes the config to the standard location
@@ -194,9 +230,7 @@ func (c *Config) SaveTo(path string) error {
 		c.InitTime = time.Now().Unix()
 	}
 
-	if c.Central.Path == "" {
-		return fmt.Errorf("central path must be set before saving config")
-	}
+	// No validation on Repositories - empty array is valid (user hasn't configured yet)
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -220,12 +254,6 @@ func (c *Config) SaveTo(path string) error {
 	return nil
 }
 
-// SetCentralPath updates the central repository path and saves the config.
-func (c *Config) SetCentralPath(newPath string) error {
-	c.Central.Path = newPath
-	return c.Save()
-}
-
 // LoadConfig loads configuration and returns a message for TUI
 func LoadConfig() (*Config, error) {
 	return Load()
@@ -245,44 +273,69 @@ func ReloadConfig() tea.Cmd {
 	}
 }
 
-// UpdateCentralPath updates the central repository path, ensures it exists, and saves the config.
-func UpdateCentralPath(cfg *Config, newPath string) error {
-	cfg.Central.Path = newPath
-
-	// Ensure central repository path exists with secure permissions
-	root, err := repository.EnsureLocalStorageDirectory(cfg.Central.Path)
-	if err != nil {
-		return fmt.Errorf("failed to prepare central repository directory: %w", err)
-	}
-	defer root.Close()
-
-	// Save the config
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save configuration: %w", err)
-	}
-
-	logging.Info("Configuration updated successfully", "central_path", cfg.Central.Path)
-	return nil
+// GenerateRepositoryID generates a unique, human-readable identifier for a repository.
+// The ID format is "sanitized-name-timestamp" (e.g., "personal-rules-1728756432").
+//
+// This design provides several benefits:
+//   - Human-readable: Contains the repository name for debugging
+//   - Guaranteed uniqueness: Timestamp ensures no collisions even with same name
+//   - Sortable: Natural chronological ordering
+//   - Config-friendly: Short enough for YAML readability
+//
+// Parameters:
+//   - name: The repository display name to sanitize
+//   - timestamp: Unix timestamp (typically time.Now().Unix())
+//
+// Returns:
+//   - string: Unique repository ID in format "sanitized-name-timestamp"
+//
+// Example:
+//
+//	id := GenerateRepositoryID("Personal Rules", 1728756432)
+//	// Returns: "personal-rules-1728756432"
+func GenerateRepositoryID(name string, timestamp int64) string {
+	sanitized := sanitizeNameForID(name)
+	return fmt.Sprintf("%s-%d", sanitized, timestamp)
 }
 
-// CreateNewConfig initializes a new configuration with the specified storage directory
-func CreateNewConfig(storageDir string) error {
-	// Create the default config
-	cfg := DefaultConfig()
-	cfg.Central.Path = storageDir
+// sanitizeNameForID converts a repository name to a safe, URL-friendly format for ID generation.
+// This function implements the original sanitization logic that was previously in the repository package.
+//
+// The sanitization process:
+//  1. Convert to lowercase
+//  2. Replace non-alphanumeric characters with dashes using regex
+//  3. Trim leading and trailing dashes
+//  4. Fallback to "repo" if empty after sanitization
+//
+// Parameters:
+//   - name: The repository display name to sanitize
+//
+// Returns:
+//   - string: Sanitized name containing only lowercase letters, numbers, and dashes
+//
+// Examples:
+//
+//	sanitizeNameForID("Personal Rules")      // "personal-rules"
+//	sanitizeNameForID("My@Project#123!")     // "my-project-123"
+//	sanitizeNameForID("!!!@@@")              // "repo"
+//	sanitizeNameForID("")                    // "repo"
+//	sanitizeNameForID("  spaces  ")          // "spaces"
+func sanitizeNameForID(name string) string {
+	// Convert to lowercase
+	sanitized := strings.ToLower(name)
 
-	// Ensure storage directory exists
-	root, err := repository.EnsureLocalStorageDirectory(cfg.Central.Path)
-	if err != nil {
-		return fmt.Errorf("failed to create storage directory: %w", err)
+	// Replace non-alphanumeric characters with dash
+	// Pattern: [^a-z0-9]+ matches one or more characters that are NOT lowercase letters or digits
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	sanitized = re.ReplaceAllString(sanitized, "-")
+
+	// Trim leading and trailing dashes
+	sanitized = strings.Trim(sanitized, "-")
+
+	// Fallback to "repo" if empty after sanitization
+	if sanitized == "" {
+		sanitized = "repo"
 	}
-	defer root.Close()
 
-	// Save the config to the standard location
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save configuration: %w", err)
-	}
-
-	logging.Info("Configuration created successfully", "central_path", cfg.Central.Path)
-	return nil
+	return sanitized
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"rulem/pkg/fileops"
 	"slices"
 	"strings"
@@ -75,7 +76,7 @@ func (fm *FileManager) ScanCurrDirectory() ([]FileItem, error) {
 	return result, nil
 }
 
-// ScanCentralRepo recursively scans the central repository and all its children
+// ScanRepository recursively scans the repository directory and all its children
 // for markdown files and returns a list of FileItem.
 //
 // This method scans the FileManager's configured storage directory for markdown files.
@@ -88,7 +89,7 @@ func (fm *FileManager) ScanCurrDirectory() ([]FileItem, error) {
 //
 // Security: Uses secure directory scanning with protection against path traversal and symlink attacks.
 // Validates storage path and symlinks to prevent access to system directories.
-func (fm *FileManager) ScanCentralRepo() ([]FileItem, error) {
+func (fm *FileManager) ScanRepository() ([]FileItem, error) {
 	if fm == nil {
 		return nil, fmt.Errorf("filemanager is nil")
 	}
@@ -219,8 +220,11 @@ func (fm *FileManager) ConvertToAbsolutePaths(items []FileItem) []FileItem {
 	result := make([]FileItem, len(items))
 	for i, item := range items {
 		result[i] = FileItem{
-			Name: item.Name,
-			Path: fm.GetAbsolutePath(item),
+			Name:           item.Name,
+			Path:           fm.GetAbsolutePath(item),
+			RepositoryID:   item.RepositoryID,
+			RepositoryName: item.RepositoryName,
+			RepositoryType: item.RepositoryType,
 		}
 	}
 	return result
@@ -244,9 +248,134 @@ func (fm *FileManager) ConvertToAbsolutePathsCWD(items []FileItem) []FileItem {
 	result := make([]FileItem, len(items))
 	for i, item := range items {
 		result[i] = FileItem{
-			Name: item.Name,
-			Path: fm.GetAbsolutePathCWD(item),
+			Name:           item.Name,
+			Path:           fm.GetAbsolutePathCWD(item),
+			RepositoryID:   item.RepositoryID,
+			RepositoryName: item.RepositoryName,
+			RepositoryType: item.RepositoryType,
 		}
 	}
 	return result
+}
+
+// ScanAllRepositories scans multiple repositories and merges their file lists.
+// This function is the main entry point for multi-repository file discovery.
+// Files are tagged with their source repository metadata for display and tracking.
+//
+// The function maintains repository order - files from earlier repositories appear
+// first in the result list. This provides predictable, stable ordering for UI display.
+//
+// Parameters:
+//   - pathsMap: Map of repository ID to local filesystem path (from PrepareAllRepositories)
+//   - repos: List of repository entries (provides metadata and ordering)
+//   - logger: Logger for structured logging (can be nil)
+//
+// Returns:
+//   - []FileItem: Merged list of files from all repositories with source metadata
+//   - error: Scanning errors (partial results may be returned with error)
+//
+// Usage:
+//
+//	pathMap, _, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	files, err := filemanager.ScanAllRepositories(pathMap, cfg.Repositories, logger)
+//	for _, file := range files {
+//	    fmt.Printf("%s from %s (%s)\n", file.Name, file.RepositoryName, file.RepositoryType)
+//	}
+//
+// Security: Uses secure directory scanning with protection against path traversal.
+func ScanAllRepositories(pathsMap map[string]string, repos []repository.RepositoryEntry, logger *logging.AppLogger) ([]FileItem, error) {
+	if logger != nil {
+		logger.Info("Starting multi-repository scan", "repository_count", len(repos))
+	}
+
+	if len(repos) == 0 {
+		if logger != nil {
+			logger.Debug("No repositories to scan")
+		}
+		return []FileItem{}, nil
+	}
+
+	var allFiles []FileItem
+	var scanErrors []string
+
+	// Process repositories in order to maintain predictable file ordering
+	for _, repo := range repos {
+		localPath, exists := pathsMap[repo.ID]
+		if !exists {
+			errorMsg := fmt.Sprintf("repository %s (%s): path not found in paths map", repo.ID, repo.Name)
+			scanErrors = append(scanErrors, errorMsg)
+			if logger != nil {
+				logger.Warn("Repository path not found", "repository_id", repo.ID, "repository_name", repo.Name)
+			}
+			continue
+		}
+
+		if logger != nil {
+			logger.Info("Scanning repository",
+				"repository_id", repo.ID,
+				"repository_name", repo.Name,
+				"repository_type", string(repo.Type),
+				"path", localPath,
+			)
+		}
+
+		// Determine repository type for metadata
+		repoType := string(repo.Type)
+
+		// Create a temporary FileManager for this repository
+		fm, err := NewFileManager(localPath, logger)
+		if err != nil {
+			errorMsg := fmt.Sprintf("repository %s (%s): failed to create file manager: %v", repo.ID, repo.Name, err)
+			scanErrors = append(scanErrors, errorMsg)
+			if logger != nil {
+				logger.Error("Failed to create file manager", "repository_id", repo.ID, "error", err)
+			}
+			continue
+		}
+
+		// Scan the repository
+		files, err := fm.ScanRepository()
+		if err != nil {
+			errorMsg := fmt.Sprintf("repository %s (%s): scan failed: %v", repo.ID, repo.Name, err)
+			scanErrors = append(scanErrors, errorMsg)
+			if logger != nil {
+				logger.Error("Repository scan failed", "repository_id", repo.ID, "error", err)
+			}
+			continue
+		}
+
+		// Tag each file with repository metadata
+		for i := range files {
+			files[i].RepositoryID = repo.ID
+			files[i].RepositoryName = repo.Name
+			files[i].RepositoryType = repoType
+		}
+
+		allFiles = append(allFiles, files...)
+
+		if logger != nil {
+			logger.Info("Repository scan completed",
+				"repository_id", repo.ID,
+				"repository_name", repo.Name,
+				"file_count", len(files),
+			)
+		}
+	}
+
+	if logger != nil {
+		logger.Info("Multi-repository scan completed",
+			"total_repositories", len(repos),
+			"total_files", len(allFiles),
+			"errors", len(scanErrors),
+		)
+	}
+
+	// Return partial results with error if any scans failed
+	if len(scanErrors) > 0 {
+		return allFiles, fmt.Errorf("scan errors in %d repositories:\n  - %s",
+			len(scanErrors),
+			strings.Join(scanErrors, "\n  - "))
+	}
+
+	return allFiles, nil
 }

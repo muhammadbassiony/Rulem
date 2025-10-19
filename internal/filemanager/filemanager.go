@@ -9,13 +9,30 @@
 // - Path validation and security checks
 // - Integration with the logging system for audit trails
 //
+// # Architecture
+//
 // The FileManager struct is the primary entry point, providing methods for:
 //   - Copying files to/from storage with safety checks
-//   - Listing available rule files in storage
+//   - Scanning repositories for markdown files
 //   - Managing storage directory structure
 //   - Validating file paths and permissions
 //
-// Security features:
+// # Multi-Repository Support
+//
+// FileManager is designed to operate on a single directory at a time. For multi-repository
+// scenarios, create one FileManager per repository:
+//
+//	// Prepare all repositories
+//	pathMap, _, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//
+//	// Scan all repositories using ScanAllRepositories
+//	files, err := filemanager.ScanAllRepositories(pathMap, cfg.Repositories, logger)
+//
+// The ScanAllRepositories function orchestrates multiple FileManager instances and
+// automatically tags each file with its source repository metadata (ID, name, type).
+//
+// # Security Features
+//
 //   - Path traversal protection
 //   - Storage directory access validation
 //   - Safe file operations with atomic writes

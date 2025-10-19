@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"rulem/internal/logging"
+	"rulem/internal/repository"
 	"strings"
 	"testing"
 	"time"
@@ -348,9 +349,9 @@ func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
 	}
 }
 
-// Tests for ScanCentralRepo
+// Tests for ScanRepository
 
-func TestScanCentralRepo_BasicDiscovery(t *testing.T) {
+func TestScanRepository_BasicDiscovery(t *testing.T) {
 	// Test basic markdown file discovery in storage directory
 	structure := map[string]string{
 		"README.md": "# Root README",
@@ -368,9 +369,9 @@ func TestScanCentralRepo_BasicDiscovery(t *testing.T) {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
 
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	expectedFiles := []string{"README.md", "docs.md"}
@@ -390,7 +391,7 @@ func TestScanCentralRepo_BasicDiscovery(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_RecursiveDiscovery(t *testing.T) {
+func TestScanRepository_RecursiveDiscovery(t *testing.T) {
 	// Test nested markdown file discovery
 	structure := map[string]string{
 		"README.md":                  "# Root",
@@ -411,9 +412,9 @@ func TestScanCentralRepo_RecursiveDiscovery(t *testing.T) {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
 
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	expectedFiles := []string{
@@ -440,7 +441,7 @@ func TestScanCentralRepo_RecursiveDiscovery(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_SkipCommonDirectories(t *testing.T) {
+func TestScanRepository_SkipCommonDirectories(t *testing.T) {
 	// Test that common skip patterns are honored
 	structure := map[string]string{
 		"root.md":                  "# Root markdown",
@@ -463,9 +464,9 @@ func TestScanCentralRepo_SkipCommonDirectories(t *testing.T) {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
 
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	expectedFiles := []string{"root.md", "normal/docs.md"}
@@ -484,7 +485,7 @@ func TestScanCentralRepo_SkipCommonDirectories(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_HiddenFilesAndMaxDepth(t *testing.T) {
+func TestScanRepository_HiddenFilesAndMaxDepth(t *testing.T) {
 	// Test hidden files inclusion and max depth behavior
 	structure := map[string]string{
 		".hidden.md":          "# Hidden markdown",
@@ -508,9 +509,9 @@ func TestScanCentralRepo_HiddenFilesAndMaxDepth(t *testing.T) {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
 
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	// Should include hidden files but not files beyond max depth
@@ -534,7 +535,7 @@ func TestScanCentralRepo_HiddenFilesAndMaxDepth(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_SymlinkHandling(t *testing.T) {
+func TestScanRepository_SymlinkHandling(t *testing.T) {
 	// Test symlink handling within storage directory
 	structure := map[string]string{
 		"real/file.md":  "# Real file",
@@ -561,9 +562,9 @@ func TestScanCentralRepo_SymlinkHandling(t *testing.T) {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
 
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	// Should find files through symlinks
@@ -586,7 +587,7 @@ func TestScanCentralRepo_SymlinkHandling(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_UnreadableDirectories(t *testing.T) {
+func TestScanRepository_UnreadableDirectories(t *testing.T) {
 	// Test handling of unreadable directories
 	structure := map[string]string{
 		"readable/file.md":     "# Readable",
@@ -611,9 +612,9 @@ func TestScanCentralRepo_UnreadableDirectories(t *testing.T) {
 	}
 
 	// Should complete successfully and skip unreadable directory
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	// Should find readable files but skip unreadable directory
@@ -635,7 +636,421 @@ func TestScanCentralRepo_UnreadableDirectories(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_NonExistentStorageDir(t *testing.T) {
+// TestScanAllRepositories_EmptyList tests scanning with no repositories
+func TestScanAllRepositories_EmptyList(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+
+	pathsMap := make(map[string]string)
+	repos := []repository.RepositoryEntry{}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	if err != nil {
+		t.Errorf("expected no error for empty list, got: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files, got %d", len(files))
+	}
+}
+
+// TestScanAllRepositories_SingleRepository tests scanning a single repository
+func TestScanAllRepositories_SingleRepository(t *testing.T) {
+	tempDir := t.TempDir()
+	logger, _ := logging.NewTestLogger()
+
+	// Create a repository directory with markdown files
+	repoPath := filepath.Join(tempDir, "repo1")
+	createDirWithFiles(t, repoPath, []string{"file1.md", "file2.md"})
+
+	repos := []repository.RepositoryEntry{
+		{
+			ID:        "repo1-123",
+			Name:      "Repository 1",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: time.Now().Unix(),
+			Path:      repoPath,
+		},
+	}
+
+	pathsMap := map[string]string{
+		"repo1-123": repoPath,
+	}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+
+	// Check metadata is set correctly
+	for _, file := range files {
+		if file.RepositoryID != "repo1-123" {
+			t.Errorf("expected RepositoryID 'repo1-123', got %q", file.RepositoryID)
+		}
+		if file.RepositoryName != "Repository 1" {
+			t.Errorf("expected RepositoryName 'Repository 1', got %q", file.RepositoryName)
+		}
+		if file.RepositoryType != "local" {
+			t.Errorf("expected RepositoryType 'local', got %q", file.RepositoryType)
+		}
+	}
+}
+
+// TestScanAllRepositories_MultipleRepositories tests scanning multiple repositories
+func TestScanAllRepositories_MultipleRepositories(t *testing.T) {
+	tempDir := t.TempDir()
+	logger, _ := logging.NewTestLogger()
+
+	// Create multiple repositories
+	repo1Path := filepath.Join(tempDir, "repo1")
+	repo2Path := filepath.Join(tempDir, "repo2")
+	createDirWithFiles(t, repo1Path, []string{"file1.md", "file2.md"})
+	createDirWithFiles(t, repo2Path, []string{"file3.md"})
+
+	repos := []repository.RepositoryEntry{
+		{
+			ID:        "repo1-123",
+			Name:      "Repository 1",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 1000,
+			Path:      repo1Path,
+		},
+		{
+			ID:        "repo2-456",
+			Name:      "Repository 2",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 2000,
+			Path:      repo2Path,
+		},
+	}
+
+	pathsMap := map[string]string{
+		"repo1-123": repo1Path,
+		"repo2-456": repo2Path,
+	}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+
+	// Check that files are grouped by repository (order preservation)
+	repo1Files := 0
+	repo2Files := 0
+	for _, file := range files {
+		if file.RepositoryID == "repo1-123" {
+			repo1Files++
+		} else if file.RepositoryID == "repo2-456" {
+			repo2Files++
+		}
+	}
+
+	if repo1Files != 2 {
+		t.Errorf("expected 2 files from repo1, got %d", repo1Files)
+	}
+	if repo2Files != 1 {
+		t.Errorf("expected 1 file from repo2, got %d", repo2Files)
+	}
+}
+
+// TestScanAllRepositories_DuplicateFilenames tests handling of duplicate filenames from different repos
+func TestScanAllRepositories_DuplicateFilenames(t *testing.T) {
+	tempDir := t.TempDir()
+	logger, _ := logging.NewTestLogger()
+
+	// Create repositories with same filename
+	repo1Path := filepath.Join(tempDir, "repo1")
+	repo2Path := filepath.Join(tempDir, "repo2")
+	createDirWithFiles(t, repo1Path, []string{"README.md"})
+	createDirWithFiles(t, repo2Path, []string{"README.md"})
+
+	repos := []repository.RepositoryEntry{
+		{
+			ID:        "repo1-123",
+			Name:      "Repository 1",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 1000,
+			Path:      repo1Path,
+		},
+		{
+			ID:        "repo2-456",
+			Name:      "Repository 2",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 2000,
+			Path:      repo2Path,
+		},
+	}
+
+	pathsMap := map[string]string{
+		"repo1-123": repo1Path,
+		"repo2-456": repo2Path,
+	}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Both files should be present
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files (both README.md), got %d", len(files))
+	}
+
+	// Verify they come from different repositories
+	if files[0].RepositoryID == files[1].RepositoryID {
+		t.Error("expected files from different repositories")
+	}
+}
+
+// TestScanAllRepositories_MixedLocalAndGitHub tests scanning local and GitHub repositories
+func TestScanAllRepositories_MixedLocalAndGitHub(t *testing.T) {
+	tempDir := t.TempDir()
+	logger, _ := logging.NewTestLogger()
+
+	localPath := filepath.Join(tempDir, "local")
+	githubPath := filepath.Join(tempDir, "github")
+	createDirWithFiles(t, localPath, []string{"local.md"})
+	createDirWithFiles(t, githubPath, []string{"github.md"})
+
+	remoteURL := "https://github.com/user/repo.git"
+	repos := []repository.RepositoryEntry{
+		{
+			ID:        "local-123",
+			Name:      "Local Repo",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 1000,
+			Path:      localPath,
+		},
+		{
+			ID:        "github-456",
+			Name:      "GitHub Repo",
+			Type:      repository.RepositoryTypeGitHub,
+			Path:      githubPath,
+			RemoteURL: &remoteURL,
+			CreatedAt: 2000,
+		},
+	}
+
+	pathsMap := map[string]string{
+		"local-123":  localPath,
+		"github-456": githubPath,
+	}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+
+	// Check repository types
+	localFound := false
+	githubFound := false
+	for _, file := range files {
+		if file.RepositoryType == "local" {
+			localFound = true
+		}
+		if file.RepositoryType == "github" {
+			githubFound = true
+		}
+	}
+
+	if !localFound {
+		t.Error("expected to find file with type 'local'")
+	}
+	if !githubFound {
+		t.Error("expected to find file with type 'github'")
+	}
+}
+
+// TestScanAllRepositories_MissingPath tests handling when repository path is missing
+func TestScanAllRepositories_MissingPath(t *testing.T) {
+	tempDir := t.TempDir()
+	logger, _ := logging.NewTestLogger()
+
+	repo1Path := filepath.Join(tempDir, "repo1")
+	createDirWithFiles(t, repo1Path, []string{"file1.md"})
+
+	repos := []repository.RepositoryEntry{
+		{
+			ID:        "repo1-123",
+			Name:      "Repository 1",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 1000,
+			Path:      repo1Path,
+		},
+		{
+			ID:        "repo2-456",
+			Name:      "Repository 2 (missing)",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 2000,
+			Path:      "/nonexistent",
+		},
+	}
+
+	// Only include repo1 in paths map
+	pathsMap := map[string]string{
+		"repo1-123": repo1Path,
+	}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	// Should return error but also partial results
+	if err == nil {
+		t.Error("expected error for missing path")
+	}
+
+	// Should still have files from successful scan
+	if len(files) != 1 {
+		t.Errorf("expected 1 file from successful scan, got %d", len(files))
+	}
+}
+
+// TestScanAllRepositories_InvalidDirectory tests handling of invalid directories
+func TestScanAllRepositories_InvalidDirectory(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+
+	repos := []repository.RepositoryEntry{
+		{
+			ID:        "invalid-123",
+			Name:      "Invalid Repository",
+			Type:      repository.RepositoryTypeLocal,
+			CreatedAt: 1000,
+			Path:      "/nonexistent/path",
+		},
+	}
+
+	pathsMap := map[string]string{
+		"invalid-123": "/nonexistent/path",
+	}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	// Should return error
+	if err == nil {
+		t.Error("expected error for invalid directory")
+	}
+
+	// Should return empty or partial results
+	if len(files) != 0 {
+		t.Errorf("expected 0 files from failed scan, got %d", len(files))
+	}
+}
+
+// TestScanAllRepositories_OrderPreservation tests that repository order is preserved
+func TestScanAllRepositories_OrderPreservation(t *testing.T) {
+	tempDir := t.TempDir()
+	logger, _ := logging.NewTestLogger()
+
+	repo1Path := filepath.Join(tempDir, "repo1")
+	repo2Path := filepath.Join(tempDir, "repo2")
+	repo3Path := filepath.Join(tempDir, "repo3")
+	createDirWithFiles(t, repo1Path, []string{"a.md"})
+	createDirWithFiles(t, repo2Path, []string{"b.md"})
+	createDirWithFiles(t, repo3Path, []string{"c.md"})
+
+	repos := []repository.RepositoryEntry{
+		{ID: "repo1-1", Name: "Repo 1", CreatedAt: 1000, Type: repository.RepositoryTypeLocal, Path: repo1Path},
+		{ID: "repo2-2", Name: "Repo 2", CreatedAt: 2000, Type: repository.RepositoryTypeLocal, Path: repo2Path},
+		{ID: "repo3-3", Name: "Repo 3", CreatedAt: 3000, Type: repository.RepositoryTypeLocal, Path: repo3Path},
+	}
+
+	pathsMap := map[string]string{
+		"repo1-1": repo1Path,
+		"repo2-2": repo2Path,
+		"repo3-3": repo3Path,
+	}
+
+	files, err := ScanAllRepositories(pathsMap, repos, logger)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+
+	// Check order matches repository order
+	expectedOrder := []string{"repo1-1", "repo2-2", "repo3-3"}
+	for i, file := range files {
+		if file.RepositoryID != expectedOrder[i] {
+			t.Errorf("file[%d]: expected RepositoryID %q, got %q", i, expectedOrder[i], file.RepositoryID)
+		}
+	}
+}
+
+// TestConvertToAbsolutePaths_PreservesMetadata tests that metadata is preserved during conversion
+func TestConvertToAbsolutePaths_PreservesMetadata(t *testing.T) {
+	tempDir := t.TempDir()
+	logger, _ := logging.NewTestLogger()
+
+	createDirWithFiles(t, tempDir, []string{"test.md"})
+
+	fm, err := NewFileManager(tempDir, logger)
+	if err != nil {
+		t.Fatalf("failed to create FileManager: %v", err)
+	}
+
+	// Create files with metadata
+	items := []FileItem{
+		{
+			Name:           "test.md",
+			Path:           "test.md",
+			RepositoryID:   "repo-123",
+			RepositoryName: "Test Repo",
+			RepositoryType: "local",
+		},
+	}
+
+	result := fm.ConvertToAbsolutePaths(items)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(result))
+	}
+
+	// Check metadata is preserved
+	if result[0].RepositoryID != "repo-123" {
+		t.Errorf("expected RepositoryID 'repo-123', got %q", result[0].RepositoryID)
+	}
+	if result[0].RepositoryName != "Test Repo" {
+		t.Errorf("expected RepositoryName 'Test Repo', got %q", result[0].RepositoryName)
+	}
+	if result[0].RepositoryType != "local" {
+		t.Errorf("expected RepositoryType 'local', got %q", result[0].RepositoryType)
+	}
+}
+
+// Helper function to create a directory with markdown files
+func createDirWithFiles(t *testing.T, dirPath string, filenames []string) {
+	t.Helper()
+
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		t.Fatalf("failed to create directory: %v", err)
+	}
+
+	for _, filename := range filenames {
+		filePath := filepath.Join(dirPath, filename)
+		if err := os.WriteFile(filePath, []byte("# Test content"), 0644); err != nil {
+			t.Fatalf("failed to create file %s: %v", filename, err)
+		}
+	}
+}
+
+func TestScanRepository_NonExistentStorageDir(t *testing.T) {
 	// Test error when storage directory doesn't exist
 	nonExistentDir := filepath.Join(os.TempDir(), "non-existent-storage-dir")
 
@@ -652,7 +1067,7 @@ func TestScanCentralRepo_NonExistentStorageDir(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_StorageDirIsFile(t *testing.T) {
+func TestScanRepository_StorageDirIsFile(t *testing.T) {
 	// Test error when storage path points to a file instead of directory
 	tempDir := createTempTestDir(t, "scan-test-*")
 	storageFile := createTestFile(t, tempDir, "notadirectory.txt", "content")
@@ -671,10 +1086,10 @@ func TestScanCentralRepo_StorageDirIsFile(t *testing.T) {
 		return
 	}
 
-	// If NewFileManager succeeded, ScanCentralRepo should fail
-	_, err = fm.ScanCentralRepo()
+	// If NewFileManager succeeded, ScanRepository should fail
+	_, err = fm.ScanRepository()
 	if err == nil {
-		t.Fatal("Expected ScanCentralRepo to fail when storage path is a file")
+		t.Fatal("Expected ScanRepository to fail when storage path is a file")
 	}
 
 	if !strings.Contains(err.Error(), "not a directory") &&
@@ -683,7 +1098,7 @@ func TestScanCentralRepo_StorageDirIsFile(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_SymlinkToSystemDirectory(t *testing.T) {
+func TestScanRepository_SymlinkToSystemDirectory(t *testing.T) {
 	// Test security: symlink pointing to system directory should fail
 	tempDir := createTempTestDir(t, "scan-symlink-test-*")
 
@@ -713,7 +1128,7 @@ func TestScanCentralRepo_SymlinkToSystemDirectory(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_Performance(t *testing.T) {
+func TestScanRepository_Performance(t *testing.T) {
 	// Test performance with larger file sets
 	structure := make(map[string]string)
 
@@ -741,11 +1156,11 @@ func TestScanCentralRepo_Performance(t *testing.T) {
 	}
 
 	start := time.Now()
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	duration := time.Since(start)
 
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	// Should find 500 markdown files
@@ -761,11 +1176,11 @@ func TestScanCentralRepo_Performance(t *testing.T) {
 	t.Logf("Scanned %d files in %v", len(files), duration)
 }
 
-func TestScanCentralRepo_NilFileManager(t *testing.T) {
+func TestScanRepository_NilFileManager(t *testing.T) {
 	// Test error handling with nil FileManager
 	var fm *FileManager = nil
 
-	_, err := fm.ScanCentralRepo()
+	_, err := fm.ScanRepository()
 	if err == nil {
 		t.Fatal("Expected error with nil FileManager")
 	}
@@ -775,7 +1190,7 @@ func TestScanCentralRepo_NilFileManager(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_EmptyStorageDir(t *testing.T) {
+func TestScanRepository_EmptyStorageDir(t *testing.T) {
 	// Test error handling with empty storage directory configuration
 	logger, _ := logging.NewTestLogger()
 
@@ -786,7 +1201,7 @@ func TestScanCentralRepo_EmptyStorageDir(t *testing.T) {
 		storageDir: "", // Empty storage dir
 	}
 
-	_, err := fm.ScanCentralRepo()
+	_, err := fm.ScanRepository()
 	if err == nil {
 		t.Fatal("Expected error with empty storage directory")
 	}
@@ -796,7 +1211,7 @@ func TestScanCentralRepo_EmptyStorageDir(t *testing.T) {
 	}
 }
 
-func TestScanCentralRepo_ValidStorageSymlink(t *testing.T) {
+func TestScanRepository_ValidStorageSymlink(t *testing.T) {
 	// Test valid symlink within allowed paths (positive test for symlink security)
 	// Create actual storage directory within user's home or temp directory
 	homeDir, err := os.UserHomeDir()
@@ -825,9 +1240,9 @@ func TestScanCentralRepo_ValidStorageSymlink(t *testing.T) {
 		t.Fatalf("NewFileManager failed with valid symlink: %v", err)
 	}
 
-	files, err := fm.ScanCentralRepo()
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed with valid symlink: %v", err)
+		t.Fatalf("ScanRepository failed with valid symlink: %v", err)
 	}
 
 	// Should find the test markdown file
@@ -867,9 +1282,9 @@ func TestConvertToAbsolutePaths(t *testing.T) {
 	}
 
 	// Get files with relative paths
-	relativeFiles, err := fm.ScanCentralRepo()
+	relativeFiles, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	// Convert to absolute paths
@@ -970,9 +1385,9 @@ func TestConvertToAbsolutePaths_DoesNotModifyOriginal(t *testing.T) {
 	}
 
 	// Get original files
-	originalFiles, err := fm.ScanCentralRepo()
+	originalFiles, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
 	// Store original paths for comparison

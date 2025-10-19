@@ -148,6 +148,55 @@
 //   - Non-git content: Manual resolution required
 //   - Validation uses go-git library for reliable repository detection
 //
+// # Multi-Repository Support
+//
+// The package provides comprehensive multi-repository management for handling multiple
+// rule repositories simultaneously (added in multi-repository feature):
+//
+// **Repository Orchestration (multi.go):**
+//   - PrepareAllRepositories: Validates, prepares, and syncs multiple repositories in one call
+//   - ValidateAllRepositories: Structural validation with uniqueness checks (IDs and names)
+//   - Returns map[repositoryID]localPath for efficient lookup by consumers
+//   - Resilient design: Preparation failures in one repository don't affect others
+//   - Aggregated error reporting with detailed per-repository messages
+//
+// **Repository Synchronization (sync.go):**
+//   - SyncAllRepositories: Synchronizes all GitHub repositories independently
+//   - RepositorySyncResult: Detailed status tracking (Success/Failed/Skipped)
+//   - SyncStatus enum: Categorizes outcomes for proper UI display and error handling
+//   - Dirty repository detection: Skips repos with uncommitted changes to preserve work
+//   - Independent operation: Sync failures in one repo don't prevent others from syncing
+//
+// **Validation (config.go):**
+//   - ValidateRepositoryEntry: Structural validation for individual repository entries
+//   - ValidateCentralRepositoryConfig: Configuration field validation
+//   - ID format validation: Ensures "sanitized-name-timestamp" pattern
+//   - Name uniqueness: Case-insensitive duplicate detection
+//   - Comprehensive error messages for all validation failures
+//
+// Usage pattern for multi-repository setup:
+//
+//	// Prepare all repositories (validates, prepares, and syncs)
+//	pathMap, syncResults, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	if err != nil {
+//	    // Handle errors (partial results may be available in pathMap)
+//	}
+//
+//	// Use path map to access repositories
+//	for repoID, localPath := range pathMap {
+//	    fm := filemanager.NewFileManager(localPath, logger)
+//	    // Work with repository files
+//	}
+//
+//	// Review sync results for UI feedback
+//	for _, result := range syncResults {
+//	    fmt.Printf("%s: %s\n", result.RepositoryName, result.GetMessage())
+//	}
+//
+// The multi-repository layer maintains the same security and validation standards as
+// single-repository operations, with additional checks for uniqueness and consistency
+// across the repository collection.
+//
 // # Security
 //
 // All path operations leverage the existing pkg/fileops security validators to prevent:

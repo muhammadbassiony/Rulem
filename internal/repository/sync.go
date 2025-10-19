@@ -191,7 +191,7 @@ func syncSingleRepository(repo RepositoryEntry, logger *logging.AppLogger) Repos
 
 	// Perform sync operation
 	gitSource := NewGitSource(*repo.RemoteURL, repo.Branch, repo.Path)
-	_, err = gitSource.FetchUpdates(logger)
+	err = gitSource.FetchUpdates(logger)
 	if err != nil {
 		result.Status = SyncStatusFailed
 		result.Error = fmt.Errorf("fetch updates failed: %w", err)

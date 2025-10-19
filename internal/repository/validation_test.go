@@ -1,130 +1,9 @@
 package repository
 
 import (
-	"rulem/internal/logging"
 	"strings"
 	"testing"
 )
-
-// TestRepositoryEntry_IsRemote tests the IsRemote method
-func TestRepositoryEntry_IsRemote(t *testing.T) {
-	tests := []struct {
-		name     string
-		repo     RepositoryEntry
-		expected bool
-	}{
-		{
-			name: "local repository",
-			repo: RepositoryEntry{
-				Type: RepositoryTypeLocal,
-				Path: "/home/user/rules",
-			},
-			expected: false,
-		},
-		{
-			name: "github repository",
-			repo: RepositoryEntry{
-				Type:      RepositoryTypeGitHub,
-				Path:      "/home/user/cached-rules",
-				RemoteURL: stringPtr("https://github.com/user/rules.git"),
-			},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.repo.IsRemote()
-			if got != tt.expected {
-				t.Errorf("IsRemote() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
-// TestPrepareRepository_LocalSource tests preparing a local repository
-func TestPrepareRepository_LocalSource(t *testing.T) {
-	tempDir := t.TempDir()
-	logger, _ := logging.NewTestLogger()
-
-	repo := RepositoryEntry{
-		ID:        "test-repo-123",
-		Name:      "Test Repo",
-		Type:      RepositoryTypeLocal,
-		Path:      tempDir,
-		CreatedAt: 1234567890,
-	}
-
-	localPath, syncInfo, err := PrepareRepository(repo, logger)
-	if err != nil {
-		t.Fatalf("PrepareRepository failed: %v", err)
-	}
-
-	// Should return the absolute path
-	if localPath != tempDir {
-		t.Errorf("Expected path '%s', got '%s'", tempDir, localPath)
-	}
-
-	// LocalSource should not set sync flags
-	if syncInfo.Cloned || syncInfo.Updated || syncInfo.Dirty {
-		t.Errorf("LocalSource should not set sync flags, got: %+v", syncInfo)
-	}
-
-	// Should have a user-friendly message
-	if !strings.Contains(strings.ToLower(syncInfo.Message), "local") {
-		t.Errorf("Expected message about local repository, got: %q", syncInfo.Message)
-	}
-}
-
-// TestPrepareRepository_InvalidLocalPath tests error handling for invalid paths
-func TestPrepareRepository_InvalidLocalPath(t *testing.T) {
-	logger, _ := logging.NewTestLogger()
-
-	repo := RepositoryEntry{
-		ID:        "test-repo-123",
-		Name:      "Test Repo",
-		Type:      RepositoryTypeLocal,
-		Path:      "/nonexistent/directory/that/should/not/exist",
-		CreatedAt: 1234567890,
-	}
-
-	_, _, err := PrepareRepository(repo, logger)
-	if err == nil {
-		t.Fatal("Expected error for invalid local path")
-	}
-
-	// Should get an error about the directory not existing
-	if !strings.Contains(strings.ToLower(err.Error()), "does not exist") {
-		t.Errorf("Expected 'does not exist' error, got: %v", err)
-	}
-}
-
-// TestPrepareRepository_WithNilLogger tests operation with nil logger
-func TestPrepareRepository_WithNilLogger(t *testing.T) {
-	tempDir := t.TempDir()
-
-	repo := RepositoryEntry{
-		ID:        "test-repo-123",
-		Name:      "Test Repo",
-		Type:      RepositoryTypeLocal,
-		Path:      tempDir,
-		CreatedAt: 1234567890,
-	}
-
-	// Should work with nil logger (logging calls are guarded)
-	localPath, syncInfo, err := PrepareRepository(repo, nil)
-	if err != nil {
-		t.Fatalf("PrepareRepository with nil logger failed: %v", err)
-	}
-
-	if localPath != tempDir {
-		t.Errorf("Expected path '%s', got '%s'", tempDir, localPath)
-	}
-
-	if syncInfo.Message == "" {
-		t.Error("Expected sync info message even with nil logger")
-	}
-}
 
 // TestValidateRepositoryEntry_ValidEntries tests validation of valid repository entries
 func TestValidateRepositoryEntry_ValidEntries(t *testing.T) {
@@ -543,6 +422,18 @@ func TestValidateRepositoryEntry_LocalWithGitHubFields(t *testing.T) {
 			},
 			expectErr: "should not have a branch",
 		},
+		{
+			name: "local repo with last sync time",
+			repo: RepositoryEntry{
+				ID:           "test-repo-1234567890",
+				Name:         "Test Repo",
+				Type:         RepositoryTypeLocal,
+				Path:         "/tmp/test",
+				LastSyncTime: int64Ptr(1234567890),
+				CreatedAt:    1234567890,
+			},
+			expectErr: "should not have a last_sync_time",
+		},
 	}
 
 	for _, tt := range tests {
@@ -558,74 +449,115 @@ func TestValidateRepositoryEntry_LocalWithGitHubFields(t *testing.T) {
 	}
 }
 
-// TestRepositoryType_Constants tests that type constants are defined correctly
-func TestRepositoryType_Constants(t *testing.T) {
-	if RepositoryTypeLocal != "local" {
-		t.Errorf("RepositoryTypeLocal should be 'local', got: %q", RepositoryTypeLocal)
-	}
-	if RepositoryTypeGitHub != "github" {
-		t.Errorf("RepositoryTypeGitHub should be 'github', got: %q", RepositoryTypeGitHub)
-	}
-}
-
-// TestNewLocalSource tests local source creation
-func TestNewLocalSource(t *testing.T) {
-	path := "/home/user/rules"
-
-	source := NewLocalSource(path)
-
-	if source.Path != path {
-		t.Errorf("Expected Path to be %s, got %s", path, source.Path)
-	}
-}
-
-// TestNewGitSource tests git source creation
-func TestNewGitSource(t *testing.T) {
-	remoteURL := "https://github.com/user/repo.git"
-	branch := "main"
-	localPath := "/tmp/cached-repo"
-
-	source := NewGitSource(remoteURL, &branch, localPath)
-
-	if source.RemoteURL != remoteURL {
-		t.Errorf("Expected RemoteURL to be %s, got %s", remoteURL, source.RemoteURL)
-	}
-
-	if source.Branch == nil || *source.Branch != branch {
-		t.Errorf("Expected Branch to be %s, got %v", branch, source.Branch)
-	}
-
-	if source.Path != localPath {
-		t.Errorf("Expected Path to be %s, got %s", localPath, source.Path)
-	}
-}
-
-// TestNewGitSource_NilBranch tests git source creation with nil branch
-func TestNewGitSource_NilBranch(t *testing.T) {
-	remoteURL := "https://github.com/user/repo.git"
-	localPath := "/tmp/cached-repo"
-
-	source := NewGitSource(remoteURL, nil, localPath)
-
-	if source.RemoteURL != remoteURL {
-		t.Errorf("Expected RemoteURL to be %s, got %s", remoteURL, source.RemoteURL)
+// TestValidateRepositoryName tests the ValidateRepositoryName function
+func TestValidateRepositoryName(t *testing.T) {
+	tests := []struct {
+		name      string
+		repoName  string
+		wantErr   bool
+		expectErr string
+	}{
+		{
+			name:     "valid name",
+			repoName: "My Rules",
+			wantErr:  false,
+		},
+		{
+			name:      "empty name",
+			repoName:  "",
+			wantErr:   true,
+			expectErr: "cannot be empty",
+		},
+		{
+			name:      "whitespace only",
+			repoName:  "   ",
+			wantErr:   true,
+			expectErr: "cannot be empty",
+		},
+		{
+			name:      "name too long",
+			repoName:  strings.Repeat("a", 101),
+			wantErr:   true,
+			expectErr: "too long",
+		},
+		{
+			name:      "control characters",
+			repoName:  "Test\x00Repo",
+			wantErr:   true,
+			expectErr: "invalid control characters",
+		},
 	}
 
-	if source.Branch != nil {
-		t.Errorf("Expected Branch to be nil, got %v", source.Branch)
-	}
-
-	if source.Path != localPath {
-		t.Errorf("Expected Path to be %s, got %s", localPath, source.Path)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRepositoryName(tt.repoName)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tt.expectErr != "" && !strings.Contains(err.Error(), tt.expectErr) {
+					t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got: %v", err)
+				}
+			}
+		})
 	}
 }
 
-// Helper functions
+// TestValidateRepositoryPath tests the ValidateRepositoryPath function
+func TestValidateRepositoryPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		wantErr   bool
+		expectErr string
+	}{
+		{
+			name:    "valid path",
+			path:    "/home/user/rules",
+			wantErr: false,
+		},
+		{
+			name:      "empty path",
+			path:      "",
+			wantErr:   true,
+			expectErr: "cannot be empty",
+		},
+		{
+			name:      "whitespace only",
+			path:      "   ",
+			wantErr:   true,
+			expectErr: "cannot be empty",
+		},
+		{
+			name:      "null bytes",
+			path:      "/home/user\x00/rules",
+			wantErr:   true,
+			expectErr: "null bytes",
+		},
+	}
 
-func stringPtr(s string) *string {
-	return &s
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRepositoryPath(tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tt.expectErr != "" && !strings.Contains(err.Error(), tt.expectErr) {
+					t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got: %v", err)
+				}
+			}
+		})
+	}
 }
 
-func int64Ptr(i int64) *int64 {
-	return &i
-}
+// Note: Tests for ValidateAllRepositories are in multi_test.go
+// as they test multi-repository orchestration functionality

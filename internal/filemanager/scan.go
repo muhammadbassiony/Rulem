@@ -266,8 +266,7 @@ func (fm *FileManager) ConvertToAbsolutePathsCWD(items []FileItem) []FileItem {
 // first in the result list. This provides predictable, stable ordering for UI display.
 //
 // Parameters:
-//   - pathsMap: Map of repository ID to local filesystem path (from PrepareAllRepositories)
-//   - repos: List of repository entries (provides metadata and ordering)
+//   - prepared: Slice of prepared repositories with validated paths (from PrepareAllRepositories)
 //   - logger: Logger for structured logging (can be nil)
 //
 // Returns:
@@ -276,19 +275,19 @@ func (fm *FileManager) ConvertToAbsolutePathsCWD(items []FileItem) []FileItem {
 //
 // Usage:
 //
-//	pathMap, _, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
-//	files, err := filemanager.ScanAllRepositories(pathMap, cfg.Repositories, logger)
+//	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	files, err := filemanager.ScanAllRepositories(prepared, logger)
 //	for _, file := range files {
 //	    fmt.Printf("%s from %s (%s)\n", file.Name, file.RepositoryName, file.RepositoryType)
 //	}
 //
-// Security: Uses secure directory scanning with protection against path traversal.
-func ScanAllRepositories(pathsMap map[string]string, repos []repository.RepositoryEntry, logger *logging.AppLogger) ([]FileItem, error) {
+// Security: Paths are pre-validated by PrepareAllRepositories, so this function can safely assume valid paths.
+func ScanAllRepositories(prepared []repository.PreparedRepository, logger *logging.AppLogger) ([]FileItem, error) {
 	if logger != nil {
-		logger.Info("Starting multi-repository scan", "repository_count", len(repos))
+		logger.Info("Starting multi-repository scan", "repository_count", len(prepared))
 	}
 
-	if len(repos) == 0 {
+	if len(prepared) == 0 {
 		if logger != nil {
 			logger.Debug("No repositories to scan")
 		}
@@ -299,36 +298,27 @@ func ScanAllRepositories(pathsMap map[string]string, repos []repository.Reposito
 	var scanErrors []string
 
 	// Process repositories in order to maintain predictable file ordering
-	for _, repo := range repos {
-		localPath, exists := pathsMap[repo.ID]
-		if !exists {
-			errorMsg := fmt.Sprintf("repository %s (%s): path not found in paths map", repo.ID, repo.Name)
-			scanErrors = append(scanErrors, errorMsg)
-			if logger != nil {
-				logger.Warn("Repository path not found", "repository_id", repo.ID, "repository_name", repo.Name)
-			}
-			continue
-		}
-
+	for _, prep := range prepared {
 		if logger != nil {
 			logger.Info("Scanning repository",
-				"repository_id", repo.ID,
-				"repository_name", repo.Name,
-				"repository_type", string(repo.Type),
-				"path", localPath,
+				"repository_id", prep.ID(),
+				"repository_name", prep.Name(),
+				"repository_type", string(prep.Type()),
+				"path", prep.LocalPath,
 			)
 		}
 
 		// Determine repository type for metadata
-		repoType := string(repo.Type)
+		repoType := string(prep.Type())
 
 		// Create a temporary FileManager for this repository
-		fm, err := NewFileManager(localPath, logger)
+		// Paths are already validated by PrepareAllRepositories
+		fm, err := NewFileManager(prep.LocalPath, logger)
 		if err != nil {
-			errorMsg := fmt.Sprintf("repository %s (%s): failed to create file manager: %v", repo.ID, repo.Name, err)
+			errorMsg := fmt.Sprintf("repository %s (%s): failed to create file manager: %v", prep.ID(), prep.Name(), err)
 			scanErrors = append(scanErrors, errorMsg)
 			if logger != nil {
-				logger.Error("Failed to create file manager", "repository_id", repo.ID, "error", err)
+				logger.Error("Failed to create file manager", "repository_id", prep.ID(), "error", err)
 			}
 			continue
 		}
@@ -336,18 +326,18 @@ func ScanAllRepositories(pathsMap map[string]string, repos []repository.Reposito
 		// Scan the repository
 		files, err := fm.ScanRepository()
 		if err != nil {
-			errorMsg := fmt.Sprintf("repository %s (%s): scan failed: %v", repo.ID, repo.Name, err)
+			errorMsg := fmt.Sprintf("repository %s (%s): scan failed: %v", prep.ID(), prep.Name(), err)
 			scanErrors = append(scanErrors, errorMsg)
 			if logger != nil {
-				logger.Error("Repository scan failed", "repository_id", repo.ID, "error", err)
+				logger.Error("Repository scan failed", "repository_id", prep.ID(), "error", err)
 			}
 			continue
 		}
 
 		// Tag each file with repository metadata
 		for i := range files {
-			files[i].RepositoryID = repo.ID
-			files[i].RepositoryName = repo.Name
+			files[i].RepositoryID = prep.ID()
+			files[i].RepositoryName = prep.Name()
 			files[i].RepositoryType = repoType
 		}
 
@@ -355,8 +345,8 @@ func ScanAllRepositories(pathsMap map[string]string, repos []repository.Reposito
 
 		if logger != nil {
 			logger.Info("Repository scan completed",
-				"repository_id", repo.ID,
-				"repository_name", repo.Name,
+				"repository_id", prep.ID(),
+				"repository_name", prep.Name(),
 				"file_count", len(files),
 			)
 		}
@@ -364,7 +354,7 @@ func ScanAllRepositories(pathsMap map[string]string, repos []repository.Reposito
 
 	if logger != nil {
 		logger.Info("Multi-repository scan completed",
-			"total_repositories", len(repos),
+			"total_repositories", len(prepared),
 			"total_files", len(allFiles),
 			"errors", len(scanErrors),
 		)

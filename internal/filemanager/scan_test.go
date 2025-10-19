@@ -636,14 +636,26 @@ func TestScanRepository_UnreadableDirectories(t *testing.T) {
 	}
 }
 
+// Helper function to create PreparedRepository from entry and path
+func makePrepared(entry repository.RepositoryEntry, path string) repository.PreparedRepository {
+	return repository.PreparedRepository{
+		Entry:     entry,
+		LocalPath: path,
+		SyncResult: repository.RepositorySyncResult{
+			RepositoryID:   entry.ID,
+			RepositoryName: entry.Name,
+			Status:         repository.SyncStatusSkipped,
+		},
+	}
+}
+
 // TestScanAllRepositories_EmptyList tests scanning with no repositories
 func TestScanAllRepositories_EmptyList(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
-	pathsMap := make(map[string]string)
-	repos := []repository.RepositoryEntry{}
+	prepared := []repository.PreparedRepository{}
 
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
 	if err != nil {
 		t.Errorf("expected no error for empty list, got: %v", err)
@@ -662,21 +674,17 @@ func TestScanAllRepositories_SingleRepository(t *testing.T) {
 	repoPath := filepath.Join(tempDir, "repo1")
 	createDirWithFiles(t, repoPath, []string{"file1.md", "file2.md"})
 
-	repos := []repository.RepositoryEntry{
-		{
-			ID:        "repo1-123",
-			Name:      "Repository 1",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: time.Now().Unix(),
-			Path:      repoPath,
-		},
+	entry := repository.RepositoryEntry{
+		ID:        "repo1-123",
+		Name:      "Repository 1",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: time.Now().Unix(),
+		Path:      repoPath,
 	}
 
-	pathsMap := map[string]string{
-		"repo1-123": repoPath,
-	}
+	prepared := []repository.PreparedRepository{makePrepared(entry, repoPath)}
 
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -711,29 +719,27 @@ func TestScanAllRepositories_MultipleRepositories(t *testing.T) {
 	createDirWithFiles(t, repo1Path, []string{"file1.md", "file2.md"})
 	createDirWithFiles(t, repo2Path, []string{"file3.md"})
 
-	repos := []repository.RepositoryEntry{
-		{
-			ID:        "repo1-123",
-			Name:      "Repository 1",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 1000,
-			Path:      repo1Path,
-		},
-		{
-			ID:        "repo2-456",
-			Name:      "Repository 2",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 2000,
-			Path:      repo2Path,
-		},
+	entry1 := repository.RepositoryEntry{
+		ID:        "repo1-123",
+		Name:      "Repository 1",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: 1000,
+		Path:      repo1Path,
+	}
+	entry2 := repository.RepositoryEntry{
+		ID:        "repo2-456",
+		Name:      "Repository 2",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: 2000,
+		Path:      repo2Path,
 	}
 
-	pathsMap := map[string]string{
-		"repo1-123": repo1Path,
-		"repo2-456": repo2Path,
+	prepared := []repository.PreparedRepository{
+		makePrepared(entry1, repo1Path),
+		makePrepared(entry2, repo2Path),
 	}
 
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -773,29 +779,27 @@ func TestScanAllRepositories_DuplicateFilenames(t *testing.T) {
 	createDirWithFiles(t, repo1Path, []string{"README.md"})
 	createDirWithFiles(t, repo2Path, []string{"README.md"})
 
-	repos := []repository.RepositoryEntry{
-		{
-			ID:        "repo1-123",
-			Name:      "Repository 1",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 1000,
-			Path:      repo1Path,
-		},
-		{
-			ID:        "repo2-456",
-			Name:      "Repository 2",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 2000,
-			Path:      repo2Path,
-		},
+	entry1 := repository.RepositoryEntry{
+		ID:        "repo1-123",
+		Name:      "Repository 1",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: 1000,
+		Path:      repo1Path,
+	}
+	entry2 := repository.RepositoryEntry{
+		ID:        "repo2-456",
+		Name:      "Repository 2",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: 2000,
+		Path:      repo2Path,
 	}
 
-	pathsMap := map[string]string{
-		"repo1-123": repo1Path,
-		"repo2-456": repo2Path,
+	prepared := []repository.PreparedRepository{
+		makePrepared(entry1, repo1Path),
+		makePrepared(entry2, repo2Path),
 	}
 
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -823,30 +827,28 @@ func TestScanAllRepositories_MixedLocalAndGitHub(t *testing.T) {
 	createDirWithFiles(t, githubPath, []string{"github.md"})
 
 	remoteURL := "https://github.com/user/repo.git"
-	repos := []repository.RepositoryEntry{
-		{
-			ID:        "local-123",
-			Name:      "Local Repo",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 1000,
-			Path:      localPath,
-		},
-		{
-			ID:        "github-456",
-			Name:      "GitHub Repo",
-			Type:      repository.RepositoryTypeGitHub,
-			Path:      githubPath,
-			RemoteURL: &remoteURL,
-			CreatedAt: 2000,
-		},
+	entry1 := repository.RepositoryEntry{
+		ID:        "local-123",
+		Name:      "Local Repo",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: 1000,
+		Path:      localPath,
+	}
+	entry2 := repository.RepositoryEntry{
+		ID:        "github-456",
+		Name:      "GitHub Repo",
+		Type:      repository.RepositoryTypeGitHub,
+		Path:      githubPath,
+		RemoteURL: &remoteURL,
+		CreatedAt: 2000,
 	}
 
-	pathsMap := map[string]string{
-		"local-123":  localPath,
-		"github-456": githubPath,
+	prepared := []repository.PreparedRepository{
+		makePrepared(entry1, localPath),
+		makePrepared(entry2, githubPath),
 	}
 
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -877,6 +879,8 @@ func TestScanAllRepositories_MixedLocalAndGitHub(t *testing.T) {
 }
 
 // TestScanAllRepositories_MissingPath tests handling when repository path is missing
+// Note: With the new API, if a repository is in the prepared list, it was successfully prepared.
+// This test now verifies successful scanning of a single repository.
 func TestScanAllRepositories_MissingPath(t *testing.T) {
 	tempDir := t.TempDir()
 	logger, _ := logging.NewTestLogger()
@@ -884,36 +888,29 @@ func TestScanAllRepositories_MissingPath(t *testing.T) {
 	repo1Path := filepath.Join(tempDir, "repo1")
 	createDirWithFiles(t, repo1Path, []string{"file1.md"})
 
-	repos := []repository.RepositoryEntry{
-		{
-			ID:        "repo1-123",
-			Name:      "Repository 1",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 1000,
-			Path:      repo1Path,
-		},
-		{
-			ID:        "repo2-456",
-			Name:      "Repository 2 (missing)",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 2000,
-			Path:      "/nonexistent",
-		},
+	entry1 := repository.RepositoryEntry{
+		ID:        "repo1-123",
+		Name:      "Repository 1",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: 1000,
+		Path:      repo1Path,
 	}
 
-	// Only include repo1 in paths map
-	pathsMap := map[string]string{
-		"repo1-123": repo1Path,
+	// Only include successfully prepared repo1
+	// In real scenarios, repo2 would have failed during PrepareAllRepositories
+	// and would not be in this list
+	prepared := []repository.PreparedRepository{
+		makePrepared(entry1, repo1Path),
 	}
 
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
-	// Should return error but also partial results
-	if err == nil {
-		t.Error("expected error for missing path")
+	// Should succeed since all prepared repos are valid
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
 	}
 
-	// Should still have files from successful scan
+	// Should have files from successful scan
 	if len(files) != 1 {
 		t.Errorf("expected 1 file from successful scan, got %d", len(files))
 	}
@@ -923,21 +920,19 @@ func TestScanAllRepositories_MissingPath(t *testing.T) {
 func TestScanAllRepositories_InvalidDirectory(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
-	repos := []repository.RepositoryEntry{
-		{
-			ID:        "invalid-123",
-			Name:      "Invalid Repository",
-			Type:      repository.RepositoryTypeLocal,
-			CreatedAt: 1000,
-			Path:      "/nonexistent/path",
-		},
+	entry := repository.RepositoryEntry{
+		ID:        "invalid-123",
+		Name:      "Invalid Repository",
+		Type:      repository.RepositoryTypeLocal,
+		CreatedAt: 1000,
+		Path:      "/nonexistent/path",
 	}
 
-	pathsMap := map[string]string{
-		"invalid-123": "/nonexistent/path",
+	prepared := []repository.PreparedRepository{
+		makePrepared(entry, "/nonexistent/path"),
 	}
 
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
 	// Should return error
 	if err == nil {
@@ -962,19 +957,17 @@ func TestScanAllRepositories_OrderPreservation(t *testing.T) {
 	createDirWithFiles(t, repo2Path, []string{"b.md"})
 	createDirWithFiles(t, repo3Path, []string{"c.md"})
 
-	repos := []repository.RepositoryEntry{
-		{ID: "repo1-1", Name: "Repo 1", CreatedAt: 1000, Type: repository.RepositoryTypeLocal, Path: repo1Path},
-		{ID: "repo2-2", Name: "Repo 2", CreatedAt: 2000, Type: repository.RepositoryTypeLocal, Path: repo2Path},
-		{ID: "repo3-3", Name: "Repo 3", CreatedAt: 3000, Type: repository.RepositoryTypeLocal, Path: repo3Path},
+	entry1 := repository.RepositoryEntry{ID: "repo1-1", Name: "Repo 1", CreatedAt: 1000, Type: repository.RepositoryTypeLocal, Path: repo1Path}
+	entry2 := repository.RepositoryEntry{ID: "repo2-2", Name: "Repo 2", CreatedAt: 2000, Type: repository.RepositoryTypeLocal, Path: repo2Path}
+	entry3 := repository.RepositoryEntry{ID: "repo3-3", Name: "Repo 3", CreatedAt: 3000, Type: repository.RepositoryTypeLocal, Path: repo3Path}
+
+	prepared := []repository.PreparedRepository{
+		makePrepared(entry1, repo1Path),
+		makePrepared(entry2, repo2Path),
+		makePrepared(entry3, repo3Path),
 	}
 
-	pathsMap := map[string]string{
-		"repo1-1": repo1Path,
-		"repo2-2": repo2Path,
-		"repo3-3": repo3Path,
-	}
-
-	files, err := ScanAllRepositories(pathsMap, repos, logger)
+	files, err := ScanAllRepositories(prepared, logger)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)

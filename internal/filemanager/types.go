@@ -8,8 +8,8 @@ import (
 // File item that is compatible with bubble's List model
 // Includes repository metadata for multi-repository support
 type FileItem struct {
-	Name string
-	Path string
+	Name string // Base filename for display
+	Path string // Absolute filesystem path (validated during scan)
 
 	// Repository metadata (for multi-repository support)
 	RepositoryID   string // Links to RepositoryEntry.ID (e.g., "personal-rules-1728756432")

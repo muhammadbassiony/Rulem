@@ -20,7 +20,7 @@ func TestGitSource_Prepare_InitialClone_Success(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	gotPath, info, err := gs.Prepare(logger)
+	gotPath, err := gs.Prepare(logger)
 
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for initial clone: %v", err)
@@ -31,22 +31,10 @@ func TestGitSource_Prepare_InitialClone_Success(t *testing.T) {
 		t.Errorf("Prepare() returned path = %s, want %s", gotPath, clonePath)
 	}
 
-	// Should indicate a clone occurred
-	if !info.Cloned {
-		t.Errorf("Prepare() expected Cloned=true for initial clone, got %+v", info)
-	}
-
-	// Should not indicate update or dirty state on fresh clone
-	if info.Updated {
-		t.Errorf("Prepare() unexpected Updated=true for initial clone, got %+v", info)
-	}
-	if info.Dirty {
-		t.Errorf("Prepare() unexpected Dirty=true for initial clone, got %+v", info)
-	}
-
-	// Should have a useful message
-	if info.Message == "" {
-		t.Errorf("Prepare() expected non-empty message for clone operation")
+	// Verify the repository was cloned by checking if it exists and is a git repo
+	_, err = git.PlainOpen(clonePath)
+	if err != nil {
+		t.Errorf("Prepare() should have cloned repository at %s, got error: %v", clonePath, err)
 	}
 
 	// Directory should exist and contain git repository
@@ -69,7 +57,7 @@ func TestGitSource_Prepare_InitialClone_WithBranch(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	gs := NewGitSource(remoteURL, &branch, clonePath)
-	gotPath, info, err := gs.Prepare(logger)
+	gotPath, err := gs.Prepare(logger)
 
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for branch clone: %v", err)
@@ -79,8 +67,10 @@ func TestGitSource_Prepare_InitialClone_WithBranch(t *testing.T) {
 		t.Errorf("Prepare() returned path = %s, want %s", gotPath, clonePath)
 	}
 
-	if !info.Cloned {
-		t.Errorf("Prepare() expected Cloned=true for branch clone, got %+v", info)
+	// Verify the repository was cloned
+	_, err = git.PlainOpen(clonePath)
+	if err != nil {
+		t.Errorf("Prepare() should have cloned repository at %s, got error: %v", clonePath, err)
 	}
 
 	// Directory should exist and contain git repository
@@ -98,33 +88,27 @@ func TestGitSource_Prepare_FetchRefresh_Success(t *testing.T) {
 
 	// First clone should succeed
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, firstInfo, err := gs.Prepare(logger)
+	_, err := gs.Prepare(logger)
 	if err != nil {
 		t.Fatalf("First Prepare() failed: %v", err)
 	}
-	if !firstInfo.Cloned {
-		t.Fatalf("First Prepare() should have cloned, got %+v", firstInfo)
+
+	// Verify repository was cloned
+	_, err = git.PlainOpen(clonePath)
+	if err != nil {
+		t.Fatalf("First Prepare() should have cloned repository at %s, got error: %v", clonePath, err)
 	}
 
 	// Second prepare should fetch updates
-	_, secondInfo, err := gs.Prepare(logger)
+	_, err = gs.Prepare(logger)
 	if err != nil {
 		t.Fatalf("Second Prepare() failed: %v", err)
 	}
 
-	// Should not clone again
-	if secondInfo.Cloned {
-		t.Errorf("Second Prepare() unexpected Cloned=true, should fetch instead, got %+v", secondInfo)
-	}
-
-	// Should indicate update attempt (may or may not have actual updates)
-	if !secondInfo.Updated {
-		t.Errorf("Second Prepare() expected Updated=true for fetch operation, got %+v", secondInfo)
-	}
-
-	// Should not be dirty on clean fetch
-	if secondInfo.Dirty {
-		t.Errorf("Second Prepare() unexpected Dirty=true for clean fetch, got %+v", secondInfo)
+	// Repository should still exist and be a git repo after second prepare
+	_, err = git.PlainOpen(clonePath)
+	if err != nil {
+		t.Errorf("Second Prepare() should maintain git repository at %s, got error: %v", clonePath, err)
 	}
 }
 
@@ -139,7 +123,7 @@ func TestGitSource_Prepare_PATAuth_Required(t *testing.T) {
 	gs := NewGitSource(remoteURL, nil, clonePath)
 
 	// Without PAT configured, should fail with auth error
-	_, _, err := gs.Prepare(logger)
+	_, err := gs.Prepare(logger)
 	if err == nil {
 		t.Fatalf("Prepare() should fail without PAT for private repo")
 	}
@@ -165,7 +149,7 @@ func TestGitSource_Prepare_DirtyWorkingTree_Message(t *testing.T) {
 
 	// First, clone the repository
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, _, err := gs.Prepare(logger)
+	_, err := gs.Prepare(logger)
 	if err != nil {
 		t.Fatalf("Initial clone failed: %v", err)
 	}
@@ -176,26 +160,20 @@ func TestGitSource_Prepare_DirtyWorkingTree_Message(t *testing.T) {
 		t.Fatalf("Failed to create dirty file: %v", err)
 	}
 
-	// Second prepare should detect dirty state
-	_, info, err := gs.Prepare(logger)
+	// Second prepare should succeed even with dirty state
+	// (GitSource doesn't fail on dirty working tree, it just skips updates)
+	_, err = gs.Prepare(logger)
 	if err != nil {
 		t.Fatalf("Prepare() with dirty tree failed: %v", err)
 	}
 
-	// Should detect dirty working tree
-	if !info.Dirty {
-		t.Errorf("Prepare() should detect dirty working tree, got %+v", info)
+	// Verify dirty state can be detected
+	isDirty, err := CheckGithubRepositoryStatus(clonePath)
+	if err != nil {
+		t.Fatalf("CheckGithubRepositoryStatus() failed: %v", err)
 	}
-
-	// Should provide user guidance without data loss
-	if info.Message == "" {
-		t.Errorf("Prepare() should provide message for dirty working tree")
-	}
-
-	// Message should mention cleaning/committing
-	msgLower := strings.ToLower(info.Message)
-	if !strings.Contains(msgLower, "clean") && !strings.Contains(msgLower, "commit") && !strings.Contains(msgLower, "changes") {
-		t.Errorf("Prepare() message should mention cleaning/committing, got: %q", info.Message)
+	if !isDirty {
+		t.Errorf("CheckGithubRepositoryStatus() should detect dirty working tree")
 	}
 
 	// Dirty file should still exist (no data loss)
@@ -231,7 +209,7 @@ func TestGitSource_Prepare_InvalidURL(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			gs := NewGitSource(tc.remoteURL, nil, clonePath)
-			_, _, err := gs.Prepare(logger)
+			_, err := gs.Prepare(logger)
 
 			if err == nil {
 				t.Errorf("Prepare() should fail for invalid URL: %s", tc.remoteURL)
@@ -262,7 +240,7 @@ func TestGitSource_Prepare_DirectoryConflict(t *testing.T) {
 	}
 
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, _, err := gs.Prepare(logger)
+	_, err := gs.Prepare(logger)
 
 	if err == nil {
 		t.Fatalf("Prepare() should fail for directory conflict")
@@ -286,7 +264,7 @@ func TestGitSource_Prepare_EmptyPath_Error(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	gs := NewGitSource(remoteURL, nil, "")
-	_, _, err := gs.Prepare(logger)
+	_, err := gs.Prepare(logger)
 
 	if err == nil {
 		t.Fatalf("Prepare() should fail for empty clone path")
@@ -315,7 +293,7 @@ func TestGitSource_Prepare_PATExpired_Error(t *testing.T) {
 	_ = credMgr.StoreGitHubToken(invalidToken)
 
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, _, err := gs.Prepare(logger)
+	_, err := gs.Prepare(logger)
 
 	if err == nil {
 		t.Fatalf("Prepare() should fail with expired/invalid PAT")
@@ -963,7 +941,7 @@ func TestCheckRepositoryStatus(t *testing.T) {
 		remoteURL := "https://github.com/octocat/Hello-World.git"
 
 		gs := NewGitSource(remoteURL, nil, clonePath)
-		_, _, err := gs.Prepare(logger)
+		_, err := gs.Prepare(logger)
 		if err != nil {
 			t.Skipf("Cannot clone repository for testing (network issue?): %v", err)
 		}
@@ -986,7 +964,7 @@ func TestCheckRepositoryStatus(t *testing.T) {
 		remoteURL := "https://github.com/octocat/Hello-World.git"
 
 		gs := NewGitSource(remoteURL, nil, clonePath)
-		_, _, err := gs.Prepare(logger)
+		_, err := gs.Prepare(logger)
 		if err != nil {
 			t.Skipf("Cannot clone repository for testing (network issue?): %v", err)
 		}

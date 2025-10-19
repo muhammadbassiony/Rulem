@@ -544,12 +544,9 @@ func (m *SetupModel) performConfigCreation() error {
 		entry := repository.RepositoryEntry{
 			ID:        config.GenerateRepositoryID(repoName, timestamp),
 			Name:      repoName,
+			Type:      repository.RepositoryTypeLocal,
 			CreatedAt: timestamp,
-			Central: repository.CentralRepositoryConfig{
-				Path:      m.StorageDir,
-				RemoteURL: nil,
-				Branch:    nil,
-			},
+			Path:      m.StorageDir,
 		}
 
 		// Assign to Repositories array
@@ -581,16 +578,14 @@ func (m *SetupModel) performConfigCreation() error {
 	entry := repository.RepositoryEntry{
 		ID:        config.GenerateRepositoryID(gitInfo.Repo, timestamp),
 		Name:      gitInfo.Repo,
+		Type:      repository.RepositoryTypeGitHub,
 		CreatedAt: timestamp,
-		Central: repository.CentralRepositoryConfig{
-			Path:      m.GitHubPath,
-			RemoteURL: &m.GitHubURL,
-		},
+		Path:      m.GitHubPath,
+		RemoteURL: &m.GitHubURL,
 	}
 
-	// Set branch if provided
 	if m.GitHubBranch != "" {
-		entry.Central.Branch = &m.GitHubBranch
+		entry.Branch = &m.GitHubBranch
 	}
 
 	// Assign to Repositories array

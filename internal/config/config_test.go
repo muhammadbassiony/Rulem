@@ -58,10 +58,9 @@ func TestRepositoryEntryValidation(t *testing.T) {
 			entry: repository.RepositoryEntry{
 				ID:        "personal-rules-1728756432",
 				Name:      "Personal Rules",
+				Type:      repository.RepositoryTypeLocal,
 				CreatedAt: 1728756432,
-				Central: repository.CentralRepositoryConfig{
-					Path: "/tmp/rules",
-				},
+				Path:      "/tmp/rules",
 			},
 			wantErr: false,
 		},
@@ -70,10 +69,9 @@ func TestRepositoryEntryValidation(t *testing.T) {
 			entry: repository.RepositoryEntry{
 				ID:        "work-repo-1728756500",
 				Name:      "Work Repo",
+				Type:      repository.RepositoryTypeLocal,
 				CreatedAt: 1728756500,
-				Central: repository.CentralRepositoryConfig{
-					Path: "/tmp/work-rules",
-				},
+				Path:      "/tmp/work-rules",
 			},
 			wantErr: false,
 		},
@@ -82,10 +80,9 @@ func TestRepositoryEntryValidation(t *testing.T) {
 			entry: repository.RepositoryEntry{
 				ID:        "personal-rules",
 				Name:      "Personal Rules",
+				Type:      repository.RepositoryTypeLocal,
 				CreatedAt: 1728756432,
-				Central: repository.CentralRepositoryConfig{
-					Path: "/tmp/rules",
-				},
+				Path:      "/tmp/rules",
 			},
 			wantErr: true,
 			errMsg:  "invalid ID format",
@@ -95,10 +92,9 @@ func TestRepositoryEntryValidation(t *testing.T) {
 			entry: repository.RepositoryEntry{
 				ID:        "test-1728756432",
 				Name:      "",
+				Type:      repository.RepositoryTypeLocal,
 				CreatedAt: 1728756432,
-				Central: repository.CentralRepositoryConfig{
-					Path: "/tmp/rules",
-				},
+				Path:      "/tmp/rules",
 			},
 			wantErr: true,
 			errMsg:  "name must be non-empty",
@@ -140,18 +136,16 @@ func TestConfigWithMultipleRepositories(t *testing.T) {
 			{
 				ID:        "personal-rules-1728756432",
 				Name:      "Personal Rules",
+				Type:      repository.RepositoryTypeLocal,
 				CreatedAt: 1728756432,
-				Central: repository.CentralRepositoryConfig{
-					Path: "/tmp/personal-rules",
-				},
+				Path:      "/tmp/personal-rules",
 			},
 			{
 				ID:        "work-repo-1728756500",
 				Name:      "Work Repo",
+				Type:      repository.RepositoryTypeLocal,
 				CreatedAt: 1728756500,
-				Central: repository.CentralRepositoryConfig{
-					Path: "/tmp/work-rules",
-				},
+				Path:      "/tmp/work-rules",
 			},
 		},
 	}

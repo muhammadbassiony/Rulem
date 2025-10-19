@@ -9,7 +9,17 @@ import (
 )
 
 func createTestConfigWithPath(path string) *config.Config {
-	return &config.Config{Central: repository.CentralRepositoryConfig{Path: path}}
+	return &config.Config{
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "test-repo-123456",
+				Name:      "Test Repository",
+				Type:      repository.RepositoryTypeLocal,
+				CreatedAt: 1234567890,
+				Path:      path,
+			},
+		},
+	}
 }
 
 func TestNewMainModel(t *testing.T) {

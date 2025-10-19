@@ -887,11 +887,14 @@ func TestLocalRepositorySetupCreatesCorrectRepositoryEntry(t *testing.T) {
 	if repo.CreatedAt == 0 {
 		t.Error("expected non-zero CreatedAt timestamp")
 	}
-	if repo.Central.Path != model.StorageDir {
-		t.Errorf("expected path %q, got %q", model.StorageDir, repo.Central.Path)
+	if repo.Path != model.StorageDir {
+		t.Errorf("expected path %q, got %q", model.StorageDir, repo.Path)
 	}
-	if repo.Central.RemoteURL != nil {
-		t.Error("expected nil RemoteURL for local repository")
+	if repo.Type != repository.RepositoryTypeLocal {
+		t.Errorf("expected type %q, got %q", repository.RepositoryTypeLocal, repo.Type)
+	}
+	if repo.RemoteURL != nil {
+		t.Errorf("expected RemoteURL to be nil for local repo, got %v", repo.RemoteURL)
 	}
 }
 
@@ -935,14 +938,17 @@ func TestGitHubRepositorySetupCreatesCorrectRepositoryEntry(t *testing.T) {
 	if repo.CreatedAt == 0 {
 		t.Error("expected non-zero CreatedAt timestamp")
 	}
-	if repo.Central.Path != model.GitHubPath {
-		t.Errorf("expected path %q, got %q", model.GitHubPath, repo.Central.Path)
+	if repo.Path != model.GitHubPath {
+		t.Errorf("expected path %q, got %q", model.GitHubPath, repo.Path)
 	}
-	if repo.Central.RemoteURL == nil || *repo.Central.RemoteURL != model.GitHubURL {
-		t.Errorf("expected RemoteURL %q, got %v", model.GitHubURL, repo.Central.RemoteURL)
+	if repo.Type != repository.RepositoryTypeGitHub {
+		t.Errorf("expected type %q, got %q", repository.RepositoryTypeGitHub, repo.Type)
 	}
-	if repo.Central.Branch == nil || *repo.Central.Branch != model.GitHubBranch {
-		t.Errorf("expected branch %q, got %v", model.GitHubBranch, repo.Central.Branch)
+	if repo.RemoteURL == nil || *repo.RemoteURL != model.GitHubURL {
+		t.Errorf("expected RemoteURL %q, got %v", model.GitHubURL, repo.RemoteURL)
+	}
+	if repo.Branch == nil || *repo.Branch != model.GitHubBranch {
+		t.Errorf("expected branch %q, got %v", model.GitHubBranch, repo.Branch)
 	}
 }
 
@@ -1111,10 +1117,10 @@ func TestGitHubBranchOptional(t *testing.T) {
 		}
 
 		repo := cfg.Repositories[0]
-		if repo.Central.Branch == nil {
+		if repo.Branch == nil {
 			t.Error("expected branch to be set")
-		} else if *repo.Central.Branch != "develop" {
-			t.Errorf("expected branch 'develop', got %q", *repo.Central.Branch)
+		} else if *repo.Branch != "develop" {
+			t.Errorf("expected branch 'develop', got %q", *repo.Branch)
 		}
 	})
 
@@ -1140,8 +1146,8 @@ func TestGitHubBranchOptional(t *testing.T) {
 		}
 
 		repo := cfg.Repositories[0]
-		if repo.Central.Branch != nil {
-			t.Errorf("expected branch to be nil, got %v", repo.Central.Branch)
+		if repo.Branch != nil {
+			t.Errorf("expected branch to be nil, got %v", repo.Branch)
 		}
 	})
 }

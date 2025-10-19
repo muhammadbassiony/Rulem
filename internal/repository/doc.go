@@ -1,28 +1,55 @@
 // Package repository provides abstractions for resolving central rule sources to local filesystem paths.
 //
-// This package implements the repository abstraction layer described in the GitHub-backed central repo
-// specification. It handles both local directory sources and remote Git repository sources, providing
+// This package implements the repository abstraction layer for multi-repository support.
+// It handles both local directory sources and remote Git repository sources, providing
 // a unified interface for accessing rule files regardless of their origin.
+//
+// # Package Organization
+//
+// The package is organized into logical groups:
+//
+// Core Types & Interfaces (types.go):
+//   - Source: Interface for repository preparation (LocalSource, GitSource)
+//   - RepositoryEntry: Domain entity representing a configured repository
+//   - RepositoryType: Enum for repository types (local, github)
+//   - PreparedRepository: Bundles repository entry, local path, and sync results
+//
+// Implementations (local.go, git.go, credentials.go):
+//   - LocalSource: Validates existing local directories
+//   - GitSource: Handles Git clone/sync operations with authentication
+//   - CredentialManager: Secure GitHub PAT management via OS credential store
+//
+// Operations (preparation.go, validation.go, sync.go):
+//   - PrepareRepository: Prepares a single repository for use
+//   - PrepareAllRepositories: Orchestrates multi-repository preparation
+//   - ValidateRepositoryEntry: Validates repository configuration
+//   - SyncAllRepositories: Synchronizes all GitHub repositories
+//
+// Utilities (defaults.go, setup.go):
+//   - GetDefaultStorageDir: Returns default repository storage location
+//   - EnsureLocalStorageDirectory: Creates and validates directories for config setup
 //
 // # Architecture
 //
-// The package defines a clean, simple architecture for repository management:
+// The package provides a clean API for repository management:
 //
-//   - CentralRepositoryConfig: Configuration struct for both local and remote repositories
-//     Contains Path, RemoteURL, Branch, and LastSyncTime fields with IsRemote() method
-//   - PrepareRepository(config, logger): Creates appropriate Source and prepares it
-//     One-line solution for most use cases: get config, return ready-to-use local path
-//   - Source interface: Prepare(logger) (localPath, SyncInfo, error)
+//   - RepositoryEntry: Configuration for each repository (ID, name, type, path, etc.)
+//   - PrepareRepository(repo, logger): Prepares single repository, returns local path
+//   - PrepareAllRepositories(repos, logger): Prepares all repositories, returns []PreparedRepository
+//   - Source interface: Prepare(logger) (localPath, error)
 //     LocalSource validates existing directories, GitSource handles clone/sync operations
-//   - SyncInfo struct: Reports cloned/updated/dirty status with user-friendly messages
 //
-// This eliminates the need for separate startup packages and provides a unified API:
+// Usage pattern for multi-repository setup:
 //
-//	// Simple usage pattern for all components:
-//	localPath, syncInfo, err := repository.PrepareRepository(config.Central, logger)
-//	if err != nil { /* handle error */ }
-//	// Use syncInfo.Message for UI feedback
-//	fm := filemanager.NewFileManager(localPath, logger)
+//	// Prepare all repositories (validates, prepares, and syncs)
+//	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	if err != nil { /* handle errors */ }
+//
+//	// Access prepared repositories
+//	for _, prep := range prepared {
+//	    fm := filemanager.NewFileManager(prep.LocalPath, logger)
+//	    // Work with repository files
+//	}
 //
 // # Git Repository Integration
 //
@@ -52,57 +79,79 @@
 //   - Offline support: Network failures allow continued operation with cached repositories
 //   - Recovery guidance: Clear instructions for resolving common issues
 //
-// LocalSource behavior:
+// Source Implementations:
+//
+// LocalSource (local.go):
 //   - Validates non-empty path, expands "~/" and cleans it
-//   - Enforces security and suitability using fileops.ValidateStoragePath
-//   - Requires the directory to already exist and be a directory (no auto-create)
-//   - Performs no network access; Message typically "Using local repository"
+//   - Enforces security via fileops.ValidateStoragePath (prevents traversal, system dirs)
+//   - Requires the directory to already exist (no auto-create during preparation)
 //   - Returns the absolute path for FileManager consumption
+//   - No network operations performed
 //
-// All sources resolve to a local filesystem path that can be used by the FileManager for
-// consistent file operations, maintaining the existing public API contracts.
+// GitSource (git.go):
+//   - Clones repository if not present (shallow clone for performance)
+//   - Updates repository if already cloned and clean
+//   - Detects uncommitted changes and skips updates to preserve work
+//   - Uses CredentialManager for secure GitHub PAT authentication
+//   - Returns the absolute path to the cloned repository
 //
-// # Local Storage Directory Management
+// All sources resolve to a local filesystem path for use by FileManager.
 //
-// The package provides distinct functions for different local storage scenarios:
+// # Directory Management
 //
-//   - EnsureLocalStorageDirectory: Creates and validates local directories during config setup
-//     Used by config.CreateNewConfig and config.UpdateCentralPath to ensure user-specified
-//     directories exist and are writable before saving configuration.
-//   - LocalSource.Prepare: Validates existing directories at runtime for FileManager use
-//     Used during startup/refresh to validate that configured local paths are ready for use.
+// The package provides distinct functions for different scenarios:
+//
+//   - EnsureLocalStorageDirectory (setup.go): Creates and validates directories during config setup
+//     Used by configuration management to ensure user-specified directories exist and are writable
+//     before saving configuration. Creates parent directories as needed.
+//
+//   - LocalSource.Prepare (local.go): Validates existing directories at runtime
+//     Used during application startup to confirm configured paths are ready for file operations.
+//     Does not create directories - they must already exist.
 //
 // This separation maintains clear responsibilities:
 //   - Config setup: "Make sure this directory exists and is usable"
 //   - Runtime validation: "Confirm this directory is ready for file operations"
 //
-// Usage (Recommended - via config):
+// # Usage Examples
 //
-//	cfg := repository.CentralRepositoryConfig{
-//	    Path: "/path/to/rules",
-//	    // RemoteURL: nil for local, or &"https://github.com/user/repo.git" for Git
+// Single Repository:
+//
+//	repo := repository.RepositoryEntry{
+//	    ID:        "my-rules-1234567890",
+//	    Name:      "My Rules",
+//	    Type:      repository.RepositoryTypeLocal,
+//	    Path:      "/home/user/rules",
+//	    CreatedAt: 1234567890,
 //	}
-//	localPath, syncInfo, err := repository.PrepareRepository(cfg, logger)
+//	localPath, err := repository.PrepareRepository(repo, logger)
 //	if err != nil {
-//	    return fmt.Errorf("repository preparation failed: %w", err)
+//	    return fmt.Errorf("preparation failed: %w", err)
 //	}
-//	// Use syncInfo.Message for user feedback
 //	fm := filemanager.NewFileManager(localPath, logger)
 //
-// Usage (Direct LocalSource):
+// Multiple Repositories:
 //
-//	ls := LocalSource{Path: "/path/to/rules"}
-//	p, info, err := ls.Prepare(logging.GetDefault())
-//	// p is an absolute path; info.Message explains state (e.g., "Using local repository")
+//	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	if err != nil {
+//	    return fmt.Errorf("multi-repo preparation failed: %w", err)
+//	}
+//	for _, prep := range prepared {
+//	    fmt.Printf("%s: %s\n", prep.Name(), prep.GetStatusMessage())
+//	    if !prep.HasError() {
+//	        fm := filemanager.NewFileManager(prep.LocalPath, logger)
+//	        // Work with repository
+//	    }
+//	}
 //
-// Usage (Config setup):
+// Directory Setup (Config):
 //
-//	root, err := EnsureLocalStorageDirectory("~/Documents/rulem-rules")
+//	root, err := repository.EnsureLocalStorageDirectory("~/Documents/rulem-rules")
 //	if err != nil {
 //	    return fmt.Errorf("setup failed: %w", err)
 //	}
 //	defer root.Close()
-//	// Directory now exists and is validated for use
+//	// Directory now exists and is validated
 //
 // # Credential Management
 //
@@ -150,52 +199,40 @@
 //
 // # Multi-Repository Support
 //
-// The package provides comprehensive multi-repository management for handling multiple
-// rule repositories simultaneously (added in multi-repository feature):
+// The package provides comprehensive multi-repository management:
 //
-// **Repository Orchestration (multi.go):**
-//   - PrepareAllRepositories: Validates, prepares, and syncs multiple repositories in one call
-//   - ValidateAllRepositories: Structural validation with uniqueness checks (IDs and names)
-//   - Returns map[repositoryID]localPath for efficient lookup by consumers
-//   - Resilient design: Preparation failures in one repository don't affect others
-//   - Aggregated error reporting with detailed per-repository messages
+// **Core Types:**
+//   - PreparedRepository: Bundles RepositoryEntry, local path, and sync results
+//   - RepositorySyncResult: Detailed sync status (Success/Failed/Skipped)
+//   - SyncStatus: Enum for categorizing sync outcomes
 //
-// **Repository Synchronization (sync.go):**
-//   - SyncAllRepositories: Synchronizes all GitHub repositories independently
-//   - RepositorySyncResult: Detailed status tracking (Success/Failed/Skipped)
-//   - SyncStatus enum: Categorizes outcomes for proper UI display and error handling
-//   - Dirty repository detection: Skips repos with uncommitted changes to preserve work
-//   - Independent operation: Sync failures in one repo don't prevent others from syncing
+// **Orchestration (multi.go):**
+//   - PrepareAllRepositories: One-call preparation, validation, and sync
+//   - Returns []PreparedRepository with complete status for each repository
+//   - Resilient: Failures in one repository don't affect others
+//   - Aggregated error reporting with per-repository details
 //
-// **Validation (config.go):**
-//   - ValidateRepositoryEntry: Structural validation for individual repository entries
-//   - ValidateCentralRepositoryConfig: Configuration field validation
-//   - ID format validation: Ensures "sanitized-name-timestamp" pattern
+// **Validation (validation.go):**
+//   - ValidateRepositoryEntry: Structural validation for single entries
+//   - ValidateAllRepositories: Batch validation with uniqueness checks
+//   - ID format: "sanitized-name-timestamp" pattern enforcement
 //   - Name uniqueness: Case-insensitive duplicate detection
-//   - Comprehensive error messages for all validation failures
+//   - Type-specific validation: GitHub repos must have RemoteURL, etc.
 //
-// Usage pattern for multi-repository setup:
+// **Synchronization (sync.go):**
+//   - SyncAllRepositories: Independent sync for all GitHub repositories
+//   - Dirty detection: Skips repos with uncommitted changes
+//   - Returns RepositorySyncResult for each repository
+//   - Failures are isolated - one repo's failure doesn't prevent others
 //
-//	// Prepare all repositories (validates, prepares, and syncs)
-//	pathMap, syncResults, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
-//	if err != nil {
-//	    // Handle errors (partial results may be available in pathMap)
-//	}
-//
-//	// Use path map to access repositories
-//	for repoID, localPath := range pathMap {
-//	    fm := filemanager.NewFileManager(localPath, logger)
-//	    // Work with repository files
-//	}
-//
-//	// Review sync results for UI feedback
-//	for _, result := range syncResults {
-//	    fmt.Printf("%s: %s\n", result.RepositoryName, result.GetMessage())
-//	}
+// **API Benefits:**
+//   - Single source of truth: PreparedRepository contains all repository state
+//   - Easy status access: WasSynced(), HasError(), GetStatusMessage()
+//   - Simplified error handling: Check individual repo status or aggregate
+//   - Type-safe access: ID(), Name(), Type(), IsRemote(), etc.
 //
 // The multi-repository layer maintains the same security and validation standards as
-// single-repository operations, with additional checks for uniqueness and consistency
-// across the repository collection.
+// single-repository operations, with additional checks for uniqueness and consistency.
 //
 // # Security
 //
@@ -223,14 +260,15 @@
 //
 // # Usage Flow
 //
-//  1. Configuration (CentralRepositoryConfig) specifies local path and optional remote Git URL
-//  2. Call repository.PrepareRepository(config, logger)
+//  1. Create RepositoryEntry with configuration (ID, name, type, path, etc.)
+//  2. Call PrepareRepository(repo, logger) or PrepareAllRepositories(repos, logger)
 //  3. For Git sources, retrieve Personal Access Token from credential store
 //  4. Source validates/clones/syncs and resolves to local path
-//  5. Local path is passed to FileManager for normal operations
-//  6. All subsequent file operations work transparently
+//  5. Receive PreparedRepository with local path and sync status
+//  6. Pass local path to FileManager for file operations
+//  7. All subsequent operations work transparently with validated paths
 //
-// The simplified flow eliminates intermediate packages and provides a clean, unified API.
+// The architecture provides a clean, type-safe API with comprehensive error handling.
 //
 // # Design Goals
 //
@@ -243,13 +281,28 @@
 //   - Secure credential management with clear error messaging
 //   - Comprehensive Git integration with shallow cloning and conflict detection
 //   - Robust error handling with actionable user guidance
+//   - Clean separation of concerns with logical file organization
+//   - Type-safe API with PreparedRepository for unified access
 //
-// See the contracts/ directory for detailed interface specifications and expected behaviors.
-// Implementation spans multiple files:
-//   - source.go: Core interfaces and LocalSource implementation
-//   - git.go: GitSource implementation with full Git lifecycle management
-//   - credentials.go: Secure PAT management via OS credential store
-//   - path.go: URL parsing, path derivation, and directory conflict resolution
-//   - config.go: Configuration management and repository preparation
-//   - secure_root.go: Local storage directory management with security boundaries
+// # File Organization
+//
+// Core:
+//   - types.go: Domain types (RepositoryEntry, PreparedRepository, RepositoryType)
+//   - source.go: Source interface definition
+//
+// Implementations:
+//   - local.go: LocalSource implementation
+//   - git.go: GitSource with Git operations
+//   - credentials.go: Secure credential management
+//
+// Operations:
+//   - preparation.go: Single repository preparation
+//   - validation.go: Repository validation logic
+//   - multi.go: Multi-repository orchestration
+//   - sync.go: Repository synchronization
+//
+// Utilities:
+//   - defaults.go: Default paths and constants
+//   - setup.go: Directory creation for config setup
+//   - doc.go: Package documentation
 package repository

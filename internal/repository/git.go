@@ -6,10 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
-
 	"rulem/internal/logging"
 	"rulem/pkg/fileops"
+	"strings"
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -139,9 +138,8 @@ func NewGitSource(remoteURL string, branch *string, localPath string) GitSource 
 //
 // Returns:
 //   - localPath: Absolute path to the prepared repository (ready for FileManager)
-//   - SyncInfo: Status details with user-friendly messages for UI display
 //   - error: Preparation failures with actionable error messages
-func (gs GitSource) Prepare(logger *logging.AppLogger) (string, SyncInfo, error) {
+func (gs GitSource) Prepare(logger *logging.AppLogger) (string, error) {
 	if logger != nil {
 		logger.Info("Preparing Git repository source",
 			"remoteURL", gs.RemoteURL,
@@ -151,63 +149,57 @@ func (gs GitSource) Prepare(logger *logging.AppLogger) (string, SyncInfo, error)
 
 	// Validate inputs
 	if err := gs.validateInputs(); err != nil {
-		return "", SyncInfo{}, err
+		return "", err
 	}
 
 	// Normalize and validate remote URL (convert SSH to HTTPS if needed)
 	normalizedURL, err := gs.normalizeRemoteURL()
 	if err != nil {
-		return "", SyncInfo{}, fmt.Errorf("invalid remote URL: %w", err)
+		return "", fmt.Errorf("invalid remote URL: %w", err)
 	}
 
 	// Validate and prepare local path
 	cleanPath, err := gs.validateLocalPath()
 	if err != nil {
-		return "", SyncInfo{}, err
+		return "", err
 	}
 
 	// Check directory status for conflicts
 	dirStatus, err := gs.validateCloneDirectory(cleanPath, normalizedURL)
 	if err != nil {
-		return "", SyncInfo{}, err
+		return "", err
 	}
 
 	// Handle directory conflicts
 	if dirStatus == DirectoryStatusConflict || dirStatus == DirectoryStatusDifferentRepo {
-		return "", SyncInfo{}, fmt.Errorf("directory conflict at %s (%s): please resolve manually by removing or relocating the existing directory",
+		return "", fmt.Errorf("directory conflict at %s (%s): please resolve manually by removing or relocating the existing directory",
 			cleanPath, dirStatus.String())
 	}
-
-	var syncInfo SyncInfo
 
 	// Perform clone or fetch based on directory status
 	// Try without authentication first, fall back to PAT if needed
 	switch dirStatus {
 	case DirectoryStatusEmpty:
-		syncInfo, err = gs.performCloneWithAuth(cleanPath, normalizedURL, logger)
+		err = gs.performCloneWithAuth(cleanPath, normalizedURL, logger)
 		if err != nil {
-			return "", SyncInfo{}, err
+			return "", err
 		}
 
 	case DirectoryStatusSameRepo:
-		syncInfo, err = gs.performFetchWithAuth(cleanPath, logger)
+		err = gs.performFetchWithAuth(cleanPath, logger)
 		if err != nil {
-			return "", SyncInfo{}, err
+			return "", err
 		}
 
 	default:
-		return "", SyncInfo{}, fmt.Errorf("unexpected directory status: %s", dirStatus.String())
+		return "", fmt.Errorf("unexpected directory status: %s", dirStatus.String())
 	}
 
 	if logger != nil {
-		logger.Info("Git repository prepared successfully",
-			"localPath", cleanPath,
-			"cloned", syncInfo.Cloned,
-			"updated", syncInfo.Updated,
-			"dirty", syncInfo.Dirty)
+		logger.Info("Git repository prepared successfully", "localPath", cleanPath)
 	}
 
-	return cleanPath, syncInfo, nil
+	return cleanPath, nil
 }
 
 // validateInputs validates the GitSource configuration
@@ -246,41 +238,32 @@ func (gs GitSource) normalizeRemoteURL() (string, error) {
 //   - Only fetches updates (does not clone if missing)
 //   - Checks for dirty working tree before updating
 //   - Attempts public fetch first, then falls back to PAT authentication
-//   - Returns detailed sync information about what was updated
 //
 // This function is designed for user-initiated refresh operations where:
 //   - The repository is already cloned
-//   - We want to sync with the remote without modifying local structure
-//   - We need to preserve local changes (blocks update if dirty)
-//
-// Parameters:
-//   - logger: Application logger for operation tracking
+//   - The user wants to sync with remote changes
+//   - The working tree may have uncommitted changes (will be skipped)
 //
 // Returns:
-//   - SyncInfo: Information about the sync operation (updated, dirty, etc.)
-//   - error: Any error that occurred during fetch
+//   - error: Any error that occurred during fetch (nil if successful or skipped due to dirty tree)
 //
 // Example:
 //
 //	source := repository.NewGitSource(url, &branch, path)
-//	syncInfo, err := source.FetchUpdates(logger)
+//	err := source.FetchUpdates(logger)
 //	if err != nil {
 //	    return fmt.Errorf("failed to fetch updates: %w", err)
 //	}
-//	if syncInfo.Dirty {
-//	    log.Warn("Repository has uncommitted changes")
-//	}
-func (gs GitSource) FetchUpdates(logger *logging.AppLogger) (SyncInfo, error) {
+func (gs GitSource) FetchUpdates(logger *logging.AppLogger) error {
 	if logger != nil {
 		logger.Info("Manual fetch requested", "url", gs.RemoteURL, "path", gs.Path)
 	}
 
 	// Validate that the repository exists
 	if _, err := os.Stat(gs.Path); os.IsNotExist(err) {
-		return SyncInfo{}, fmt.Errorf("repository does not exist at %s - cannot fetch updates", gs.Path)
+		return fmt.Errorf("repository does not exist at %s - cannot fetch updates", gs.Path)
 	}
 
-	// Use the existing performFetchWithAuth method which handles auth fallback
 	return gs.performFetchWithAuth(gs.Path, logger)
 }
 
@@ -398,11 +381,11 @@ func (gs GitSource) getAuthentication(logger *logging.AppLogger) (*http.BasicAut
 //  3. If non-auth error occurs, return original error for proper handling
 //
 // This approach minimizes credential usage and supports both public and private repositories.
-func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *logging.AppLogger) (SyncInfo, error) {
+func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *logging.AppLogger) error {
 	// First try without authentication (for public repositories)
-	syncInfo, err := gs.performClone(localPath, remoteURL, nil, logger)
+	err := gs.performClone(localPath, remoteURL, nil, logger)
 	if err == nil {
-		return syncInfo, nil
+		return nil
 	}
 
 	// If clone failed, check if it's an auth error and try with PAT
@@ -411,14 +394,13 @@ func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *lo
 			logger.Debug("Public access failed, trying with authentication")
 		}
 
-		// Get authentication
+		// Get authentication credentials
 		auth, authErr := gs.getAuthentication(logger)
 		if authErr != nil {
-			return SyncInfo{}, fmt.Errorf("GitHub authentication required - please configure a Personal Access Token in Settings → GitHub Authentication")
+			return fmt.Errorf("GitHub authentication failed: %w", authErr)
 		}
-
 		if auth == nil {
-			return SyncInfo{}, fmt.Errorf("GitHub authentication required - please configure a Personal Access Token in Settings → GitHub Authentication")
+			return fmt.Errorf("GitHub authentication required - please configure a Personal Access Token in Settings → GitHub Authentication")
 		}
 
 		// Retry with authentication
@@ -426,7 +408,7 @@ func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *lo
 	}
 
 	// Not an auth error, return original error
-	return SyncInfo{}, err
+	return err
 }
 
 // performClone performs the initial repository clone with the given authentication.
@@ -442,7 +424,7 @@ func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *lo
 //   - CloneOptions.Depth: Shallow clone depth (1 = latest commit only)
 //   - CloneOptions.ReferenceName: Specific branch to clone
 //   - CloneOptions.SingleBranch: Clone only the specified branch
-func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAuth, logger *logging.AppLogger) (SyncInfo, error) {
+func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAuth, logger *logging.AppLogger) error {
 	if logger != nil {
 		logger.Info("Cloning repository", "remoteURL", remoteURL, "localPath", localPath)
 	}
@@ -452,23 +434,26 @@ func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAu
 
 	// Validate parent directory path security before creation
 	if err := fileops.ValidatePathSecurity(parentDir); err != nil {
-		return SyncInfo{}, fmt.Errorf("parent directory failed security validation: %w", err)
+		return fmt.Errorf("parent directory failed security validation: %w", err)
 	}
 
-	// Create parent directory structure with secure permissions
+	// Create parent directories if they don't exist
 	if err := os.MkdirAll(parentDir, 0755); err != nil {
-		return SyncInfo{}, fmt.Errorf("failed to create parent directory: %w", err)
+		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
-	// Prepare clone options
+	// Configure clone options
 	cloneOpts := &git.CloneOptions{
 		URL:      remoteURL,
-		Auth:     auth,
-		Depth:    1,   // Shallow clone for performance
-		Progress: nil, // Could add progress reporting in the future
+		Progress: nil, // Set to os.Stdout for debug
 	}
 
-	// Set specific branch if provided
+	// Add authentication if provided
+	if auth != nil {
+		cloneOpts.Auth = auth
+	}
+
+	// Add branch specification if provided
 	if gs.Branch != nil && *gs.Branch != "" {
 		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(*gs.Branch)
 		cloneOpts.SingleBranch = true
@@ -478,15 +463,14 @@ func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAu
 	_, err := git.PlainClone(localPath, cloneOpts)
 	if err != nil {
 		// Provide user-friendly error messages for common failures
-		return SyncInfo{}, gs.translateCloneError(err)
+		return gs.translateCloneError(err)
 	}
 
-	return SyncInfo{
-		Cloned:  true,
-		Updated: false,
-		Dirty:   false,
-		Message: "Repository cloned successfully",
-	}, nil
+	if logger != nil {
+		logger.Info("Repository cloned successfully", "localPath", localPath)
+	}
+
+	return nil
 }
 
 // performFetchWithAuth performs fetch/pull operations with authentication fallback.
@@ -498,11 +482,11 @@ func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAu
 //
 // This approach maintains consistency with clone operations and supports repository
 // visibility changes (public to private or vice versa).
-func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLogger) (SyncInfo, error) {
+func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLogger) error {
 	// First try without authentication (for public repositories)
-	syncInfo, err := gs.performFetch(localPath, nil, logger)
+	err := gs.performFetch(localPath, nil, logger)
 	if err == nil {
-		return syncInfo, nil
+		return nil
 	}
 
 	// If fetch failed, check if it's an auth error and try with PAT
@@ -511,14 +495,13 @@ func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLo
 			logger.Debug("Public fetch failed, trying with authentication")
 		}
 
-		// Get authentication
+		// Get authentication credentials
 		auth, authErr := gs.getAuthentication(logger)
 		if authErr != nil {
-			return SyncInfo{}, fmt.Errorf("GitHub token has expired or is invalid - please update in Settings → GitHub Authentication")
+			return fmt.Errorf("GitHub authentication failed: %w", authErr)
 		}
-
 		if auth == nil {
-			return SyncInfo{}, fmt.Errorf("GitHub authentication required - please configure a Personal Access Token in Settings → GitHub Authentication")
+			return fmt.Errorf("GitHub authentication required - please configure a Personal Access Token in Settings → GitHub Authentication")
 		}
 
 		// Retry with authentication
@@ -526,7 +509,7 @@ func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLo
 	}
 
 	// Not an auth error, return original error
-	return SyncInfo{}, err
+	return err
 }
 
 // performFetch performs fetch/pull operations on existing repository.
@@ -550,7 +533,7 @@ func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLo
 //
 // The shallow fetch + reset approach avoids complex merge scenarios in favor of
 // clean synchronization, which is appropriate for a cache-focused use case.
-func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger *logging.AppLogger) (SyncInfo, error) {
+func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger *logging.AppLogger) error {
 	if logger != nil {
 		logger.Info("Fetching repository updates", "localPath", localPath)
 	}
@@ -558,18 +541,18 @@ func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger 
 	// Open existing repository
 	repo, err := git.PlainOpen(localPath)
 	if err != nil {
-		return SyncInfo{}, fmt.Errorf("failed to open existing repository: %w", err)
+		return fmt.Errorf("failed to open existing repository: %w", err)
 	}
 
 	// Check for dirty working tree first - this detects uncommitted changes
 	worktree, err := repo.Worktree()
 	if err != nil {
-		return SyncInfo{}, fmt.Errorf("failed to get working tree: %w", err)
+		return fmt.Errorf("failed to get working tree: %w", err)
 	}
 
 	status, err := worktree.Status()
 	if err != nil {
-		return SyncInfo{}, fmt.Errorf("failed to get working tree status: %w", err)
+		return fmt.Errorf("failed to get working tree status: %w", err)
 	}
 
 	// If working tree is dirty, continue with current state but inform user
@@ -577,84 +560,38 @@ func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger 
 		if logger != nil {
 			logger.Warn("Working tree has uncommitted changes, skipping sync")
 		}
-
-		return SyncInfo{
-			Cloned:  false,
-			Updated: false,
-			Dirty:   true,
-			Message: "Local changes detected - please commit or clean working tree before syncing",
-		}, nil
+		// Return nil error - this is not an error condition, just skipped
+		return nil
 	}
 
 	// Perform fetch
-	fetchOpts := &git.FetchOptions{
-		Auth:     auth,
-		Depth:    1, // Maintain shallow fetch for consistency
-		Progress: nil,
-	}
-
 	// Get the remote
 	remote, err := repo.Remote("origin")
 	if err != nil {
-		return SyncInfo{}, fmt.Errorf("failed to get origin remote: %w", err)
+		return fmt.Errorf("failed to get origin remote: %w", err)
 	}
 
-	// Fetch updates
+	// Fetch updates from remote
+	fetchOpts := &git.FetchOptions{
+		Auth: auth,
+		// TODO should we raise an error or show a message here? do we really want to force?
+		Force: true, // Force update to handle force-pushes
+	}
+
 	err = remote.Fetch(fetchOpts)
 	if err != nil && err != git.NoErrAlreadyUpToDate {
-		return SyncInfo{}, gs.translateFetchError(err)
+		return gs.translateFetchError(err)
 	}
 
-	// Always indicate that we attempted to fetch updates
-	updated := true
-	if err != git.NoErrAlreadyUpToDate {
-		// Get the current branch
-		head, err := repo.Head()
-		if err != nil {
-			return SyncInfo{}, fmt.Errorf("failed to get HEAD reference: %w", err)
-		}
-
-		// For shallow repos, we reset to the remote branch rather than merge
-		// This avoids complex merge scenarios in a cache-focused use case
-		remoteBranch := head.Name().Short() // Extract branch name (e.g. "main")
-		remoteRef := fmt.Sprintf("refs/remotes/origin/%s", remoteBranch)
-
-		// Get the remote commit hash from the fetched remote branch
-		remoteHash, err := repo.ResolveRevision(plumbing.Revision(remoteRef))
-		if err != nil {
-			// If we can't resolve the remote reference, continue with current state
-			if logger != nil {
-				logger.Warn("Could not resolve remote reference, using current state", "ref", remoteRef)
-			}
-			updated = false
+	if logger != nil {
+		if err == git.NoErrAlreadyUpToDate {
+			logger.Debug("Repository already up to date")
 		} else {
-			// Reset working tree to remote commit (hard reset for clean sync)
-			// This discards any local changes and matches the remote exactly
-			err = worktree.Reset(&git.ResetOptions{
-				Commit: *remoteHash,
-				Mode:   git.HardReset,
-			})
-			if err != nil {
-				return SyncInfo{}, fmt.Errorf("failed to reset to remote commit: %w", err)
-			}
-
-			if logger != nil {
-				logger.Info("Reset to remote commit", "commit", remoteHash.String()[:8])
-			}
+			logger.Info("Repository updated successfully")
 		}
 	}
 
-	message := "Repository is up to date"
-	if updated {
-		message = "Repository updated successfully"
-	}
-
-	return SyncInfo{
-		Cloned:  false,
-		Updated: updated,
-		Dirty:   false,
-		Message: message,
-	}, nil
+	return nil
 }
 
 // translateCloneError provides user-friendly error messages for clone failures.

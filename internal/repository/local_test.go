@@ -14,7 +14,7 @@ func TestLocalSource_Prepare_ValidPath(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	ls := LocalSource{Path: tempDir}
-	gotPath, info, err := ls.Prepare(logger)
+	gotPath, err := ls.Prepare(logger)
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for valid path: %v", err)
 	}
@@ -26,14 +26,6 @@ func TestLocalSource_Prepare_ValidPath(t *testing.T) {
 	if gotPath != tempDir {
 		t.Errorf("Prepare() returned path = %s, want %s", gotPath, tempDir)
 	}
-
-	// No sync activity for LocalSource
-	if info.Cloned || info.Updated || info.Dirty {
-		t.Errorf("Prepare() unexpected SyncInfo flags for local source: %+v", info)
-	}
-	if info.Message == "" || !strings.Contains(strings.ToLower(info.Message), "local") {
-		t.Errorf("Prepare() expected user message about local repository, got: %q", info.Message)
-	}
 }
 
 func TestLocalSource_Prepare_MissingDirectory(t *testing.T) {
@@ -42,7 +34,7 @@ func TestLocalSource_Prepare_MissingDirectory(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	ls := LocalSource{Path: missingPath}
-	_, _, err := ls.Prepare(logger)
+	_, err := ls.Prepare(logger)
 	if err == nil {
 		t.Fatalf("Prepare() expected error for missing directory but got none")
 	}
@@ -60,7 +52,7 @@ func TestLocalSource_Prepare_PathTraversalRejected(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	ls := LocalSource{Path: invalidPath}
-	_, _, err := ls.Prepare(logger)
+	_, err := ls.Prepare(logger)
 	if err == nil {
 		t.Fatalf("Prepare() expected error for traversal path but got none")
 	}
@@ -81,7 +73,7 @@ func TestLocalSource_Prepare_NotADirectory(t *testing.T) {
 
 	logger, _ := logging.NewTestLogger()
 	ls := LocalSource{Path: filePath}
-	_, _, err := ls.Prepare(logger)
+	_, err := ls.Prepare(logger)
 	if err == nil {
 		t.Fatalf("Prepare() expected error for file path but got none")
 	}

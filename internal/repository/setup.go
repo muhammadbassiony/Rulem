@@ -1,3 +1,20 @@
+// Package repository - setup.go
+//
+// This file contains functions for setting up and creating local storage directories
+// during configuration setup. These functions are distinct from runtime validation:
+//
+//   - EnsureLocalStorageDirectory: Creates directories with proper permissions and validates
+//     them for use. This is called during config creation/modification to ensure the
+//     user-specified directory exists and is writable before saving the configuration.
+//
+//   - Runtime validation (in local.go): LocalSource.Prepare validates that configured
+//     directories exist and are accessible during application startup, but does not
+//     create them.
+//
+// This separation ensures that:
+// - Config setup can create necessary directories for the user
+// - Runtime validation confirms directories are still valid without side effects
+// - Security boundaries are maintained (home directory confinement)
 package repository
 
 import (

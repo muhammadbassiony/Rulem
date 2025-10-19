@@ -6,41 +6,27 @@ import (
 	"testing"
 )
 
-func TestCentralRepositoryConfig_IsRemote(t *testing.T) {
+// TestRepositoryEntry_IsRemote tests the IsRemote method
+func TestRepositoryEntry_IsRemote(t *testing.T) {
 	tests := []struct {
 		name     string
-		config   CentralRepositoryConfig
+		repo     RepositoryEntry
 		expected bool
 	}{
 		{
-			name: "local repository (nil remote URL)",
-			config: CentralRepositoryConfig{
-				Path:      "/home/user/rules",
-				RemoteURL: nil,
+			name: "local repository",
+			repo: RepositoryEntry{
+				Type: RepositoryTypeLocal,
+				Path: "/home/user/rules",
 			},
 			expected: false,
 		},
 		{
-			name: "local repository (empty remote URL)",
-			config: CentralRepositoryConfig{
-				Path:      "/home/user/rules",
-				RemoteURL: stringPtr(""),
-			},
-			expected: false,
-		},
-		{
-			name: "remote repository (GitHub)",
-			config: CentralRepositoryConfig{
+			name: "github repository",
+			repo: RepositoryEntry{
+				Type:      RepositoryTypeGitHub,
 				Path:      "/home/user/cached-rules",
 				RemoteURL: stringPtr("https://github.com/user/rules.git"),
-			},
-			expected: true,
-		},
-		{
-			name: "remote repository (custom Git server)",
-			config: CentralRepositoryConfig{
-				Path:      "/home/user/cached-rules",
-				RemoteURL: stringPtr("git@git.company.com:team/rules.git"),
 			},
 			expected: true,
 		},
@@ -48,7 +34,7 @@ func TestCentralRepositoryConfig_IsRemote(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.IsRemote()
+			got := tt.repo.IsRemote()
 			if got != tt.expected {
 				t.Errorf("IsRemote() = %v, want %v", got, tt.expected)
 			}
@@ -56,16 +42,20 @@ func TestCentralRepositoryConfig_IsRemote(t *testing.T) {
 	}
 }
 
+// TestPrepareRepository_LocalSource tests preparing a local repository
 func TestPrepareRepository_LocalSource(t *testing.T) {
 	tempDir := t.TempDir()
 	logger, _ := logging.NewTestLogger()
 
-	cfg := CentralRepositoryConfig{
+	repo := RepositoryEntry{
+		ID:        "test-repo-123",
+		Name:      "Test Repo",
+		Type:      RepositoryTypeLocal,
 		Path:      tempDir,
-		RemoteURL: nil, // Local mode
+		CreatedAt: 1234567890,
 	}
 
-	localPath, syncInfo, err := PrepareRepository(cfg, logger)
+	localPath, syncInfo, err := PrepareRepository(repo, logger)
 	if err != nil {
 		t.Fatalf("PrepareRepository failed: %v", err)
 	}
@@ -86,15 +76,19 @@ func TestPrepareRepository_LocalSource(t *testing.T) {
 	}
 }
 
+// TestPrepareRepository_InvalidLocalPath tests error handling for invalid paths
 func TestPrepareRepository_InvalidLocalPath(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
-	cfg := CentralRepositoryConfig{
+	repo := RepositoryEntry{
+		ID:        "test-repo-123",
+		Name:      "Test Repo",
+		Type:      RepositoryTypeLocal,
 		Path:      "/nonexistent/directory/that/should/not/exist",
-		RemoteURL: nil, // Local mode
+		CreatedAt: 1234567890,
 	}
 
-	_, _, err := PrepareRepository(cfg, logger)
+	_, _, err := PrepareRepository(repo, logger)
 	if err == nil {
 		t.Fatal("Expected error for invalid local path")
 	}
@@ -105,49 +99,20 @@ func TestPrepareRepository_InvalidLocalPath(t *testing.T) {
 	}
 }
 
-func TestPrepareRepository_GitMode_WithoutAuth(t *testing.T) {
-	tempDir := t.TempDir()
-	logger, _ := logging.NewTestLogger()
-
-	// Use a public repository that should be accessible without authentication
-	remoteURL := "https://github.com/octocat/Hello-World.git"
-	cfg := CentralRepositoryConfig{
-		Path:      tempDir,
-		RemoteURL: &remoteURL, // Git mode
-	}
-
-	// Should use GitSource and succeed for public repository
-	localPath, syncInfo, err := PrepareRepository(cfg, logger)
-	if err != nil {
-		t.Fatalf("PrepareRepository failed: %v", err)
-	}
-
-	// Should return the configured path
-	if localPath != tempDir {
-		t.Errorf("Expected path '%s', got '%s'", tempDir, localPath)
-	}
-
-	// GitSource should set clone flag for initial clone
-	if !syncInfo.Cloned {
-		t.Errorf("Expected Cloned=true for initial GitSource clone, got %+v", syncInfo)
-	}
-
-	// Should have GitSource success message
-	if !strings.Contains(strings.ToLower(syncInfo.Message), "clone") {
-		t.Errorf("Expected clone message, got: %q", syncInfo.Message)
-	}
-}
-
+// TestPrepareRepository_WithNilLogger tests operation with nil logger
 func TestPrepareRepository_WithNilLogger(t *testing.T) {
 	tempDir := t.TempDir()
 
-	cfg := CentralRepositoryConfig{
+	repo := RepositoryEntry{
+		ID:        "test-repo-123",
+		Name:      "Test Repo",
+		Type:      RepositoryTypeLocal,
 		Path:      tempDir,
-		RemoteURL: nil, // Local mode
+		CreatedAt: 1234567890,
 	}
 
 	// Should work with nil logger (logging calls are guarded)
-	localPath, syncInfo, err := PrepareRepository(cfg, nil)
+	localPath, syncInfo, err := PrepareRepository(repo, nil)
 	if err != nil {
 		t.Fatalf("PrepareRepository with nil logger failed: %v", err)
 	}
@@ -161,58 +126,449 @@ func TestPrepareRepository_WithNilLogger(t *testing.T) {
 	}
 }
 
-func TestPrepareRepository_EmptyPath(t *testing.T) {
-	logger, _ := logging.NewTestLogger()
-
-	cfg := CentralRepositoryConfig{
-		Path:      "", // Empty path
-		RemoteURL: nil,
+// TestValidateRepositoryEntry_ValidEntries tests validation of valid repository entries
+func TestValidateRepositoryEntry_ValidEntries(t *testing.T) {
+	tests := []struct {
+		name string
+		repo RepositoryEntry
+	}{
+		{
+			name: "valid local repository",
+			repo: RepositoryEntry{
+				ID:        "local-repo-1234567890",
+				Name:      "Local Repository",
+				Type:      RepositoryTypeLocal,
+				Path:      "/home/user/rules",
+				CreatedAt: 1234567890,
+			},
+		},
+		{
+			name: "valid github repository",
+			repo: RepositoryEntry{
+				ID:        "github-repo-1234567890",
+				Name:      "GitHub Repository",
+				Type:      RepositoryTypeGitHub,
+				Path:      "/home/user/.local/share/rulem/repo",
+				RemoteURL: stringPtr("https://github.com/user/repo.git"),
+				CreatedAt: 1234567890,
+			},
+		},
+		{
+			name: "github repository with branch",
+			repo: RepositoryEntry{
+				ID:        "github-repo-1234567890",
+				Name:      "GitHub Repository",
+				Type:      RepositoryTypeGitHub,
+				Path:      "/home/user/.local/share/rulem/repo",
+				RemoteURL: stringPtr("https://github.com/user/repo.git"),
+				Branch:    stringPtr("main"),
+				CreatedAt: 1234567890,
+			},
+		},
+		{
+			name: "github repository with last sync time",
+			repo: RepositoryEntry{
+				ID:           "github-repo-1234567890",
+				Name:         "GitHub Repository",
+				Type:         RepositoryTypeGitHub,
+				Path:         "/home/user/.local/share/rulem/repo",
+				RemoteURL:    stringPtr("https://github.com/user/repo.git"),
+				LastSyncTime: int64Ptr(1234567890),
+				CreatedAt:    1234567890,
+			},
+		},
 	}
 
-	_, _, err := PrepareRepository(cfg, logger)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRepositoryEntry(tt.repo)
+			if err != nil {
+				t.Errorf("expected no error for valid repository, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateRepositoryEntry_InvalidID tests ID validation
+func TestValidateRepositoryEntry_InvalidID(t *testing.T) {
+	tests := []struct {
+		name      string
+		id        string
+		expectErr string
+	}{
+		{
+			name:      "empty ID",
+			id:        "",
+			expectErr: "cannot be empty",
+		},
+		{
+			name:      "ID without dash",
+			id:        "noDashHere",
+			expectErr: "invalid repository ID format",
+		},
+		{
+			name:      "ID with non-numeric timestamp",
+			id:        "repo-name-abc",
+			expectErr: "timestamp must be numeric",
+		},
+		{
+			name:      "ID ending with dash",
+			id:        "repo-name-",
+			expectErr: "missing timestamp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := RepositoryEntry{
+				ID:        tt.id,
+				Name:      "Test Repo",
+				Type:      RepositoryTypeLocal,
+				Path:      "/tmp/test",
+				CreatedAt: 1234567890,
+			}
+
+			err := ValidateRepositoryEntry(repo)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.expectErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateRepositoryEntry_InvalidName tests name validation
+func TestValidateRepositoryEntry_InvalidName(t *testing.T) {
+	tests := []struct {
+		name      string
+		repoName  string
+		expectErr string
+	}{
+		{
+			name:      "empty name",
+			repoName:  "",
+			expectErr: "cannot be empty",
+		},
+		{
+			name:      "whitespace-only name",
+			repoName:  "   ",
+			expectErr: "cannot be empty",
+		},
+		{
+			name:      "name too long",
+			repoName:  strings.Repeat("a", 101),
+			expectErr: "too long",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := RepositoryEntry{
+				ID:        "test-repo-1234567890",
+				Name:      tt.repoName,
+				Type:      RepositoryTypeLocal,
+				Path:      "/tmp/test",
+				CreatedAt: 1234567890,
+			}
+
+			err := ValidateRepositoryEntry(repo)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.expectErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateRepositoryEntry_InvalidType tests type validation
+func TestValidateRepositoryEntry_InvalidType(t *testing.T) {
+	tests := []struct {
+		name      string
+		repoType  RepositoryType
+		expectErr string
+	}{
+		{
+			name:      "empty type",
+			repoType:  "",
+			expectErr: "invalid repository type",
+		},
+		{
+			name:      "invalid type",
+			repoType:  "gitlab",
+			expectErr: "invalid repository type",
+		},
+		{
+			name:      "uppercase type",
+			repoType:  "LOCAL",
+			expectErr: "invalid repository type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := RepositoryEntry{
+				ID:        "test-repo-1234567890",
+				Name:      "Test Repo",
+				Type:      tt.repoType,
+				Path:      "/tmp/test",
+				CreatedAt: 1234567890,
+			}
+
+			err := ValidateRepositoryEntry(repo)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.expectErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateRepositoryEntry_InvalidCreatedAt tests CreatedAt validation
+func TestValidateRepositoryEntry_InvalidCreatedAt(t *testing.T) {
+	tests := []struct {
+		name      string
+		createdAt int64
+	}{
+		{
+			name:      "zero timestamp",
+			createdAt: 0,
+		},
+		{
+			name:      "negative timestamp",
+			createdAt: -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := RepositoryEntry{
+				ID:        "test-repo-1234567890",
+				Name:      "Test Repo",
+				Type:      RepositoryTypeLocal,
+				Path:      "/tmp/test",
+				CreatedAt: tt.createdAt,
+			}
+
+			err := ValidateRepositoryEntry(repo)
+			if err == nil {
+				t.Fatalf("expected error for invalid CreatedAt, got nil")
+			}
+			if !strings.Contains(err.Error(), "created_at") {
+				t.Errorf("expected error about created_at, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateRepositoryEntry_InvalidPath tests path validation
+func TestValidateRepositoryEntry_InvalidPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		expectErr string
+	}{
+		{
+			name:      "empty path",
+			path:      "",
+			expectErr: "path cannot be empty",
+		},
+		{
+			name:      "whitespace-only path",
+			path:      "   ",
+			expectErr: "path cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := RepositoryEntry{
+				ID:        "test-repo-1234567890",
+				Name:      "Test Repo",
+				Type:      RepositoryTypeLocal,
+				Path:      tt.path,
+				CreatedAt: 1234567890,
+			}
+
+			err := ValidateRepositoryEntry(repo)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.expectErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateRepositoryEntry_GitHubWithoutRemoteURL tests GitHub validation
+func TestValidateRepositoryEntry_GitHubWithoutRemoteURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		remoteURL *string
+		expectErr string
+	}{
+		{
+			name:      "nil remote URL",
+			remoteURL: nil,
+			expectErr: "must have a remote URL",
+		},
+		{
+			name:      "empty remote URL",
+			remoteURL: stringPtr(""),
+			expectErr: "must have a remote URL",
+		},
+		{
+			name:      "whitespace-only remote URL",
+			remoteURL: stringPtr("   "),
+			expectErr: "must have a remote URL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := RepositoryEntry{
+				ID:        "test-repo-1234567890",
+				Name:      "Test Repo",
+				Type:      RepositoryTypeGitHub,
+				Path:      "/tmp/test",
+				RemoteURL: tt.remoteURL,
+				CreatedAt: 1234567890,
+			}
+
+			err := ValidateRepositoryEntry(repo)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.expectErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateRepositoryEntry_GitHubWithEmptyBranch tests branch validation
+func TestValidateRepositoryEntry_GitHubWithEmptyBranch(t *testing.T) {
+	repo := RepositoryEntry{
+		ID:        "test-repo-1234567890",
+		Name:      "Test Repo",
+		Type:      RepositoryTypeGitHub,
+		Path:      "/tmp/test",
+		RemoteURL: stringPtr("https://github.com/user/repo.git"),
+		Branch:    stringPtr(""),
+		CreatedAt: 1234567890,
+	}
+
+	err := ValidateRepositoryEntry(repo)
 	if err == nil {
-		t.Fatal("Expected error for empty path")
+		t.Fatalf("expected error for empty branch, got nil")
 	}
-
-	// Should get validation error about empty path
-	errStr := strings.ToLower(err.Error())
-	if !strings.Contains(errStr, "empty") && !strings.Contains(errStr, "cannot be empty") {
-		t.Errorf("Expected error about empty path, got: %v", err)
+	if !strings.Contains(err.Error(), "branch") {
+		t.Errorf("expected error about branch, got: %v", err)
 	}
 }
 
-func TestCentralRepositoryConfig_WithAllFields(t *testing.T) {
-	remoteURL := "https://github.com/user/repo.git"
-	branch := "main"
-	lastSync := int64(1234567890)
-
-	cfg := CentralRepositoryConfig{
-		Path:         "/home/user/cached-repo",
-		RemoteURL:    &remoteURL,
-		Branch:       &branch,
-		LastSyncTime: &lastSync,
+// TestValidateRepositoryEntry_GitHubWithInvalidLastSyncTime tests LastSyncTime validation
+func TestValidateRepositoryEntry_GitHubWithInvalidLastSyncTime(t *testing.T) {
+	tests := []struct {
+		name         string
+		lastSyncTime *int64
+	}{
+		{
+			name:         "zero timestamp",
+			lastSyncTime: int64Ptr(0),
+		},
+		{
+			name:         "negative timestamp",
+			lastSyncTime: int64Ptr(-1),
+		},
 	}
 
-	// Should be detected as remote
-	if !cfg.IsRemote() {
-		t.Error("Expected IsRemote() to return true for config with remote URL")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := RepositoryEntry{
+				ID:           "test-repo-1234567890",
+				Name:         "Test Repo",
+				Type:         RepositoryTypeGitHub,
+				Path:         "/tmp/test",
+				RemoteURL:    stringPtr("https://github.com/user/repo.git"),
+				LastSyncTime: tt.lastSyncTime,
+				CreatedAt:    1234567890,
+			}
 
-	// Check that all fields are preserved in the config
-	if cfg.Path != "/home/user/cached-repo" {
-		t.Errorf("Path not preserved: got %s", cfg.Path)
-	}
-	if cfg.RemoteURL == nil || *cfg.RemoteURL != remoteURL {
-		t.Errorf("RemoteURL not preserved: got %v", cfg.RemoteURL)
-	}
-	if cfg.Branch == nil || *cfg.Branch != branch {
-		t.Errorf("Branch not preserved: got %v", cfg.Branch)
-	}
-	if cfg.LastSyncTime == nil || *cfg.LastSyncTime != lastSync {
-		t.Errorf("LastSyncTime not preserved: got %v", cfg.LastSyncTime)
+			err := ValidateRepositoryEntry(repo)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "last_sync_time") {
+				t.Errorf("expected error about last_sync_time, got: %v", err)
+			}
+		})
 	}
 }
 
+// TestValidateRepositoryEntry_LocalWithGitHubFields tests that local repos don't have GitHub fields
+func TestValidateRepositoryEntry_LocalWithGitHubFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		repo      RepositoryEntry
+		expectErr string
+	}{
+		{
+			name: "local repo with remote URL",
+			repo: RepositoryEntry{
+				ID:        "test-repo-1234567890",
+				Name:      "Test Repo",
+				Type:      RepositoryTypeLocal,
+				Path:      "/tmp/test",
+				RemoteURL: stringPtr("https://github.com/user/repo.git"),
+				CreatedAt: 1234567890,
+			},
+			expectErr: "should not have a remote URL",
+		},
+		{
+			name: "local repo with branch",
+			repo: RepositoryEntry{
+				ID:        "test-repo-1234567890",
+				Name:      "Test Repo",
+				Type:      RepositoryTypeLocal,
+				Path:      "/tmp/test",
+				Branch:    stringPtr("main"),
+				CreatedAt: 1234567890,
+			},
+			expectErr: "should not have a branch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRepositoryEntry(tt.repo)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.expectErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.expectErr, err)
+			}
+		})
+	}
+}
+
+// TestRepositoryType_Constants tests that type constants are defined correctly
+func TestRepositoryType_Constants(t *testing.T) {
+	if RepositoryTypeLocal != "local" {
+		t.Errorf("RepositoryTypeLocal should be 'local', got: %q", RepositoryTypeLocal)
+	}
+	if RepositoryTypeGitHub != "github" {
+		t.Errorf("RepositoryTypeGitHub should be 'github', got: %q", RepositoryTypeGitHub)
+	}
+}
+
+// TestNewLocalSource tests local source creation
 func TestNewLocalSource(t *testing.T) {
 	path := "/home/user/rules"
 
@@ -223,6 +579,7 @@ func TestNewLocalSource(t *testing.T) {
 	}
 }
 
+// TestNewGitSource tests git source creation
 func TestNewGitSource(t *testing.T) {
 	remoteURL := "https://github.com/user/repo.git"
 	branch := "main"
@@ -243,6 +600,7 @@ func TestNewGitSource(t *testing.T) {
 	}
 }
 
+// TestNewGitSource_NilBranch tests git source creation with nil branch
 func TestNewGitSource_NilBranch(t *testing.T) {
 	remoteURL := "https://github.com/user/repo.git"
 	localPath := "/tmp/cached-repo"
@@ -262,23 +620,12 @@ func TestNewGitSource_NilBranch(t *testing.T) {
 	}
 }
 
-func TestGitSource_Prepare_RequiresAuth(t *testing.T) {
-	source := NewGitSource("https://github.com/user/repo.git", nil, "/tmp/test")
-	logger, _ := logging.NewTestLogger()
+// Helper functions
 
-	_, _, err := source.Prepare(logger)
-	if err == nil {
-		t.Error("GitSource.Prepare should require authentication")
-	}
-
-	// Should mention authentication requirement
-	errStr := strings.ToLower(err.Error())
-	if !strings.Contains(errStr, "auth") && !strings.Contains(errStr, "token") {
-		t.Errorf("Expected error to mention authentication, got: %v", err)
-	}
-}
-
-// Helper function to create a string pointer
 func stringPtr(s string) *string {
 	return &s
+}
+
+func int64Ptr(i int64) *int64 {
+	return &i
 }

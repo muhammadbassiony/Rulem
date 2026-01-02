@@ -3,7 +3,6 @@ package filemanager
 import (
 	"os"
 	"path/filepath"
-	"rulem/internal/logging"
 	"rulem/pkg/fileops"
 	"strings"
 	"testing"
@@ -1127,89 +1126,6 @@ func TestCopyFileFromStorage_BrokenSymlinkDetection(t *testing.T) {
 			t.Error("Result should not be a symlink after copy")
 		}
 	})
-}
-
-// Tests for GetAbsolutePath and GetAbsolutePathCWD methods
-
-func TestGetAbsolutePath(t *testing.T) {
-	tempDir := createTempTestDir(t, "test-get-absolute-*")
-	defer os.RemoveAll(tempDir)
-
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
-
-	// Test with simple filename
-	item := FileItem{
-		Name: "test.md",
-		Path: "test.md",
-	}
-
-	expected := filepath.Join(tempDir, "test.md")
-	actual := fm.GetAbsolutePath(item)
-
-	if actual != expected {
-		t.Errorf("GetAbsolutePath() = %q, want %q", actual, expected)
-	}
-
-	// Test with nested path
-	nestedItem := FileItem{
-		Name: "nested.md",
-		Path: "docs/nested.md",
-	}
-
-	expectedNested := filepath.Join(tempDir, "docs/nested.md")
-	actualNested := fm.GetAbsolutePath(nestedItem)
-
-	if actualNested != expectedNested {
-		t.Errorf("GetAbsolutePath() nested = %q, want %q", actualNested, expectedNested)
-	}
-}
-
-func TestGetAbsolutePathCWD(t *testing.T) {
-	// Get current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current working directory: %v", err)
-	}
-
-	// Create FileManager (storage dir doesn't matter for this test)
-	storageDir := createTempTestDir(t, "storage-*")
-	defer os.RemoveAll(storageDir)
-
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
-
-	// Test with simple filename
-	item := FileItem{
-		Name: "test.md",
-		Path: "test.md",
-	}
-
-	expected := filepath.Join(cwd, "test.md")
-	actual := fm.GetAbsolutePathCWD(item)
-
-	if actual != expected {
-		t.Errorf("GetAbsolutePathCWD() = %q, want %q", actual, expected)
-	}
-
-	// Test with nested path
-	nestedItem := FileItem{
-		Name: "nested.md",
-		Path: "docs/nested.md",
-	}
-
-	expectedNested := filepath.Join(cwd, "docs/nested.md")
-	actualNested := fm.GetAbsolutePathCWD(nestedItem)
-
-	if actualNested != expectedNested {
-		t.Errorf("GetAbsolutePathCWD() nested = %q, want %q", actualNested, expectedNested)
-	}
 }
 
 // Test for broken symlink detection and overwrite behavior

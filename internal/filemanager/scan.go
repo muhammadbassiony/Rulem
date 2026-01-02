@@ -24,14 +24,16 @@ func isMarkdownFile(filename string) bool {
 }
 
 // ScanCurrDirectory recursively scans the current working directory and all its children
-// for markdown files and returns a list of FileItem. This function acts as an integration
-// point between the generic fileops directory scanner and the filemanager domain logic.
+// for markdown files and returns a list of FileItem with absolute paths.
+// This function acts as an integration point between the generic fileops directory scanner
+// and the filemanager domain logic.
 //
 // Returns:
-//   - []FileItem: List of discovered markdown files
+//   - []FileItem: List of discovered markdown files with absolute paths
 //   - error: Scanning errors
 //
 // Security: Uses secure directory scanning with protection against path traversal and symlink attacks.
+// File paths are validated and converted to absolute paths during scanning.
 func (fm *FileManager) ScanCurrDirectory() ([]FileItem, error) {
 	// Get current working directory
 	cwd, err := os.Getwd()
@@ -65,9 +67,10 @@ func (fm *FileManager) ScanCurrDirectory() ([]FileItem, error) {
 	var result []FileItem
 	for _, file := range files {
 		if !file.IsDir { // Only include files, not directories
+			absPath := filepath.Join(cwd, file.Path)
 			result = append(result, FileItem{
 				Name: file.Name,
-				Path: file.Path,
+				Path: absPath,
 			})
 		}
 	}
@@ -77,18 +80,19 @@ func (fm *FileManager) ScanCurrDirectory() ([]FileItem, error) {
 }
 
 // ScanRepository recursively scans the repository directory and all its children
-// for markdown files and returns a list of FileItem.
+// for markdown files and returns a list of FileItem with absolute paths.
 //
 // This method scans the FileManager's configured storage directory for markdown files.
 // It performs comprehensive security validation including symlink security checks,
 // reserved directory protection, and path traversal prevention.
 //
 // Returns:
-//   - []FileItem: List of discovered markdown files with paths relative to storage root
+//   - []FileItem: List of discovered markdown files with absolute paths
 //   - error: Scanning errors including security violations
 //
 // Security: Uses secure directory scanning with protection against path traversal and symlink attacks.
 // Validates storage path and symlinks to prevent access to system directories.
+// File paths are validated and converted to absolute paths during scanning.
 func (fm *FileManager) ScanRepository() ([]FileItem, error) {
 	if fm == nil {
 		return nil, fmt.Errorf("filemanager is nil")
@@ -174,13 +178,15 @@ func (fm *FileManager) ScanRepository() ([]FileItem, error) {
 		return nil, fmt.Errorf("failed to scan storage directory: %w", err)
 	}
 
-	// Convert fileops.FileInfo to filemanager.FileItem
+	// Convert fileops.FileInfo to filemanager.FileItem with absolute paths
 	var result []FileItem
 	for _, file := range files {
 		if !file.IsDir { // Only include files, not directories
+			// Construct absolute path immediately during scan
+			absPath := filepath.Join(storageRoot, file.Path)
 			result = append(result, FileItem{
 				Name: file.Name,
-				Path: file.Path,
+				Path: absPath,
 			})
 		}
 	}
@@ -189,78 +195,10 @@ func (fm *FileManager) ScanRepository() ([]FileItem, error) {
 	return result, nil
 }
 
-// GetAbsolutePath returns the absolute path for a FileItem from central repository.
-// This is needed for FilePicker which requires absolute paths for file reading.
-func (fm *FileManager) GetAbsolutePath(item FileItem) string {
-	return filepath.Join(fm.storageDir, item.Path)
-}
-
-// GetAbsolutePathCWD returns the absolute path for a FileItem from current directory.
-// This is needed for FilePicker which requires absolute paths for file reading.
-func (fm *FileManager) GetAbsolutePathCWD(item FileItem) string {
-	cwd, _ := os.Getwd()
-	return filepath.Join(cwd, item.Path)
-}
-
-// ConvertToAbsolutePaths converts a slice of FileItems with relative paths to absolute paths
-// for the storage directory. This is needed for FilePicker which requires absolute paths for file reading.
-//
-// Parameters:
-//   - items: List of FileItems with paths relative to storage directory
-//
-// Returns:
-//   - []FileItem: New slice with absolute paths for storage directory
-//
-// Note: This creates a new slice and does not modify the original items.
-func (fm *FileManager) ConvertToAbsolutePaths(items []FileItem) []FileItem {
-	if len(items) == 0 {
-		return []FileItem{}
-	}
-
-	result := make([]FileItem, len(items))
-	for i, item := range items {
-		result[i] = FileItem{
-			Name:           item.Name,
-			Path:           fm.GetAbsolutePath(item),
-			RepositoryID:   item.RepositoryID,
-			RepositoryName: item.RepositoryName,
-			RepositoryType: item.RepositoryType,
-		}
-	}
-	return result
-}
-
-// ConvertToAbsolutePathsCWD converts a slice of FileItems with relative paths to absolute paths
-// for the current working directory. This is needed for FilePicker which requires absolute paths for file reading.
-//
-// Parameters:
-//   - items: List of FileItems with paths relative to current working directory
-//
-// Returns:
-//   - []FileItem: New slice with absolute paths for current working directory
-//
-// Note: This creates a new slice and does not modify the original items.
-func (fm *FileManager) ConvertToAbsolutePathsCWD(items []FileItem) []FileItem {
-	if len(items) == 0 {
-		return []FileItem{}
-	}
-
-	result := make([]FileItem, len(items))
-	for i, item := range items {
-		result[i] = FileItem{
-			Name:           item.Name,
-			Path:           fm.GetAbsolutePathCWD(item),
-			RepositoryID:   item.RepositoryID,
-			RepositoryName: item.RepositoryName,
-			RepositoryType: item.RepositoryType,
-		}
-	}
-	return result
-}
-
 // ScanAllRepositories scans multiple repositories and merges their file lists.
 // This function is the main entry point for multi-repository file discovery.
 // Files are tagged with their source repository metadata for display and tracking.
+// All paths are returned as absolute paths, validated during scanning.
 //
 // The function maintains repository order - files from earlier repositories appear
 // first in the result list. This provides predictable, stable ordering for UI display.
@@ -270,7 +208,7 @@ func (fm *FileManager) ConvertToAbsolutePathsCWD(items []FileItem) []FileItem {
 //   - logger: Logger for structured logging (can be nil)
 //
 // Returns:
-//   - []FileItem: Merged list of files from all repositories with source metadata
+//   - []FileItem: Merged list of files from all repositories with absolute paths and source metadata
 //   - error: Scanning errors (partial results may be returned with error)
 //
 // Usage:
@@ -282,6 +220,7 @@ func (fm *FileManager) ConvertToAbsolutePathsCWD(items []FileItem) []FileItem {
 //	}
 //
 // Security: Paths are pre-validated by PrepareAllRepositories, so this function can safely assume valid paths.
+// File paths are validated and converted to absolute paths during scanning.
 func ScanAllRepositories(prepared []repository.PreparedRepository, logger *logging.AppLogger) ([]FileItem, error) {
 	if logger != nil {
 		logger.Info("Starting multi-repository scan", "repository_count", len(prepared))
@@ -323,7 +262,7 @@ func ScanAllRepositories(prepared []repository.PreparedRepository, logger *loggi
 			continue
 		}
 
-		// Scan the repository
+		// Scan the repository - files already have absolute paths from ScanRepository
 		files, err := fm.ScanRepository()
 		if err != nil {
 			errorMsg := fmt.Sprintf("repository %s (%s): scan failed: %v", prep.ID(), prep.Name(), err)
@@ -335,6 +274,7 @@ func ScanAllRepositories(prepared []repository.PreparedRepository, logger *loggi
 		}
 
 		// Tag each file with repository metadata
+		// Paths are already absolute from ScanRepository
 		for i := range files {
 			files[i].RepositoryID = prep.ID()
 			files[i].RepositoryName = prep.Name()

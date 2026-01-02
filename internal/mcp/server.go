@@ -21,12 +21,12 @@ import (
 )
 
 type Server struct {
-	config        *config.Config
-	logger        *logging.AppLogger
-	fileManager   *filemanager.FileManager
-	mcpServer     *server.MCPServer
-	toolRegistry  map[string]*RuleFileTool // Maps tool names to their RuleFileTool instances
-	ruleProcessor *RuleFileProcessor       // Handles rule file parsing and processing
+	config               *config.Config
+	logger               *logging.AppLogger
+	mcpServer            *server.MCPServer
+	toolRegistry         map[string]*RuleFileTool        // Maps tool names to their RuleFileTool instances
+	ruleProcessor        *RuleFileProcessor              // Handles rule file parsing and processing
+	preparedRepositories []repository.PreparedRepository // Prepared repositories with paths and sync status
 }
 
 // NewServer creates a new MCP server instance
@@ -45,33 +45,26 @@ func (s *Server) Start() error {
 	// Create MCP server instance
 	s.mcpServer = server.NewMCPServer("rulem", "1.0.0", server.WithToolCapabilities(true))
 
-	// Prepare repository and initialize file manager for scanning
-	localPath, syncInfo, err := repository.PrepareRepository(s.config.Central, s.logger)
+	// Prepare all repositories
+	// This validates, prepares, syncs, and logs all repositories
+	prepared, err := repository.PrepareAllRepositories(s.config.Repositories, s.logger)
 	if err != nil {
-		// Log the original low-level error for diagnostics
-		s.logger.Error("Repository preparation failed", "error", err)
-
-		// Return a clearer, user-facing message to avoid misleading low-level details
-		return fmt.Errorf(
-			"Cannot prepare the central repository at '%s'. The location may be read-only or not writable. Choose a writable directory and try again. Suggested location: %s",
-			s.config.Central.Path,
-			repository.GetDefaultStorageDir(),
-		)
+		s.logger.Error("Multi-repository preparation failed", "error", err)
+		return fmt.Errorf("failed to prepare repositories: %w", err)
 	}
 
-	// Surface sync information to user if available
-	if syncInfo.Message != "" {
-		s.logger.Info("Repository status", "message", syncInfo.Message)
+	// Store prepared repositories for later use
+	s.preparedRepositories = prepared
+
+	// Build repository paths map for rule file processor
+	repositoryPaths := make(map[string]string, len(prepared))
+	for _, prep := range prepared {
+		repositoryPaths[prep.ID()] = prep.LocalPath
 	}
 
-	s.fileManager, err = filemanager.NewFileManager(localPath, s.logger)
-	if err != nil {
-		return fmt.Errorf("failed to initialize file manager: %w", err)
-	}
-
-	// Initialize rule file processor
+	// Initialize rule file processor with repository paths
 	maxFileSize := int64(5 * 1024 * 1024) // 5 MB
-	s.ruleProcessor = NewRuleFileProcessor(s.logger, s.fileManager, maxFileSize)
+	s.ruleProcessor = NewRuleFileProcessor(s.logger, repositoryPaths, maxFileSize)
 
 	// Register rule files as MCP tools
 	err = s.RegisterRuleFileTools()
@@ -102,17 +95,17 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// getRepoFiles scans the central repository and returns the list of files
-// This helper function uses the filemanager to call ScanCentralRepo()
+// getRepoFiles scans all repositories and returns the aggregated list of files
+// This helper function uses filemanager.ScanAllRepositories() for multi-repository support
 func (s *Server) getRepoFiles() ([]filemanager.FileItem, error) {
-	if s.fileManager == nil {
-		return nil, fmt.Errorf("file manager not initialized")
+	if s.preparedRepositories == nil {
+		return nil, fmt.Errorf("repositories not initialized")
 	}
 
-	files, err := s.fileManager.ScanCentralRepo()
+	files, err := filemanager.ScanAllRepositories(s.preparedRepositories, s.logger)
 	if err != nil {
-		s.logger.Error("Failed to scan central repository", "error", err)
-		return nil, fmt.Errorf("failed to scan central repository: %w", err)
+		s.logger.Error("Failed to scan repositories", "error", err)
+		return nil, fmt.Errorf("failed to scan repositories: %w", err)
 	}
 
 	return files, nil
@@ -202,12 +195,12 @@ func (s *Server) getRulefileToolHandler(toolName string) (server.ToolHandlerFunc
 	}, nil
 }
 
-// InitializeComponents initializes the server components (file manager and rule processor)
+// InitializeComponents initializes the server components for multi-repository support
 // without starting the full MCP server. This method is specifically designed for testing
 // scenarios where you need to access server functionality without the MCP server lifecycle.
 //
 // This method initializes:
-//   - FileManager for repository scanning and file operations
+//   - Prepared repositories via PrepareAllRepositories (validates, prepares, syncs, logs)
 //   - RuleFileProcessor for parsing and processing rule files
 //
 // Use this method in tests when you need to call methods like RegisterRuleFileTools,
@@ -216,35 +209,28 @@ func (s *Server) getRulefileToolHandler(toolName string) (server.ToolHandlerFunc
 // For production use, prefer Start() which initializes components and starts the MCP server.
 //
 // Returns:
-//   - error: Initialization error if file manager creation fails
+//   - error: Initialization error if repository preparation fails
 func (s *Server) InitializeComponents() error {
-	// Prepare repository and initialize file manager for scanning
-	localPath, syncInfo, err := repository.PrepareRepository(s.config.Central, s.logger)
+	// Prepare all repositories for multi-repository support
+	// This validates, prepares, syncs, and logs all repositories
+	prepared, err := repository.PrepareAllRepositories(s.config.Repositories, s.logger)
 	if err != nil {
-		// Log the original low-level error for diagnostics
-		s.logger.Error("Repository preparation failed", "error", err)
-
-		// Return a clearer, user-facing message to avoid misleading low-level details
-		return fmt.Errorf(
-			"Cannot prepare the central repository at '%s'. The location may be read-only or not writable. Choose a writable directory and try again. Suggested location: %s",
-			s.config.Central.Path,
-			repository.GetDefaultStorageDir(),
-		)
+		s.logger.Error("Multi-repository preparation failed", "error", err)
+		return fmt.Errorf("failed to prepare repositories: %w", err)
 	}
 
-	// Surface sync information to user if available
-	if syncInfo.Message != "" {
-		s.logger.Info("Repository status", "message", syncInfo.Message)
+	// Store prepared repositories for later use
+	s.preparedRepositories = prepared
+
+	// Build repository paths map for rule file processor
+	repositoryPaths := make(map[string]string, len(prepared))
+	for _, prep := range prepared {
+		repositoryPaths[prep.ID()] = prep.LocalPath
 	}
 
-	s.fileManager, err = filemanager.NewFileManager(localPath, s.logger)
-	if err != nil {
-		return fmt.Errorf("failed to initialize file manager: %w", err)
-	}
-
-	// Initialize rule file processor
+	// Initialize rule file processor with repository paths for multi-repository support
 	maxFileSize := int64(5 * 1024 * 1024) // 5 MB
-	s.ruleProcessor = NewRuleFileProcessor(s.logger, s.fileManager, maxFileSize)
+	s.ruleProcessor = NewRuleFileProcessor(s.logger, repositoryPaths, maxFileSize)
 
 	return nil
 }

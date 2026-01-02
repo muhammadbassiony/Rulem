@@ -3,15 +3,14 @@ package mcp
 import (
 	"os"
 	"path/filepath"
-	"strings"
-	"testing"
-
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
+	"strings"
+	"testing"
 )
 
-func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string) {
+func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string, map[string]string) {
 	t.Helper()
 
 	tempDir, err := os.MkdirTemp("", "rulem-rulefile-test-*")
@@ -22,26 +21,29 @@ func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string) {
 	cfg := createTestConfigWithPath(tempDir)
 	logger, _ := logging.NewTestLogger()
 
-	// Prepare repository and get local path
-	localPath, _, err := repository.PrepareRepository(cfg.Central, logger)
+	// Prepare all repositories
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
 	if err != nil {
-		t.Fatalf("Failed to prepare repository: %v", err)
+		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
 
-	fileManager, err := filemanager.NewFileManager(localPath, logger)
-	if err != nil {
-		t.Fatalf("Failed to create file manager: %v", err)
+	// Build paths map for processor
+	pathsMap := make(map[string]string)
+	for _, prep := range prepared {
+		pathsMap[prep.ID()] = prep.LocalPath
 	}
 
-	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
-	return processor, tempDir
+	processor := NewRuleFileProcessor(logger, pathsMap, 5*1024*1024) // 5MB
+	return processor, tempDir, pathsMap
 }
 
 func TestNewRuleFileProcessor(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
-	fileManager, _ := filemanager.NewFileManager("/tmp", logger)
+	repositoryPaths := map[string]string{
+		"test-repo-123": "/tmp/test-repo",
+	}
 
-	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
+	processor := NewRuleFileProcessor(logger, repositoryPaths, 5*1024*1024) // 5MB
 
 	if processor == nil {
 		t.Fatal("NewRuleFileProcessor returned nil")
@@ -49,8 +51,8 @@ func TestNewRuleFileProcessor(t *testing.T) {
 	if processor.logger != logger {
 		t.Error("Processor logger not set correctly")
 	}
-	if processor.fileManager != fileManager {
-		t.Error("Processor fileManager not set correctly")
+	if processor.repositoryPaths == nil {
+		t.Error("Processor repositoryPaths not set correctly")
 	}
 	if processor.toolRegistry == nil {
 		t.Error("Tool registry should be initialized")
@@ -58,7 +60,7 @@ func TestNewRuleFileProcessor(t *testing.T) {
 }
 
 func TestGenerateToolName(t *testing.T) {
-	_, tempDir := createTestRuleFileProcessor(t)
+	_, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	tests := []struct {
@@ -126,7 +128,7 @@ func TestGenerateToolName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a new processor for each test to avoid conflicts
-			testProcessor, testTempDir := createTestRuleFileProcessor(t)
+			testProcessor, testTempDir, _ := createTestRuleFileProcessor(t)
 			defer os.RemoveAll(testTempDir)
 
 			result := testProcessor.generateToolName(tt.ruleFile)
@@ -138,7 +140,7 @@ func TestGenerateToolName(t *testing.T) {
 }
 
 func TestGenerateToolNameDuplicateHandling(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create a rule file that will generate the same name
@@ -182,7 +184,7 @@ func TestGenerateToolNameDuplicateHandling(t *testing.T) {
 }
 
 func TestGenerateToolNameWithFrontmatterNameDuplicates(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create rule files with the same frontmatter name
@@ -217,7 +219,7 @@ func TestGenerateToolNameWithFrontmatterNameDuplicates(t *testing.T) {
 }
 
 func TestGenerateToolNameEdgeCases(t *testing.T) {
-	_, tempDir := createTestRuleFileProcessor(t)
+	_, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	tests := []struct {
@@ -276,7 +278,7 @@ func TestGenerateToolNameEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a new processor for each test to avoid conflicts
-			testProcessor, testTempDir := createTestRuleFileProcessor(t)
+			testProcessor, testTempDir, _ := createTestRuleFileProcessor(t)
 			defer os.RemoveAll(testTempDir)
 
 			result := testProcessor.generateToolName(tt.ruleFile)
@@ -291,7 +293,7 @@ func TestGenerateToolNameEdgeCases(t *testing.T) {
 // Note: These tests use the same constants (ToolDescriptionPrefix and ApplyToFormat)
 // that the implementation uses, so they automatically adapt when those constants change
 func TestGenerateToolDescription(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	tests := []struct {
@@ -385,7 +387,7 @@ func TestGenerateToolDescription(t *testing.T) {
 }
 
 func TestGenerateToolDescriptionEdgeCases(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	tests := []struct {
@@ -443,7 +445,7 @@ func TestGenerateToolDescriptionEdgeCases(t *testing.T) {
 }
 
 func TestProcessRuleFiles(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create test files with frontmatter
@@ -500,8 +502,13 @@ This file is missing the required description field.`,
 		}
 	}
 
-	// Get file items from file manager
-	files, err := processor.fileManager.ScanCentralRepo()
+	// Get file items from scanning the repository
+	cfg := createTestConfigWithPath(tempDir)
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+	files, err := filemanager.ScanAllRepositories(prepared, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to scan files: %v", err)
 	}
@@ -561,7 +568,7 @@ This file is missing the required description field.`,
 }
 
 func TestProcessRuleFilesEmptyList(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Process empty file list
@@ -576,7 +583,7 @@ func TestProcessRuleFilesEmptyList(t *testing.T) {
 }
 
 func TestProcessRuleFilesDuplicateNames(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create test files that will generate the same tool name
@@ -615,8 +622,13 @@ name: "test_rule"
 		}
 	}
 
-	// Get file items from file manager
-	files, err := processor.fileManager.ScanCentralRepo()
+	// Get file items from scanning the repository
+	cfg := createTestConfigWithPath(tempDir)
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+	files, err := filemanager.ScanAllRepositories(prepared, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to scan files: %v", err)
 	}
@@ -714,21 +726,22 @@ This file has invalid YAML frontmatter.`,
 	// Create file manager and processor with test logger
 	cfg := createTestConfigWithPath(tempDir)
 
-	// Prepare repository and get local path
-	localPath, _, err := repository.PrepareRepository(cfg.Central, logger)
+	// Prepare all repositories
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
 	if err != nil {
-		t.Fatalf("Failed to prepare repository: %v", err)
+		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
 
-	fileManager, err := filemanager.NewFileManager(localPath, logger)
-	if err != nil {
-		t.Fatalf("Failed to create file manager: %v", err)
+	// Build paths map for processor
+	pathsMap := make(map[string]string)
+	for _, prep := range prepared {
+		pathsMap[prep.ID()] = prep.LocalPath
 	}
 
-	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
+	processor := NewRuleFileProcessor(logger, pathsMap, 5*1024*1024)
 
 	// Get files for processing
-	files, err := fileManager.ScanCentralRepo()
+	files, err := filemanager.ScanAllRepositories(prepared, logger)
 	if err != nil {
 		t.Fatalf("Failed to scan repository: %v", err)
 	}
@@ -804,21 +817,22 @@ Write comprehensive tests.`,
 	// Create file manager and processor with test logger
 	cfg := createTestConfigWithPath(tempDir)
 
-	// Prepare repository and get local path
-	localPath, _, err := repository.PrepareRepository(cfg.Central, logger)
+	// Prepare all repositories
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
 	if err != nil {
-		t.Fatalf("Failed to prepare repository: %v", err)
+		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
 
-	fileManager, err := filemanager.NewFileManager(localPath, logger)
-	if err != nil {
-		t.Fatalf("Failed to create file manager: %v", err)
+	// Build paths map for processor
+	pathsMap := make(map[string]string)
+	for _, prep := range prepared {
+		pathsMap[prep.ID()] = prep.LocalPath
 	}
 
-	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
+	processor := NewRuleFileProcessor(logger, pathsMap, 5*1024*1024)
 
 	// Get files for processing
-	files, err := fileManager.ScanCentralRepo()
+	files, err := filemanager.ScanAllRepositories(prepared, logger)
 	if err != nil {
 		t.Fatalf("Failed to scan repository: %v", err)
 	}
@@ -879,7 +893,7 @@ func TestRuleFileProcessorErrorLogging(t *testing.T) {
 // Security and validation tests
 
 func TestValidateFrontmatter(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	tests := []struct {
@@ -1001,7 +1015,7 @@ func TestValidateFrontmatter(t *testing.T) {
 }
 
 func TestParseRuleFilesWithLargeFiles(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create test files directly since we can't modify processor settings
@@ -1029,7 +1043,12 @@ Small content`
 	}
 
 	// Get files for processing
-	files, err := processor.fileManager.ScanCentralRepo()
+	cfg := createTestConfigWithPath(tempDir)
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+	files, err := filemanager.ScanAllRepositories(prepared, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to scan repository: %v", err)
 	}
@@ -1046,8 +1065,8 @@ Small content`
 	}
 }
 
-func TestParseRuleFilesFilePermissionErrors(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+func TestParseRuleFilesFilePermissionErrorsSkipped(t *testing.T) {
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create a file with content
@@ -1068,7 +1087,12 @@ Test content`
 	defer os.Chmod(testPath, 0644) // Restore permissions for cleanup
 
 	// Get files for processing
-	files, err := processor.fileManager.ScanCentralRepo()
+	cfg := createTestConfigWithPath(tempDir)
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+	files, err := filemanager.ScanAllRepositories(prepared, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to scan repository: %v", err)
 	}
@@ -1086,7 +1110,7 @@ Test content`
 }
 
 func TestParseRuleFilesInvalidYAML(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create files with various YAML issues
@@ -1133,8 +1157,13 @@ Valid content`,
 		}
 	}
 
-	// Get files for processing
-	files, err := processor.fileManager.ScanCentralRepo()
+	// Get files for processing - should return empty list due to invalid YAML
+	cfg := createTestConfigWithPath(tempDir)
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+	files, err := filemanager.ScanAllRepositories(prepared, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to scan repository: %v", err)
 	}
@@ -1156,7 +1185,7 @@ Valid content`,
 }
 
 func TestRuleFileProcessorConfigurability(t *testing.T) {
-	_, tempDir := createTestRuleFileProcessor(t)
+	_, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Configuration methods have been removed for simplicity
@@ -1165,7 +1194,7 @@ func TestRuleFileProcessorConfigurability(t *testing.T) {
 }
 
 func TestGenerateToolNameWithSanitization(t *testing.T) {
-	_, tempDir := createTestRuleFileProcessor(t)
+	_, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	tests := []struct {
@@ -1215,7 +1244,7 @@ func TestGenerateToolNameWithSanitization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a new processor for each test to avoid conflicts
-			testProcessor, testTempDir := createTestRuleFileProcessor(t)
+			testProcessor, testTempDir, _ := createTestRuleFileProcessor(t)
 			defer os.RemoveAll(testTempDir)
 
 			result := testProcessor.generateToolName(tt.ruleFile)
@@ -1227,7 +1256,7 @@ func TestGenerateToolNameWithSanitization(t *testing.T) {
 }
 
 func TestProcessRuleFilesWithValidationErrors(t *testing.T) {
-	processor, tempDir := createTestRuleFileProcessor(t)
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
 	defer os.RemoveAll(tempDir)
 
 	// Create test files with validation issues
@@ -1276,8 +1305,13 @@ Content with suspicious description`,
 		}
 	}
 
-	// Get files for processing
-	files, err := processor.fileManager.ScanCentralRepo()
+	// Get files for processing - should skip files with validation errors
+	cfg := createTestConfigWithPath(tempDir)
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+	files, err := filemanager.ScanAllRepositories(prepared, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to scan repository: %v", err)
 	}
@@ -1315,12 +1349,11 @@ func TestProcessRuleFileEnhancedValidation(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	logger, _ := logging.NewTestLogger()
-	fileManager, err := filemanager.NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("Failed to create file manager: %v", err)
+	repositoryPaths := map[string]string{
+		"test-repo-123": tempDir,
 	}
 
-	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
+	processor := NewRuleFileProcessor(logger, repositoryPaths, 5*1024*1024) // 5MB
 
 	tests := []struct {
 		name        string
@@ -1337,13 +1370,17 @@ description: "Valid test rule"
 # Clean Rule
 This is clean content.`,
 			setupFunc: func() filemanager.FileItem {
-				filePath := filepath.Join(tempDir, "clean-rule.md")
+				filePath := filepath.Join(tempDir, "valid-rule.md")
 				os.WriteFile(filePath, []byte(`---
-description: "Valid test rule"
+description: "Valid rule"
 ---
-# Clean Rule
+# Valid Rule
 This is clean content.`), 0644)
-				return filemanager.FileItem{Name: "clean-rule.md", Path: "clean-rule.md"}
+				return filemanager.FileItem{
+					Name:         "valid-rule.md",
+					Path:         filePath, // Absolute path
+					RepositoryID: "test-repo-123",
+				}
 			},
 			expectError: false,
 		},
@@ -1363,7 +1400,11 @@ description: "Malicious rule"
 # Rule with Script
 <script>alert('xss')</script>
 This contains malicious content.`), 0644)
-				return filemanager.FileItem{Name: "malicious-rule.md", Path: "malicious-rule.md"}
+				return filemanager.FileItem{
+					Name:         "malicious-rule.md",
+					Path:         filePath, // Absolute path
+					RepositoryID: "test-repo-123",
+				}
 			},
 			expectError: true,
 			errorSubstr: "content security validation failed",
@@ -1374,7 +1415,11 @@ This contains malicious content.`), 0644)
 				filePath := filepath.Join(tempDir, "control-chars.md")
 				content := "---\ndescription: \"Rule with control chars\"\n---\n# Rule\nContent with \x00 null byte"
 				os.WriteFile(filePath, []byte(content), 0644)
-				return filemanager.FileItem{Name: "control-chars.md", Path: "control-chars.md"}
+				return filemanager.FileItem{
+					Name:         "control-chars.md",
+					Path:         filePath, // Absolute path
+					RepositoryID: "test-repo-123",
+				}
 			},
 			expectError: true,
 			errorSubstr: "content security validation failed",
@@ -1388,7 +1433,11 @@ This contains malicious content.`), 0644)
 				largeContent := strings.Repeat("This is a large file. ", 500000) // ~11MB
 				content := frontmatter + largeContent
 				os.WriteFile(filePath, []byte(content), 0644)
-				return filemanager.FileItem{Name: "large-file.md", Path: "large-file.md"}
+				return filemanager.FileItem{
+					Name:         "large-file.md",
+					Path:         filePath, // Absolute path
+					RepositoryID: "test-repo-123",
+				}
 			},
 			expectError: true,
 			errorSubstr: "file size check failed",
@@ -1432,12 +1481,11 @@ func TestProcessRuleFileSymlinkValidation(t *testing.T) {
 	defer os.RemoveAll(outsideDir)
 
 	logger, _ := logging.NewTestLogger()
-	fileManager, err := filemanager.NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("Failed to create file manager: %v", err)
+	repositoryPaths := map[string]string{
+		"test-repo-123": tempDir,
 	}
 
-	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
+	processor := NewRuleFileProcessor(logger, repositoryPaths, 5*1024*1024) // 5MB
 
 	// Create target file outside storage directory
 	outsideFile := filepath.Join(outsideDir, "outside-rule.md")
@@ -1457,7 +1505,11 @@ This is outside content.`
 		t.Fatalf("Failed to create symlink: %v", err)
 	}
 
-	fileItem := filemanager.FileItem{Name: "bad-symlink.md", Path: "bad-symlink.md"}
+	fileItem := filemanager.FileItem{
+		Name:         "bad-symlink.md",
+		Path:         linkPath, // Absolute path
+		RepositoryID: "test-repo-123",
+	}
 	_, err = processor.processRuleFile(fileItem)
 
 	if err == nil {
@@ -1477,12 +1529,11 @@ func TestProcessRuleFileDirectoryBoundaryValidation(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	logger, _ := logging.NewTestLogger()
-	fileManager, err := filemanager.NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("Failed to create file manager: %v", err)
+	repositoryPaths := map[string]string{
+		"test-repo-123": tempDir,
 	}
 
-	processor := NewRuleFileProcessor(logger, fileManager, 5*1024*1024) // 5MB
+	processor := NewRuleFileProcessor(logger, repositoryPaths, 5*1024*1024) // 5MB
 
 	// Create a file outside the storage directory
 	outsideDir := filepath.Dir(tempDir)
@@ -1498,17 +1549,18 @@ This should not be accessible.`
 	defer os.Remove(outsideFile)
 
 	// Try to process a file that's outside the storage directory
-	// This simulates a path traversal attempt
-	outsideFileItem := filemanager.FileItem{
-		Name: "outside-rule.md",
-		Path: "../outside-rule.md",
+	// This simulates a file with an absolute path outside the repository
+	fileItem := filemanager.FileItem{
+		Name:         "outside-rule.md",
+		Path:         outsideFile, // Absolute path outside repository
+		RepositoryID: "test-repo-123",
 	}
 
-	_, err = processor.processRuleFile(outsideFileItem)
+	_, err = processor.processRuleFile(fileItem)
 	if err == nil {
 		t.Error("Expected error for file outside storage directory")
-	} else if !strings.Contains(err.Error(), "path security check failed") &&
-		!strings.Contains(err.Error(), "file containment validation failed") {
-		t.Errorf("Expected path security or containment error, got: %v", err)
+	} else if !strings.Contains(err.Error(), "file containment validation failed") &&
+		!strings.Contains(err.Error(), "path security check failed") {
+		t.Errorf("Expected file containment or path security error, got: %v", err)
 	}
 }

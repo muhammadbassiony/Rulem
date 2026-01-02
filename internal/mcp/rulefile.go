@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"strings"
-
+	"path/filepath"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/pkg/fileops"
+	"strings"
 
 	"github.com/adrg/frontmatter"
 )
@@ -55,27 +55,27 @@ type RuleFileTool struct {
 
 // RuleFileProcessor handles rule file operations including parsing, naming, and tool generation
 type RuleFileProcessor struct {
-	logger       *logging.AppLogger
-	fileManager  *filemanager.FileManager
-	toolRegistry map[string]*RuleFileTool
-	maxFileSize  int64 // Maximum file size in bytes
+	logger          *logging.AppLogger
+	repositoryPaths map[string]string // Maps repository IDs to local filesystem paths
+	toolRegistry    map[string]*RuleFileTool
+	maxFileSize     int64 // Maximum file size in bytes
 }
 
 // NewRuleFileProcessor creates a new RuleFileProcessor instance
-func NewRuleFileProcessor(logger *logging.AppLogger, fileManager *filemanager.FileManager, maxFileSize int64) *RuleFileProcessor {
+func NewRuleFileProcessor(logger *logging.AppLogger, repositoryPaths map[string]string, maxFileSize int64) *RuleFileProcessor {
 	return &RuleFileProcessor{
-		logger:       logger,
-		fileManager:  fileManager,
-		toolRegistry: make(map[string]*RuleFileTool),
-		maxFileSize:  maxFileSize,
+		logger:          logger,
+		repositoryPaths: repositoryPaths,
+		toolRegistry:    make(map[string]*RuleFileTool),
+		maxFileSize:     maxFileSize,
 	}
 }
 
 // ParseRuleFiles takes a list of file items and parses them for frontmatter
 // Returns only files that have valid YAML frontmatter with at least a 'description' field
 func (p *RuleFileProcessor) ParseRuleFiles(files []filemanager.FileItem) ([]RuleFile, error) {
-	if p.fileManager == nil {
-		return nil, fmt.Errorf("file manager not initialized")
+	if p.repositoryPaths == nil {
+		return nil, fmt.Errorf("repository paths not initialized")
 	}
 
 	var ruleFiles []RuleFile
@@ -102,10 +102,23 @@ func (p *RuleFileProcessor) ParseRuleFiles(files []filemanager.FileItem) ([]Rule
 
 // processRuleFile handles the complete processing pipeline for a single rule file
 func (p *RuleFileProcessor) processRuleFile(file filemanager.FileItem) (*RuleFile, error) {
-	absolutePath := p.fileManager.GetAbsolutePath(file)
+	// Get the repository path using the repository paths map
+	repoPath, exists := p.repositoryPaths[file.RepositoryID]
+	if !exists {
+		return nil, fmt.Errorf("repository path not found for repository ID: %s", file.RepositoryID)
+	}
+
+	// file.Path is now always an absolute path from scanning
+	absolutePath := file.Path
+
+	// Compute relative path for validation (path relative to repository root)
+	relativePath, err := filepath.Rel(repoPath, absolutePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute relative path: %w", err)
+	}
 
 	// Comprehensive file validation using fileops functions
-	if err := p.validateRuleFileAccess(absolutePath, file.Path); err != nil {
+	if err := p.validateRuleFileAccess(absolutePath, relativePath, repoPath); err != nil {
 		return nil, fmt.Errorf("file validation failed: %w", err)
 	}
 
@@ -146,7 +159,7 @@ func (p *RuleFileProcessor) processRuleFile(file filemanager.FileItem) (*RuleFil
 }
 
 // validateRuleFileAccess performs comprehensive file validation using fileops functions
-func (p *RuleFileProcessor) validateRuleFileAccess(absolutePath, relativePath string) error {
+func (p *RuleFileProcessor) validateRuleFileAccess(absolutePath, relativePath, repoPath string) error {
 	// Basic path security validation
 	if err := fileops.ValidatePathSecurity(relativePath); err != nil {
 		return fmt.Errorf("path security check failed: %w", err)
@@ -162,12 +175,8 @@ func (p *RuleFileProcessor) validateRuleFileAccess(absolutePath, relativePath st
 		return fmt.Errorf("file access check failed: %w", err)
 	}
 
-	// Get storage directory for containment validation
-	// Use the file manager's storage directory
-	storageDir := p.fileManager.GetStorageDir()
-
-	// Validate that file is within the storage directory boundary
-	if err := fileops.ValidateFileInDirectory(absolutePath, storageDir); err != nil {
+	// Validate that file is within the repository directory boundary
+	if err := fileops.ValidateFileInDirectory(absolutePath, repoPath); err != nil {
 		return fmt.Errorf("file containment validation failed: %w", err)
 	}
 
@@ -175,7 +184,7 @@ func (p *RuleFileProcessor) validateRuleFileAccess(absolutePath, relativePath st
 	if isSymlink, err := fileops.IsSymlink(absolutePath); err != nil {
 		return fmt.Errorf("symlink check failed: %w", err)
 	} else if isSymlink {
-		allowedPaths := []string{storageDir}
+		allowedPaths := []string{repoPath}
 		if err := fileops.ValidateSymlinkSecurity(absolutePath, allowedPaths); err != nil {
 			return fmt.Errorf("symlink security check failed: %w", err)
 		}
@@ -185,7 +194,7 @@ func (p *RuleFileProcessor) validateRuleFileAccess(absolutePath, relativePath st
 			return fmt.Errorf("symlink resolution failed: %w", err)
 		} else {
 			// Validate the resolved target is also within bounds
-			if err := fileops.ValidateFileInDirectory(target, storageDir); err != nil {
+			if err := fileops.ValidateFileInDirectory(target, repoPath); err != nil {
 				return fmt.Errorf("symlink target validation failed: %w", err)
 			}
 		}

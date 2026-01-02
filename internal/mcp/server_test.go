@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"rulem/internal/config"
+	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
 
@@ -61,7 +62,15 @@ More content here.`
 
 func createTestConfigWithPath(path string) *config.Config {
 	return &config.Config{
-		Central: repository.CentralRepositoryConfig{Path: path},
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "test-repo-123456",
+				Name:      "Test Repository",
+				Type:      repository.RepositoryTypeLocal,
+				CreatedAt: 1234567890,
+				Path:      path,
+			},
+		},
 	}
 }
 
@@ -136,9 +145,7 @@ func TestServer_Construction(t *testing.T) {
 			if server.logger != logger {
 				t.Error("Server logger not set correctly")
 			}
-			if server.fileManager != nil {
-				t.Error("FileManager should not be initialized until InitializeComponents() is called")
-			}
+
 			if server.mcpServer != nil {
 				t.Error("MCP server should not be initialized until Start() is called")
 			}
@@ -187,18 +194,18 @@ func TestServer_ComponentInitialization(t *testing.T) {
 			if tt.wantError {
 				if err == nil {
 					t.Error("Expected error but got none")
-				} else if !strings.Contains(err.Error(), "failed to prepare repository") {
-					t.Errorf("Expected error containing \"failed to prepare repository\", got %q", err.Error())
+				} else if !strings.Contains(err.Error(), "failed to prepare repositories") {
+					t.Errorf("Expected error containing \"failed to prepare repositories\", got %q", err.Error())
 				}
 			} else {
 				if err != nil {
 					t.Errorf("Expected no error, got %v", err)
 				}
-				if server.fileManager == nil {
-					t.Error("FileManager should be initialized")
-				}
 				if server.ruleProcessor == nil {
 					t.Error("RuleProcessor should be initialized")
+				}
+				if server.preparedRepositories == nil {
+					t.Error("PreparedRepositories should be initialized")
 				}
 			}
 		})
@@ -650,9 +657,9 @@ func TestServer_ErrorConditions(t *testing.T) {
 				err := server.InitializeComponents()
 				if tt.expectError {
 					if err == nil {
-						t.Error("Expected error but got none")
-					} else if !strings.Contains(err.Error(), "failed to prepare repository") {
-						t.Errorf("Expected error containing \"failed to prepare repository\", got %q", err.Error())
+						t.Errorf("Expected error containing \"failed to prepare repositories\", got no error")
+					} else if !strings.Contains(err.Error(), "failed to prepare repositories") {
+						t.Errorf("Expected error containing \"failed to prepare repositories\", got %q", err.Error())
 					}
 				} else if err != nil {
 					t.Errorf("Expected no error, got %v", err)
@@ -839,4 +846,558 @@ func TestServer_ContentHandling(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestServer_MultiRepositoryInitialization tests server initialization with multiple repositories
+func TestServer_MultiRepositoryInitialization(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupFunc     func(t *testing.T) *config.Config
+		expectError   bool
+		errorContains string
+		validateFunc  func(t *testing.T, s *Server)
+	}{
+		{
+			name: "single repository",
+			setupFunc: func(t *testing.T) *config.Config {
+				tempDir := t.TempDir()
+				return createTestConfigWithPath(tempDir)
+			},
+			expectError: false,
+			validateFunc: func(t *testing.T, s *Server) {
+				if len(s.preparedRepositories) != 1 {
+					t.Errorf("Expected 1 prepared repository, got %d", len(s.preparedRepositories))
+				}
+			},
+		},
+		{
+			name: "multiple local repositories",
+			setupFunc: func(t *testing.T) *config.Config {
+				tempDir1 := t.TempDir()
+				tempDir2 := t.TempDir()
+				tempDir3 := t.TempDir()
+
+				return &config.Config{
+					Repositories: []repository.RepositoryEntry{
+						{
+							ID:        "repo1-123456",
+							Name:      "Repository 1",
+							Type:      repository.RepositoryTypeLocal,
+							Path:      tempDir1,
+							CreatedAt: 1234567890,
+						},
+						{
+							ID:        "repo2-123457",
+							Name:      "Repository 2",
+							Type:      repository.RepositoryTypeLocal,
+							Path:      tempDir2,
+							CreatedAt: 1234567891,
+						},
+						{
+							ID:        "repo3-123458",
+							Name:      "Repository 3",
+							Type:      repository.RepositoryTypeLocal,
+							Path:      tempDir3,
+							CreatedAt: 1234567892,
+						},
+					},
+				}
+			},
+			expectError: false,
+			validateFunc: func(t *testing.T, s *Server) {
+				if len(s.preparedRepositories) != 3 {
+					t.Errorf("Expected 3 prepared repositories, got %d", len(s.preparedRepositories))
+				}
+				expectedIDs := []string{"repo1-123456", "repo2-123457", "repo3-123458"}
+				foundIDs := make(map[string]bool)
+				for _, prep := range s.preparedRepositories {
+					foundIDs[prep.ID()] = true
+				}
+				for _, id := range expectedIDs {
+					if !foundIDs[id] {
+						t.Errorf("Expected prepared repository for ID %s", id)
+					}
+				}
+			},
+		},
+		{
+			name: "empty repository list",
+			setupFunc: func(t *testing.T) *config.Config {
+				return &config.Config{
+					Repositories: []repository.RepositoryEntry{},
+				}
+			},
+			expectError: false,
+			validateFunc: func(t *testing.T, s *Server) {
+				if len(s.preparedRepositories) != 0 {
+					t.Errorf("Expected 0 prepared repositories, got %d", len(s.preparedRepositories))
+				}
+			},
+		},
+		{
+			name: "one invalid repository among valid ones",
+			setupFunc: func(t *testing.T) *config.Config {
+				tempDir1 := t.TempDir()
+				tempDir2 := t.TempDir()
+
+				return &config.Config{
+					Repositories: []repository.RepositoryEntry{
+						{
+							ID:        "repo1-123456",
+							Name:      "Valid Repo",
+							Type:      repository.RepositoryTypeLocal,
+							Path:      tempDir1,
+							CreatedAt: 1234567890,
+						},
+						{
+							ID:        "repo2-123457",
+							Name:      "Invalid Repo",
+							Type:      repository.RepositoryTypeLocal,
+							Path:      "/nonexistent/invalid/path",
+							CreatedAt: 1234567891,
+						},
+						{
+							ID:        "repo3-123458",
+							Name:      "Another Valid Repo",
+							Type:      repository.RepositoryTypeLocal,
+							Path:      tempDir2,
+							CreatedAt: 1234567892,
+						},
+					},
+				}
+			},
+			expectError:   true,
+			errorContains: "failed to prepare",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.setupFunc(t)
+			logger, _ := logging.NewTestLogger()
+			server := NewServer(cfg, logger)
+
+			err := server.InitializeComponents()
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.errorContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got %v", err)
+				}
+				if tt.validateFunc != nil {
+					tt.validateFunc(t, server)
+				}
+			}
+		})
+	}
+}
+
+// TestServer_MultiRepositoryFileDiscovery tests file discovery from multiple repositories
+func TestServer_MultiRepositoryFileDiscovery(t *testing.T) {
+	// Create test directories with rule files
+	tempDir1 := t.TempDir()
+	tempDir2 := t.TempDir()
+	tempDir3 := t.TempDir()
+
+	// Create rule files in each repository
+	ruleFile1 := `---
+description: "Rule from repository 1"
+name: "repo1_rule"
+---
+# Repository 1 Rule
+Content from repo 1`
+
+	ruleFile2 := `---
+description: "Rule from repository 2"
+name: "repo2_rule"
+---
+# Repository 2 Rule
+Content from repo 2`
+
+	ruleFile3 := `---
+description: "Rule from repository 3"
+name: "repo3_rule"
+---
+# Repository 3 Rule
+Content from repo 3`
+
+	// Write files to repositories
+	if err := os.WriteFile(filepath.Join(tempDir1, "rule1.md"), []byte(ruleFile1), 0644); err != nil {
+		t.Fatalf("Failed to write rule file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir2, "rule2.md"), []byte(ruleFile2), 0644); err != nil {
+		t.Fatalf("Failed to write rule file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir3, "rule3.md"), []byte(ruleFile3), 0644); err != nil {
+		t.Fatalf("Failed to write rule file: %v", err)
+	}
+
+	// Create config with multiple repositories
+	cfg := &config.Config{
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "repo1-123456",
+				Name:      "Repository 1",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir1,
+				CreatedAt: 1234567890,
+			},
+			{
+				ID:        "repo2-123457",
+				Name:      "Repository 2",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir2,
+				CreatedAt: 1234567891,
+			},
+			{
+				ID:        "repo3-123458",
+				Name:      "Repository 3",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir3,
+				CreatedAt: 1234567892,
+			},
+		},
+	}
+
+	logger, _ := logging.NewTestLogger()
+
+	// Prepare repositories directly
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+
+	// Scan files from all repositories
+	files, err := filemanager.ScanAllRepositories(prepared, logger)
+	if err != nil {
+		t.Fatalf("Failed to scan repositories: %v", err)
+	}
+
+	// Verify all files are discovered
+	if len(files) != 3 {
+		t.Errorf("Expected 3 files from 3 repositories, got %d", len(files))
+	}
+
+	// Verify files have correct repository metadata
+	repoIDCount := make(map[string]int)
+	for _, file := range files {
+		repoIDCount[file.RepositoryID]++
+	}
+
+	expectedRepos := []string{"repo1-123456", "repo2-123457", "repo3-123458"}
+	for _, repoID := range expectedRepos {
+		if count := repoIDCount[repoID]; count != 1 {
+			t.Errorf("Expected 1 file from repository %s, got %d", repoID, count)
+		}
+	}
+}
+
+// TestServer_MultiRepositoryFilesWithSameNames tests handling of files with same names from different repos
+func TestServer_MultiRepositoryFilesWithSameNames(t *testing.T) {
+	// Create test directories
+	tempDir1 := t.TempDir()
+	tempDir2 := t.TempDir()
+
+	// Create rule files with same filename but different content
+	ruleFile1 := `---
+description: "Standards from team A"
+name: "coding_standards"
+---
+# Team A Standards`
+
+	ruleFile2 := `---
+description: "Standards from team B"
+name: "coding_standards"
+---
+# Team B Standards`
+
+	// Write files to repositories
+	if err := os.WriteFile(filepath.Join(tempDir1, "standards.md"), []byte(ruleFile1), 0644); err != nil {
+		t.Fatalf("Failed to write rule file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir2, "standards.md"), []byte(ruleFile2), 0644); err != nil {
+		t.Fatalf("Failed to write rule file: %v", err)
+	}
+
+	// Create config with multiple repositories
+	cfg := &config.Config{
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "teamA-123456",
+				Name:      "Team A Repo",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir1,
+				CreatedAt: 1234567890,
+			},
+			{
+				ID:        "teamB-123457",
+				Name:      "Team B Repo",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir2,
+				CreatedAt: 1234567891,
+			},
+		},
+	}
+
+	logger, _ := logging.NewTestLogger()
+
+	// Prepare repositories and scan files
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+
+	files, err := filemanager.ScanAllRepositories(prepared, logger)
+	if err != nil {
+		t.Fatalf("Failed to scan repositories: %v", err)
+	}
+
+	// Both files should be discovered
+	if len(files) != 2 {
+		t.Errorf("Expected 2 files, got %d", len(files))
+	}
+
+	// Verify files have correct repository IDs
+	repoIDs := make(map[string]bool)
+	for _, file := range files {
+		repoIDs[file.RepositoryID] = true
+		if file.Name != "standards.md" {
+			t.Errorf("Expected filename 'standards.md', got %q", file.Name)
+		}
+	}
+
+	if len(repoIDs) != 2 {
+		t.Errorf("Expected files from 2 different repositories, got %d", len(repoIDs))
+	}
+}
+
+// TestServer_MultiRepositoryWithMixedContent tests repositories with valid and invalid files
+func TestServer_MultiRepositoryWithMixedContent(t *testing.T) {
+	// Create test directories
+	tempDir1 := t.TempDir()
+	tempDir2 := t.TempDir()
+
+	// Repository 1: All valid files
+	validFile1 := `---
+description: "Valid rule 1"
+---
+Content 1`
+	validFile2 := `---
+description: "Valid rule 2"
+---
+Content 2`
+
+	// Repository 2: Mix of valid and invalid files
+	validFile3 := `---
+description: "Valid rule 3"
+---
+Content 3`
+	invalidFile := `No frontmatter here
+Just plain content`
+
+	// Write files
+	if err := os.WriteFile(filepath.Join(tempDir1, "valid1.md"), []byte(validFile1), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir1, "valid2.md"), []byte(validFile2), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir2, "valid3.md"), []byte(validFile3), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir2, "invalid.md"), []byte(invalidFile), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	// Create config
+	cfg := &config.Config{
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "repo1-123456",
+				Name:      "All Valid Repo",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir1,
+				CreatedAt: 1234567890,
+			},
+			{
+				ID:        "repo2-123457",
+				Name:      "Mixed Content Repo",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir2,
+				CreatedAt: 1234567891,
+			},
+		},
+	}
+
+	logger, _ := logging.NewTestLogger()
+
+	// Prepare and scan repositories
+	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	if err != nil {
+		t.Fatalf("Failed to prepare repositories: %v", err)
+	}
+
+	files, err := filemanager.ScanAllRepositories(prepared, logger)
+	if err != nil {
+		t.Fatalf("Failed to scan repositories: %v", err)
+	}
+
+	// Should discover all 4 files (scanner doesn't validate frontmatter)
+	if len(files) != 4 {
+		t.Errorf("Expected 4 files discovered, got %d", len(files))
+	}
+
+	// Build paths map for processor
+	pathsMap := make(map[string]string)
+	for _, prep := range prepared {
+		pathsMap[prep.ID()] = prep.LocalPath
+	}
+
+	// Test that processor would skip invalid file during parsing
+	processor := NewRuleFileProcessor(logger, pathsMap, 5*1024*1024)
+	ruleFiles, err := processor.ParseRuleFiles(files)
+	if err != nil {
+		t.Fatalf("ParseRuleFiles failed: %v", err)
+	}
+
+	// Should only parse 3 valid files (invalid file should be skipped)
+	if len(ruleFiles) != 3 {
+		t.Errorf("Expected 3 valid rule files, got %d", len(ruleFiles))
+	}
+}
+
+// TestServer_MultiRepositoryMetadata tests that repository metadata is preserved in file items
+func TestServer_MultiRepositoryMetadata(t *testing.T) {
+	tempDir1 := t.TempDir()
+	tempDir2 := t.TempDir()
+
+	// Create rule files
+	ruleFile := `---
+description: "Test rule"
+---
+Content`
+
+	if err := os.WriteFile(filepath.Join(tempDir1, "rule1.md"), []byte(ruleFile), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir2, "rule2.md"), []byte(ruleFile), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	cfg := &config.Config{
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "local-repo-123456",
+				Name:      "Local Repository",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir1,
+				CreatedAt: 1234567890,
+			},
+			{
+				ID:        "second-repo-123457",
+				Name:      "Second Local Repository",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir2,
+				CreatedAt: 1234567891,
+			},
+		},
+	}
+
+	logger, _ := logging.NewTestLogger()
+	server := NewServer(cfg, logger)
+
+	if err := server.InitializeComponents(); err != nil {
+		t.Fatalf("Failed to initialize components: %v", err)
+	}
+
+	// Get files from all repositories
+	files, err := filemanager.ScanAllRepositories(server.preparedRepositories, logger)
+	if err != nil {
+		t.Fatalf("Failed to scan repositories: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("Expected 2 files, got %d", len(files))
+	}
+
+	// Verify metadata is set on file items
+	for _, file := range files {
+		if file.RepositoryID == "" {
+			t.Error("File missing RepositoryID")
+		}
+		if file.RepositoryName == "" {
+			t.Error("File missing RepositoryName")
+		}
+		if file.RepositoryType == "" {
+			t.Error("File missing RepositoryType")
+		}
+
+		// Verify correct metadata based on repository
+		if file.RepositoryID == "local-repo-123456" {
+			if file.RepositoryName != "Local Repository" {
+				t.Errorf("Expected repository name 'Local Repository', got %q", file.RepositoryName)
+			}
+			if file.RepositoryType != "local" {
+				t.Errorf("Expected repository type 'local', got %q", file.RepositoryType)
+			}
+		}
+		if file.RepositoryID == "second-repo-123457" {
+			if file.RepositoryName != "Second Local Repository" {
+				t.Errorf("Expected repository name 'Second Local Repository', got %q", file.RepositoryName)
+			}
+			if file.RepositoryType != "local" {
+				t.Errorf("Expected repository type 'local', got %q", file.RepositoryType)
+			}
+		}
+	}
+}
+
+// TestServer_SyncResultsLogging tests that sync results are properly logged
+func TestServer_SyncResultsLogging(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg := &config.Config{
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "test-repo-123456",
+				Name:      "Test Repository",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      tempDir,
+				CreatedAt: 1234567890,
+			},
+		},
+	}
+
+	logger, logBuffer := logging.NewTestLogger()
+	server := NewServer(cfg, logger)
+
+	if err := server.InitializeComponents(); err != nil {
+		t.Fatalf("Failed to initialize components: %v", err)
+	}
+
+	// Check that prepared repositories are stored
+	if server.preparedRepositories == nil {
+		t.Error("Expected preparedRepositories to be initialized")
+	}
+
+	// Verify we have prepared repositories
+	if len(server.preparedRepositories) != 1 {
+		t.Errorf("Expected 1 prepared repository, got %d", len(server.preparedRepositories))
+	}
+
+	// Verify logging occurred
+	logOutput := logBuffer.String()
+	if !strings.Contains(logOutput, "Multi-repository preparation") {
+		t.Error("Expected log message about multi-repository preparation")
+	}
+}
+
+// Helper function for creating string pointers in tests
+func StringPtr(s string) *string {
+	return &s
 }

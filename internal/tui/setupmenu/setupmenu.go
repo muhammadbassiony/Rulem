@@ -345,6 +345,14 @@ func (m *SetupModel) handleGitHubBranchKeys(msg tea.KeyMsg) (*SetupModel, tea.Cm
 	case "enter":
 		m.GitHubBranch = strings.TrimSpace(m.textInput.Value())
 		m.logger.LogUserAction("github_branch_submit", m.GitHubBranch)
+		
+		// Validate branch name format (can't validate remote existence until after clone)
+		if err := settingshelpers.ValidateBranchName(m.GitHubBranch); err != nil {
+			m.logger.Warn("Branch name validation failed", "error", err)
+			m.layout = m.layout.SetError(err)
+			return m, nil
+		}
+		
 		nextStatePlaceholder := settingshelpers.DeriveClonePath(m.GitHubURL)
 		if nextStatePlaceholder == "" {
 			nextStatePlaceholder = repository.GetDefaultStorageDir()

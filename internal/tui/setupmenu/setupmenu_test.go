@@ -432,6 +432,42 @@ func TestGitHubBranchInput(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid branch name shows error", func(t *testing.T) {
+		model := createModelInState(t, SetupStateGitHubBranch)
+		model.textInput.SetValue("invalid branch name") // Contains spaces
+
+		key := tea.KeyMsg{Type: tea.KeyEnter}
+		updatedModel, _ := model.Update(key)
+		model = updatedModel.(*SetupModel)
+
+		// Should stay in same state when validation fails
+		if model.state != SetupStateGitHubBranch {
+			t.Errorf("expected to stay in SetupStateGitHubBranch, got %v", model.state)
+		}
+		// Should have error set
+		if model.layout.GetError() == nil {
+			t.Error("expected error to be set for invalid branch name")
+		}
+	})
+
+	t.Run("branch with special characters shows error", func(t *testing.T) {
+		model := createModelInState(t, SetupStateGitHubBranch)
+		model.textInput.SetValue("feature/test~branch") // Contains ~
+
+		key := tea.KeyMsg{Type: tea.KeyEnter}
+		updatedModel, _ := model.Update(key)
+		model = updatedModel.(*SetupModel)
+
+		// Should stay in same state when validation fails
+		if model.state != SetupStateGitHubBranch {
+			t.Errorf("expected to stay in SetupStateGitHubBranch, got %v", model.state)
+		}
+		// Should have error set
+		if model.layout.GetError() == nil {
+			t.Error("expected error to be set for branch with special characters")
+		}
+	})
+
 	t.Run("escape goes back to url", func(t *testing.T) {
 		model := createModelInState(t, SetupStateGitHubBranch)
 

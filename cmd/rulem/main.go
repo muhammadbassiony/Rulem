@@ -19,15 +19,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
-	"syscall"
-
 	"rulem/internal/config"
 	"rulem/internal/logging"
-	mcp "rulem/internal/mcp"
 	"rulem/internal/tui"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/setupmenu"
+	"runtime"
+	"syscall"
+
+	mcp "rulem/internal/mcp"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -162,8 +162,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	if cfg == nil {
 		return fmt.Errorf("configuration is nil after loading")
 	}
-
-	appLogger.Info("Configuration loaded successfully", "central_path", cfg.Central.Path, "init_time", cfg.InitTime)
+	appLogger.Info("Configuration loaded successfully", "init_time", cfg.InitTime)
 
 	// Initialize TUI application with panic recovery
 	model := tui.NewMainModel(cfg, appLogger)
@@ -281,9 +280,8 @@ func runMCPServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("configuration is nil after loading")
 	}
 
-	appLogger.Info("Starting MCP server", "central_path", cfg.Central.Path)
-
 	// Create and start MCP server
+	appLogger.Info("Starting MCP server")
 	server := mcp.NewServer(cfg, appLogger)
 	if server == nil {
 		return fmt.Errorf("failed to initialize MCP server")

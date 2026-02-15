@@ -3,10 +3,9 @@ package repository
 import (
 	"os"
 	"path/filepath"
+	"rulem/internal/logging"
 	"strings"
 	"testing"
-
-	"rulem/internal/logging"
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/config"
@@ -21,7 +20,6 @@ func TestGitSource_Prepare_InitialClone_Success(t *testing.T) {
 
 	gs := NewGitSource(remoteURL, nil, clonePath)
 	gotPath, err := gs.Prepare(logger)
-
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for initial clone: %v", err)
 	}
@@ -58,7 +56,6 @@ func TestGitSource_Prepare_InitialClone_WithBranch(t *testing.T) {
 
 	gs := NewGitSource(remoteURL, &branch, clonePath)
 	gotPath, err := gs.Prepare(logger)
-
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for branch clone: %v", err)
 	}
@@ -990,6 +987,195 @@ func TestCheckRepositoryStatus(t *testing.T) {
 
 		if !isDirty {
 			t.Error("Expected dirty repository, but got clean status")
+		}
+	})
+}
+
+func TestValidateRemoteBranchExists(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+
+	tests := []struct {
+		name          string
+		setupRepo     func(t *testing.T) string // Returns repo path
+		branchName    string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "empty branch name is valid (default)",
+			setupRepo: func(t *testing.T) string {
+				tempDir := t.TempDir()
+				clonePath := filepath.Join(tempDir, "test-repo")
+				gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
+				_, err := gs.Prepare(logger)
+				if err != nil {
+					t.Fatalf("Failed to prepare test repository: %v", err)
+				}
+				return clonePath
+			},
+			branchName:  "",
+			expectError: false,
+		},
+		{
+			name: "valid branch exists on remote",
+			setupRepo: func(t *testing.T) string {
+				tempDir := t.TempDir()
+				clonePath := filepath.Join(tempDir, "test-repo")
+				gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
+				_, err := gs.Prepare(logger)
+				if err != nil {
+					t.Fatalf("Failed to prepare test repository: %v", err)
+				}
+				return clonePath
+			},
+			branchName:  "master", // octocat/Hello-World has a master branch
+			expectError: false,
+		},
+		{
+			name: "invalid branch does not exist on remote",
+			setupRepo: func(t *testing.T) string {
+				tempDir := t.TempDir()
+				clonePath := filepath.Join(tempDir, "test-repo")
+				gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
+				_, err := gs.Prepare(logger)
+				if err != nil {
+					t.Fatalf("Failed to prepare test repository: %v", err)
+				}
+				return clonePath
+			},
+			branchName:    "nonexistent-branch-xyz",
+			expectError:   true,
+			errorContains: "does not exist on remote",
+		},
+		{
+			name: "repository path does not exist",
+			setupRepo: func(t *testing.T) string {
+				return "/nonexistent/path/to/repo"
+			},
+			branchName:    "main",
+			expectError:   true,
+			errorContains: "failed to open repository",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoPath := tt.setupRepo(t)
+			err := ValidateRemoteBranchExists(repoPath, tt.branchName, logger)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got nil")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error containing '%s', got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestGitSource_checkoutBranch(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+
+	t.Run("checkout existing remote branch", func(t *testing.T) {
+		tempDir := t.TempDir()
+		clonePath := filepath.Join(tempDir, "test-repo")
+
+		// Clone repository with default branch
+		gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
+		_, err := gs.Prepare(logger)
+		if err != nil {
+			t.Fatalf("Failed to prepare test repository: %v", err)
+		}
+
+		// Open repository
+		repo, err := git.PlainOpen(clonePath)
+		if err != nil {
+			t.Fatalf("Failed to open repository: %v", err)
+		}
+
+		worktree, err := repo.Worktree()
+		if err != nil {
+			t.Fatalf("Failed to get worktree: %v", err)
+		}
+
+		// Checkout to master branch (should exist on octocat/Hello-World)
+		err = gs.checkoutBranch(repo, worktree, "master", logger)
+		if err != nil {
+			t.Fatalf("Failed to checkout branch: %v", err)
+		}
+
+		// Verify we're on the correct branch
+		head, err := repo.Head()
+		if err != nil {
+			t.Fatalf("Failed to get HEAD: %v", err)
+		}
+
+		if head.Name().Short() != "master" {
+			t.Errorf("Expected to be on 'master' branch, got: %s", head.Name().Short())
+		}
+	})
+
+	t.Run("checkout non-existent branch fails", func(t *testing.T) {
+		tempDir := t.TempDir()
+		clonePath := filepath.Join(tempDir, "test-repo")
+
+		gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
+		_, err := gs.Prepare(logger)
+		if err != nil {
+			t.Fatalf("Failed to prepare test repository: %v", err)
+		}
+
+		repo, err := git.PlainOpen(clonePath)
+		if err != nil {
+			t.Fatalf("Failed to open repository: %v", err)
+		}
+
+		worktree, err := repo.Worktree()
+		if err != nil {
+			t.Fatalf("Failed to get worktree: %v", err)
+		}
+
+		// Try to checkout non-existent branch
+		err = gs.checkoutBranch(repo, worktree, "nonexistent-branch-xyz", logger)
+		if err == nil {
+			t.Error("Expected error when checking out non-existent branch, got nil")
+		}
+		if err != nil && !strings.Contains(err.Error(), "does not exist on remote") {
+			t.Errorf("Expected error about branch not existing, got: %v", err)
+		}
+	})
+
+	t.Run("already on target branch is no-op", func(t *testing.T) {
+		tempDir := t.TempDir()
+		clonePath := filepath.Join(tempDir, "test-repo")
+
+		// Clone with specific branch
+		masterBranch := "master"
+		gs := NewGitSource("https://github.com/octocat/Hello-World.git", &masterBranch, clonePath)
+		_, err := gs.Prepare(logger)
+		if err != nil {
+			t.Fatalf("Failed to prepare test repository: %v", err)
+		}
+
+		repo, err := git.PlainOpen(clonePath)
+		if err != nil {
+			t.Fatalf("Failed to open repository: %v", err)
+		}
+
+		worktree, err := repo.Worktree()
+		if err != nil {
+			t.Fatalf("Failed to get worktree: %v", err)
+		}
+
+		// Checkout same branch again - should be no-op
+		err = gs.checkoutBranch(repo, worktree, "master", logger)
+		if err != nil {
+			t.Errorf("Unexpected error when already on target branch: %v", err)
 		}
 	})
 }

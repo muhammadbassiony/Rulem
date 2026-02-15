@@ -591,6 +591,22 @@ func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger 
 		}
 	}
 
+	// Check if we need to switch branches
+	// Note: Checkout failures are logged but don't fail the entire fetch operation
+	// This allows repositories with invalid branch configurations to still be accessible
+	// for editing/fixing in the settings menu
+	if gs.Branch != nil && *gs.Branch != "" {
+		if err := gs.checkoutBranch(repo, worktree, *gs.Branch, logger); err != nil {
+			if logger != nil {
+				logger.Warn("Failed to checkout configured branch, repository may be in inconsistent state",
+					"branch", *gs.Branch,
+					"error", err)
+			}
+			// Don't return error - allow repository to be used even with checkout failure
+			// User can fix the branch configuration via settings menu
+		}
+	}
+
 	return nil
 }
 
@@ -902,4 +918,130 @@ func (gs GitSource) normalizeGitURL(gitURL string) string {
 	}
 
 	return gitURL
+}
+
+// checkoutBranch checks out a specific branch in the repository.
+// If the local branch doesn't exist, it creates it tracking the remote branch.
+//
+// Parameters:
+//   - repo: The git repository instance
+//   - worktree: The working tree instance
+//   - branchName: Name of the branch to checkout
+//   - logger: Logger for operation tracking
+//
+// Returns:
+//   - error: If checkout fails or branch doesn't exist on remote
+func (gs GitSource) checkoutBranch(repo *git.Repository, worktree *git.Worktree, branchName string, logger *logging.AppLogger) error {
+	if logger != nil {
+		logger.Debug("Checking out branch", "branch", branchName)
+	}
+
+	// Get current branch
+	head, err := repo.Head()
+	if err != nil && err != plumbing.ErrReferenceNotFound {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Check if we're already on the target branch
+	if head != nil && head.Name().Short() == branchName {
+		if logger != nil {
+			logger.Debug("Already on target branch", "branch", branchName)
+		}
+		return nil
+	}
+
+	// Build the reference names
+	localBranchRef := plumbing.NewBranchReferenceName(branchName)
+	remoteBranchRef := plumbing.NewRemoteReferenceName("origin", branchName)
+
+	// Check if remote branch exists
+	_, err = repo.Reference(remoteBranchRef, true)
+	if err != nil {
+		return fmt.Errorf("branch '%s' does not exist on remote 'origin'", branchName)
+	}
+
+	// Try to get local branch reference
+	_, err = repo.Reference(localBranchRef, true)
+	
+	if err == plumbing.ErrReferenceNotFound {
+		// Local branch doesn't exist, create it
+		if logger != nil {
+			logger.Debug("Creating local branch", "branch", branchName)
+		}
+
+		// Get the remote branch reference to get its hash
+		remoteRef, err := repo.Reference(remoteBranchRef, true)
+		if err != nil {
+			return fmt.Errorf("failed to get remote branch reference: %w", err)
+		}
+
+		// Create local branch pointing to remote branch's commit
+		newRef := plumbing.NewHashReference(localBranchRef, remoteRef.Hash())
+		if err := repo.Storer.SetReference(newRef); err != nil {
+			return fmt.Errorf("failed to create local branch: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to get local branch reference: %w", err)
+	}
+
+	// Checkout the branch
+	checkoutOpts := &git.CheckoutOptions{
+		Branch: localBranchRef,
+		Force:  false, // Don't discard local changes
+	}
+
+	if err := worktree.Checkout(checkoutOpts); err != nil {
+		return fmt.Errorf("failed to checkout branch: %w", err)
+	}
+
+	if logger != nil {
+		logger.Info("Successfully checked out branch", "branch", branchName)
+	}
+
+	return nil
+}
+
+// ValidateRemoteBranchExists validates that a branch exists on the remote repository.
+// This function is used before saving branch configuration to ensure the branch is valid.
+//
+// Parameters:
+//   - repoPath: Local path to the git repository
+//   - branchName: Name of the branch to validate (empty string means default branch, always valid)
+//   - logger: Logger for operation tracking
+//
+// Returns:
+//   - error: If branch doesn't exist on remote or validation fails
+func ValidateRemoteBranchExists(repoPath string, branchName string, logger *logging.AppLogger) error {
+	// Empty branch name means use default - always valid
+	if strings.TrimSpace(branchName) == "" {
+		return nil
+	}
+
+	if logger != nil {
+		logger.Debug("Validating remote branch exists", "path", repoPath, "branch", branchName)
+	}
+
+	// Open the repository
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	// Build remote branch reference name
+	remoteBranchRef := plumbing.NewRemoteReferenceName("origin", branchName)
+
+	// Check if remote branch exists
+	_, err = repo.Reference(remoteBranchRef, true)
+	if err != nil {
+		if err == plumbing.ErrReferenceNotFound {
+			return fmt.Errorf("branch '%s' does not exist on remote 'origin' - fetch the repository first or use a valid branch name", branchName)
+		}
+		return fmt.Errorf("failed to check remote branch: %w", err)
+	}
+
+	if logger != nil {
+		logger.Debug("Remote branch validated successfully", "branch", branchName)
+	}
+
+	return nil
 }

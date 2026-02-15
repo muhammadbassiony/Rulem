@@ -127,6 +127,33 @@ func (cm *CredentialManager) ValidateGitHubTokenWithRepo(ctx context.Context, to
 	return nil
 }
 
+// ValidateGitHubTokenForRepos validates a GitHub Personal Access Token against all GitHub repositories.
+// It ensures at least one GitHub repository exists and validates access to each repo.
+func (cm *CredentialManager) ValidateGitHubTokenForRepos(ctx context.Context, token string, repos []RepositoryEntry) error {
+	var githubRepos []RepositoryEntry
+	for _, repo := range repos {
+		if repo.Type == RepositoryTypeGitHub {
+			githubRepos = append(githubRepos, repo)
+		}
+	}
+
+	if len(githubRepos) == 0 {
+		return fmt.Errorf("no GitHub repositories found.\n\nAdd a GitHub repository first before updating the PAT.")
+	}
+
+	for _, repo := range githubRepos {
+		if repo.RemoteURL == nil || strings.TrimSpace(*repo.RemoteURL) == "" {
+			return fmt.Errorf("GitHub repository '%s' has no remote URL", repo.Name)
+		}
+
+		if err := cm.ValidateGitHubTokenWithRepo(ctx, token, *repo.RemoteURL); err != nil {
+			return fmt.Errorf("PAT validation failed for repository '%s': %w", repo.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // StoreGitHubToken securely stores a GitHub Personal Access Token in the OS credential store.
 // The token should be validated using ValidateGitHubToken before calling this function.
 //

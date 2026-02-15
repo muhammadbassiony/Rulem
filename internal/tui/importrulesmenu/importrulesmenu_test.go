@@ -20,7 +20,15 @@ import (
 
 func createTestConfigWithPath(path string) *config.Config {
 	return &config.Config{
-		Central: repository.CentralRepositoryConfig{Path: path},
+		Repositories: []repository.RepositoryEntry{
+			{
+				ID:        "test-repo-1234567890",
+				Name:      "Test Repository",
+				Type:      repository.RepositoryTypeLocal,
+				Path:      path,
+				CreatedAt: 1234567890,
+			},
+		},
 	}
 }
 
@@ -115,10 +123,11 @@ func createTestModelWithFiles(t *testing.T) (*ImportRulesModel, []filemanager.Fi
 	model := NewImportRulesModel(ctx)
 
 	// Prepare repository and get local path
-	localPath, _, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
-	if err != nil {
+	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+	if err != nil || len(prepared) == 0 {
 		t.Fatalf("Failed to prepare repository: %v", err)
 	}
+	localPath := prepared[0].LocalPath
 
 	files := createTestFiles(t, localPath)
 	return model, files
@@ -130,7 +139,11 @@ func TestNewImportRulesModel(t *testing.T) {
 	model := createTestModel(t)
 
 	if model == nil {
-		t.Error("Model should not be nil")
+		t.Fatal("Model should not be nil")
+	}
+	// Debug: show the actual error if there is one
+	if model.err != nil {
+		t.Logf("Model initialization error: %v", model.err)
 	}
 	if model.state != StateLoading {
 		t.Errorf("Expected state %v, got %v", StateLoading, model.state)
@@ -138,8 +151,8 @@ func TestNewImportRulesModel(t *testing.T) {
 	if model.logger == nil {
 		t.Error("Logger should not be nil")
 	}
-	if model.fileManager == nil {
-		t.Error("FileManager should not be nil")
+	if len(model.preparedRepos) == 0 {
+		t.Error("PreparedRepos should not be empty")
 	}
 	if model.filePicker != nil {
 		t.Error("FilePicker should be nil initially")
@@ -245,9 +258,9 @@ func TestNewImportRulesModel_EditorListInitialization(t *testing.T) {
 
 // Test Init
 
-func TestImportRulesModel_Init_WithNilFileManager(t *testing.T) {
+func TestImportRulesModel_Init_WithNoPreparedRepos(t *testing.T) {
 	model := createTestModel(t)
-	model.fileManager = nil
+	model.preparedRepos = nil
 
 	cmd := model.Init()
 	if cmd == nil {
@@ -259,8 +272,8 @@ func TestImportRulesModel_Init_WithNilFileManager(t *testing.T) {
 	if !ok {
 		t.Errorf("Expected ImportFileErrorMsg, got %T", msg)
 	}
-	if !strings.Contains(errorMsg.Err.Error(), "FileManager not initialized") {
-		t.Error("Error message should mention FileManager not initialized")
+	if !strings.Contains(errorMsg.Err.Error(), "no repositories available") {
+		t.Errorf("Error message should mention no repositories available: %v", errorMsg.Err)
 	}
 	if errorMsg.IsOverwriteError {
 		t.Error("Should not be an overwrite error")
@@ -1327,7 +1340,7 @@ func TestImportRulesModel_CompleteWorkflow(t *testing.T) {
 
 // TestImportRulesModel_FilePickerCanReadFiles tests that the FilePicker receives
 // absolute paths and can actually read file contents. This catches the regression
-// where ScanCentralRepo returns relative paths but FilePicker needs absolute paths.
+// where ScanRepository returns relative paths but FilePicker needs absolute paths.
 func TestImportRulesModel_FilePickerCanReadFiles(t *testing.T) {
 	// Create storage directory with test files
 	storageDir := createTestStorageDir(t)
@@ -1351,7 +1364,7 @@ func TestImportRulesModel_FilePickerCanReadFiles(t *testing.T) {
 
 	// Create model
 	ctx := createTestUIContext(t)
-	ctx.Config.Central.Path = storageDir
+	ctx.Config.Repositories[0].Path = storageDir
 	model := NewImportRulesModel(ctx)
 
 	// Initialize and trigger file scan
@@ -1426,9 +1439,8 @@ func TestImportRulesModel_FilePickerCanReadFiles(t *testing.T) {
 	}
 }
 
-// TestImportRulesModel_RelativeToAbsoluteConversion tests the conversion from
-// relative paths (from ScanCentralRepo) to absolute paths (for FilePicker)
-func TestImportRulesModel_RelativeToAbsoluteConversion(t *testing.T) {
+// TestImportRulesModel_AbsolutePaths tests that scanning returns absolute paths directly
+func TestImportRulesModel_AbsolutePaths(t *testing.T) {
 	storageDir := createTestStorageDir(t)
 
 	// Create a test file
@@ -1439,54 +1451,41 @@ func TestImportRulesModel_RelativeToAbsoluteConversion(t *testing.T) {
 	}
 
 	ctx := createTestUIContext(t)
-	ctx.Config.Central.Path = storageDir
+	ctx.Config.Repositories[0].Path = storageDir
 
 	// Prepare repository and get local path
-	localPath, _, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
-	if err != nil {
+	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+	if err != nil || len(prepared) == 0 {
 		t.Fatalf("Failed to prepare repository: %v", err)
 	}
+	localPath := prepared[0].LocalPath
 
-	// Create FileManager directly to test the conversion
+	// Create FileManager directly to test scanning
 	fm, err := filemanager.NewFileManager(localPath, ctx.Logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
-	// Get files with relative paths
-	relativeFiles, err := fm.ScanCentralRepo()
+	// Get files - should already have absolute paths
+	files, err := fm.ScanRepository()
 	if err != nil {
-		t.Fatalf("ScanCentralRepo failed: %v", err)
+		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
-	if len(relativeFiles) == 0 {
+	if len(files) == 0 {
 		t.Fatal("Should have found at least one file")
 	}
 
-	// Verify files have relative paths
-	for _, file := range relativeFiles {
-		if filepath.IsAbs(file.Path) {
-			t.Errorf("ScanCentralRepo should return relative paths, got absolute: %s", file.Path)
-		}
-	}
-
-	// Convert to absolute paths
-	absoluteFiles := fm.ConvertToAbsolutePaths(relativeFiles)
-
-	// Verify conversion worked
-	if len(absoluteFiles) != len(relativeFiles) {
-		t.Errorf("Conversion should preserve count: relative=%d, absolute=%d", len(relativeFiles), len(absoluteFiles))
-	}
-
-	for i, file := range absoluteFiles {
+	// Verify files have absolute paths
+	for i, file := range files {
 		if !filepath.IsAbs(file.Path) {
-			t.Errorf("Converted file %d should have absolute path, got: %s", i, file.Path)
+			t.Errorf("File %d should have absolute path, got: %s", i, file.Path)
 		}
 
-		// Verify file can be read
+		// Verify file can be read directly using the path
 		content, err := os.ReadFile(file.Path)
 		if err != nil {
-			t.Errorf("Failed to read converted file %s: %v", file.Path, err)
+			t.Errorf("Failed to read file %s: %v", file.Path, err)
 		}
 
 		if string(content) != testContent {
@@ -1541,7 +1540,15 @@ func TestImportRulesModel_BrokenSymlinkOverwrite(t *testing.T) {
 		Width:  80,
 		Height: 24,
 		Config: &config.Config{
-			Central: repository.CentralRepositoryConfig{Path: storageDir},
+			Repositories: []repository.RepositoryEntry{
+				{
+					ID:        "test-repo-1234567890",
+					Name:      "Test Repository",
+					Type:      repository.RepositoryTypeLocal,
+					Path:      storageDir,
+					CreatedAt: 1234567890,
+				},
+			},
 		},
 		Logger: createTestLogger(),
 	}

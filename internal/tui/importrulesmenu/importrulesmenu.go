@@ -97,9 +97,11 @@ type ImportRulesModel struct {
 	editorList         list.Model
 	selectedEditor     editors.EditorRuleConfig
 
-	// FileManager instance
-	fileManager      *filemanager.FileManager
-	ruleFiles        []filemanager.FileItem // List of markdown files found in the storage directory
+	// Multi-repository support (T009)
+	preparedRepos []repository.PreparedRepository // All prepared repositories
+
+	// Data
+	ruleFiles        []filemanager.FileItem // List of markdown files found across all repositories
 	selectedFile     filemanager.FileItem
 	finalDestPath    string // Final destination path after successful import
 	isOverwriteError bool
@@ -156,10 +158,10 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	s.Style = styles.SpinnerStyle
 	s.Spinner = spinner.Pulse
 
-	// Prepare repository and get local path
-	localPath, syncInfo, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
+	// T009: Prepare all repositories using multi-repository orchestration
+	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
 	if err != nil {
-		ctx.Logger.Error("Failed to prepare repository", "error", err)
+		ctx.Logger.Error("Failed to prepare repositories", "error", err)
 		return &ImportRulesModel{
 			logger:           ctx.Logger,
 			state:            StateError,
@@ -168,7 +170,7 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 			filePicker:       nil,
 			importModeList:   importModeList,
 			editorList:       editorsList,
-			fileManager:      nil,
+			preparedRepos:    nil,
 			ruleFiles:        nil,
 			selectedFile:     filemanager.FileItem{},
 			isOverwriteError: false,
@@ -176,14 +178,35 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 		}
 	}
 
-	// Surface sync information if available
-	if syncInfo.Message != "" {
-		ctx.Logger.Info("Repository status", "message", syncInfo.Message)
+	if len(prepared) == 0 {
+		ctx.Logger.Error("No repositories configured")
+		return &ImportRulesModel{
+			logger:           ctx.Logger,
+			state:            StateError,
+			layout:           layout,
+			spinner:          s,
+			filePicker:       nil,
+			importModeList:   importModeList,
+			editorList:       editorsList,
+			preparedRepos:    nil,
+			ruleFiles:        nil,
+			selectedFile:     filemanager.FileItem{},
+			isOverwriteError: false,
+			err:              fmt.Errorf("no repositories configured - please run setup first"),
+		}
 	}
 
-	fm, err := filemanager.NewFileManager(localPath, ctx.Logger)
-	if err != nil {
-		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
+	// Log sync results for user awareness
+	for _, prep := range prepared {
+		if prep.SyncResult.Status != repository.SyncStatusSuccess {
+			msg := prep.SyncResult.GetMessage()
+			if msg != "" {
+				ctx.Logger.Info("Repository sync status",
+					"repository", prep.Name(),
+					"status", msg,
+				)
+			}
+		}
 	}
 
 	return &ImportRulesModel{
@@ -194,7 +217,7 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 		filePicker:       nil, // created after scan
 		importModeList:   importModeList,
 		editorList:       editorsList,
-		fileManager:      fm,
+		preparedRepos:    prepared,
 		ruleFiles:        nil, // will be populated after scan
 		selectedFile:     filemanager.FileItem{},
 		isOverwriteError: false,
@@ -209,10 +232,11 @@ func (m *ImportRulesModel) Init() tea.Cmd {
 		return nil
 	}
 
-	if m.fileManager == nil {
+	// T009: Check that we have prepared repositories
+	if len(m.preparedRepos) == 0 {
 		return func() tea.Msg {
 			return ImportFileErrorMsg{
-				Err:              fmt.Errorf("FileManager not initialized - invalid storage directory"),
+				Err:              fmt.Errorf("no repositories available - please run setup first"),
 				IsOverwriteError: false,
 			}
 		}
@@ -255,10 +279,10 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FileScanCompleteMsg:
 		m.logger.Debug("Import rules model - File scan completed", "files_count", len(message.Files))
-		// Convert relative paths from ScanCentralRepo to absolute paths for FilePicker
-		m.ruleFiles = m.fileManager.ConvertToAbsolutePaths(message.Files)
+		// T009: Files from ScanAllRepositories already have absolute paths and repository metadata
+		m.ruleFiles = message.Files
 
-		m.logger.Debug("Import rules model - converted scanned files paths to absolute")
+		m.logger.Debug("Import rules model - files ready with repository metadata")
 		m.state = StateFileSelection
 		m.err = nil
 
@@ -266,7 +290,7 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ctx := helpers.NewUIContext(m.layout.ContentWidth(), m.layout.ContentHeight(), nil, m.logger)
 		m.logger.Debug("Import rules model - Creating FilePicker", "content_width", m.layout.ContentWidth(), "content_height", m.layout.ContentHeight())
 
-		// Files now have absolute paths suitable for FilePicker file reading
+		// Files now have repository metadata (RepositoryName, RepositoryType) for subtitle display
 		fp := filepicker.NewFilePicker(
 			"📄  Import rules",
 			"Select a rule file to import from your central rules repository (press Enter). \nUse / to filter, arrows to navigate, g to toggle formatting.",
@@ -685,15 +709,18 @@ func (m *ImportRulesModel) viewError() string {
 
 // COMMANDS
 
-// scanForFilesCmd asynchronously scans central storage repo tree for markdown files.
+// scanForFilesCmd asynchronously scans all central repositories for markdown files.
+// T009: Uses ScanAllRepositories to merge files from multiple repositories.
 func (m *ImportRulesModel) scanForFilesCmd() tea.Cmd {
-	m.logger.Debug("Import rules - File scan started for central repository")
+	m.logger.Debug("Import rules - File scan started for all repositories", "repo_count", len(m.preparedRepos))
 	return func() tea.Msg {
-		files, err := m.fileManager.ScanCentralRepo()
+		// T009: Scan all prepared repositories using ScanAllRepositories
+		files, err := filemanager.ScanAllRepositories(m.preparedRepos, m.logger)
 		if err != nil {
 			m.logger.Error("Import rules - File scan failed", "error", err)
 			return FileScanErrorMsg{Err: err}
 		}
+		// Files already have absolute paths from ScanAllRepositories
 		return FileScanCompleteMsg{Files: files}
 	}
 }
@@ -701,22 +728,46 @@ func (m *ImportRulesModel) scanForFilesCmd() tea.Cmd {
 func (m *ImportRulesModel) saveFileCmd(overwrite bool) tea.Cmd {
 	m.logger.Debug("Importing file", "path", m.selectedFile.Path, "mode", m.selectedImportMode.title, "editor", m.selectedEditor.Title(), "overwrite", overwrite)
 	return func() tea.Msg {
-		// Path of the file in storage, now absolute from ScanCentralRepo
+		// Path of the file in storage, now absolute from ScanAllRepositories
 		storagePath := m.selectedFile.Path
 
 		// Use the selected editor config to generate the destination file path
 		// this will be relative to the CWD.
 		destFilePath := m.selectedEditor.GenerateRuleFileFullPath(m.selectedFile.Name)
 
+		// T009: Find the source repository to create FileManager for copy/link operations
+		// The file's RepositoryID tells us which repository it came from
+		var sourceRepoPath string
+		for _, prep := range m.preparedRepos {
+			if prep.ID() == m.selectedFile.RepositoryID {
+				sourceRepoPath = prep.LocalPath
+				break
+			}
+		}
+
+		if sourceRepoPath == "" {
+			// Fallback: use the first repository (for single-repo compatibility)
+			if len(m.preparedRepos) > 0 {
+				sourceRepoPath = m.preparedRepos[0].LocalPath
+			} else {
+				return ImportFileErrorMsg{Err: fmt.Errorf("no repository found for file: %s", m.selectedFile.Name), IsOverwriteError: false}
+			}
+		}
+
+		// Create FileManager for the source repository
+		fm, err := filemanager.NewFileManager(sourceRepoPath, m.logger)
+		if err != nil {
+			return ImportFileErrorMsg{Err: fmt.Errorf("failed to access source repository: %w", err), IsOverwriteError: false}
+		}
+
 		var finalDestPath string
-		var err error
 		switch m.selectedImportMode.copyMode {
 		case CopyModeOptionCopy:
 			// Copy the file to the current working directory
 			m.logger.Debug("Calling CopyFileFromStorage", "storagePath", storagePath, "destFilePath", destFilePath)
-			finalDestPath, err = m.fileManager.CopyFileFromStorage(storagePath, destFilePath, overwrite)
+			finalDestPath, err = fm.CopyFileFromStorage(storagePath, destFilePath, overwrite)
 			if err != nil {
-				m.logger.Error("Failed to copy file from storage", "error", err, "storagePath", storagePath, "destFdestFilePathilename", destFilePath)
+				m.logger.Error("Failed to copy file from storage", "error", err, "storagePath", storagePath, "destFilePath", destFilePath)
 				isOverwriteError := strings.Contains(err.Error(), "already exists")
 				return ImportFileErrorMsg{Err: err, IsOverwriteError: isOverwriteError}
 			}
@@ -725,7 +776,7 @@ func (m *ImportRulesModel) saveFileCmd(overwrite bool) tea.Cmd {
 		case CopyModeOptionLink:
 			// Create a symbolic link to the file in the current working directory
 			m.logger.Debug("Calling CreateSymlinkFromStorage", "storagePath", storagePath, "destFilePath", destFilePath)
-			finalDestPath, err = m.fileManager.CreateSymlinkFromStorage(storagePath, destFilePath, overwrite)
+			finalDestPath, err = fm.CreateSymlinkFromStorage(storagePath, destFilePath, overwrite)
 			if err != nil {
 				m.logger.Error("Failed to create symlink from storage", "error", err, "storagePath", storagePath, "destFilePath", destFilePath)
 				isOverwriteError := strings.Contains(err.Error(), "already exists")

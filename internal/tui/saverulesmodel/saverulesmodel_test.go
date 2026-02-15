@@ -437,6 +437,36 @@ func TestNavigationWorkflow(t *testing.T) {
 	}
 }
 
+// TestWindowResizeInErrorState verifies that window resize messages don't cause
+// nil pointer dereference when the model is in error state (e.g., repository
+// preparation failed). This is a regression test for a bug where
+// repositoryList.SetSize() was called without checking if repos were prepared.
+func TestWindowResizeInErrorState(t *testing.T) {
+	// Create a model in error state with nil preparedRepos (simulating repo prep failure)
+	model := SaveRulesModel{
+		logger:        createTestLogger(),
+		state:         StateError,
+		err:           errors.New("repository validation failed"),
+		preparedRepos: nil, // Critical: no prepared repos
+	}
+
+	// Send a window resize message - this should NOT panic
+	resizeMsg := tea.WindowSizeMsg{Width: 100, Height: 50}
+
+	// This should not panic
+	var recovered interface{}
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+		model.Update(resizeMsg)
+	}()
+
+	if recovered != nil {
+		t.Errorf("Window resize in error state caused panic: %v", recovered)
+	}
+}
+
 func TestErrorScenarios(t *testing.T) {
 	model := createTestModel(t)
 
@@ -1291,7 +1321,7 @@ func TestSaveRulesModel_FilePickerReceivesAbsolutePaths(t *testing.T) {
 	}
 }
 
-func TestSaveRulesModel_RelativeToAbsoluteConversion(t *testing.T) {
+func TestSaveRulesModel_AbsolutePaths(t *testing.T) {
 	// Create working directory with test file
 	workDir := createTestWorkingDir(t)
 
@@ -1316,46 +1346,32 @@ func TestSaveRulesModel_RelativeToAbsoluteConversion(t *testing.T) {
 	storageDir := createTestStorageDir(t)
 	logger := createTestLogger()
 
-	// Create FileManager directly to test the conversion
+	// Create FileManager directly to test scanning
 	fm, err := filemanager.NewFileManager(storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
-	// Get files with relative paths from CWD scan
-	relativeFiles, err := fm.ScanCurrDirectory()
+	// Get files - should already have absolute paths
+	files, err := fm.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
 
-	if len(relativeFiles) == 0 {
+	if len(files) == 0 {
 		t.Fatal("Should have found at least one file")
 	}
 
-	// Verify files have relative paths initially
-	for _, file := range relativeFiles {
-		if filepath.IsAbs(file.Path) {
-			t.Errorf("ScanCurrDirectory should return relative paths, got absolute: %s", file.Path)
-		}
-	}
-
-	// Convert to absolute paths (this is what the SaveRulesModel does)
-	absoluteFiles := fm.ConvertToAbsolutePathsCWD(relativeFiles)
-
-	// Verify conversion worked
-	if len(absoluteFiles) != len(relativeFiles) {
-		t.Errorf("Conversion should preserve count: relative=%d, absolute=%d", len(relativeFiles), len(absoluteFiles))
-	}
-
-	for i, file := range absoluteFiles {
+	// Verify files have absolute paths
+	for i, file := range files {
 		if !filepath.IsAbs(file.Path) {
-			t.Errorf("Converted file %d should have absolute path, got: %s", i, file.Path)
+			t.Errorf("File %d should have absolute path, got: %s", i, file.Path)
 		}
 
-		// Verify file can be read
+		// Verify file can be read directly using the path
 		content, err := os.ReadFile(file.Path)
 		if err != nil {
-			t.Errorf("Failed to read converted file %s: %v", file.Path, err)
+			t.Errorf("Failed to read file %s: %v", file.Path, err)
 		}
 
 		if string(content) != testContent {

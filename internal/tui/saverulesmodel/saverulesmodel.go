@@ -2,16 +2,17 @@ package saverulesmodel
 
 import (
 	"fmt"
-	"strings"
-
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
+	"rulem/internal/tui/helpers/repolist"
 	"rulem/internal/tui/styles"
+	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,13 +21,14 @@ import (
 type SaveFileModelState int
 
 const (
-	StateLoading       SaveFileModelState = iota // Scanning filesystem for markdown files
-	StateFileSelection                           // Showing file picker with preview
-	StateFileNameInput                           // Allowing user to override destination filename
-	StateConfirmation                            // Confirming overwrite scenario
-	StateSaving                                  // Performing save
-	StateSuccess                                 // Save completed
-	StateError                                   // Any error state
+	StateLoading             SaveFileModelState = iota // Scanning filesystem for markdown files
+	StateFileSelection                                 // Showing file picker with preview
+	StateFileNameInput                                 // Allowing user to override destination filename
+	StateRepositorySelection                           // User selecting destination repository (only if multiple)
+	StateConfirmation                                  // Confirming overwrite scenario
+	StateSaving                                        // Performing save
+	StateSuccess                                       // Save completed
+	StateError                                         // Any error state
 )
 
 // Custom messages (internal domain-specific) for async operations and transitions.
@@ -63,6 +65,11 @@ type SaveRulesModel struct {
 	// Filename input (optional rename)
 	nameInput textinput.Model
 
+	// Repository selection (T008: multi-repository support)
+	preparedRepos    []repository.PreparedRepository // All prepared repositories
+	repositoryList   list.Model                      // Bubble Tea list for repository selection
+	selectedRepoItem *repolist.RepositoryListItem    // Selected repository for saving
+
 	// Data
 	markdownFiles    []filemanager.FileItem
 	selectedFile     filemanager.FileItem
@@ -71,7 +78,7 @@ type SaveRulesModel struct {
 	err              error
 	isOverwriteError bool
 
-	// FileManager instance
+	// FileManager instance (for the selected repository)
 	fileManager *filemanager.FileManager
 }
 
@@ -97,10 +104,10 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	nameInput.CharLimit = 255
 	nameInput.Width = 50
 
-	// Prepare repository and get local path
-	localPath, syncInfo, err := repository.PrepareRepository(ctx.Config.Central, ctx.Logger)
+	// Prepare all repositories using multi-repository orchestration (T008)
+	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
 	if err != nil {
-		ctx.Logger.Error("Failed to prepare repository", "error", err)
+		ctx.Logger.Error("Failed to prepare repositories", "error", err)
 		return SaveRulesModel{
 			logger:           ctx.Logger,
 			state:            StateError,
@@ -108,6 +115,9 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 			spinner:          s,
 			filePicker:       nil,
 			nameInput:        nameInput,
+			preparedRepos:    nil,
+			repositoryList:   list.Model{},
+			selectedRepoItem: nil,
 			markdownFiles:    []filemanager.FileItem{},
 			selectedFile:     filemanager.FileItem{},
 			newFileName:      "",
@@ -118,14 +128,59 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		}
 	}
 
-	// Surface sync information if available
-	if syncInfo.Message != "" {
-		ctx.Logger.Info("Repository status", "message", syncInfo.Message)
+	if len(prepared) == 0 {
+		ctx.Logger.Error("No repositories configured")
+		return SaveRulesModel{
+			logger:           ctx.Logger,
+			state:            StateError,
+			layout:           layout,
+			spinner:          s,
+			filePicker:       nil,
+			nameInput:        nameInput,
+			preparedRepos:    nil,
+			repositoryList:   list.Model{},
+			selectedRepoItem: nil,
+			markdownFiles:    []filemanager.FileItem{},
+			selectedFile:     filemanager.FileItem{},
+			newFileName:      "",
+			destinationPath:  "",
+			err:              fmt.Errorf("no repositories configured - please run setup first"),
+			isOverwriteError: false,
+			fileManager:      nil,
+		}
 	}
 
-	fm, err := filemanager.NewFileManager(localPath, ctx.Logger)
-	if err != nil {
-		ctx.Logger.Error("Failed to initialize FileManager", "error", err)
+	// Log sync results for user awareness
+	for _, prep := range prepared {
+		if prep.SyncResult.Status != repository.SyncStatusSuccess {
+			msg := prep.SyncResult.GetMessage()
+			if msg != "" {
+				ctx.Logger.Info("Repository sync status",
+					"repository", prep.Name(),
+					"status", msg,
+				)
+			}
+		}
+	}
+
+	// Build repository selection list (used if multiple repos)
+	repoItems := repolist.BuildRepositoryListItems(prepared)
+	repoListModel := repolist.BuildRepositoryList(repoItems, layout.ContentWidth(), layout.ContentHeight())
+
+	// For single repository, auto-select and create FileManager immediately
+	var fm *filemanager.FileManager
+	var selectedRepo *repolist.RepositoryListItem
+	if len(prepared) == 1 {
+		selectedRepo = &repolist.RepositoryListItem{
+			ID:   prepared[0].ID(),
+			Name: prepared[0].Name(),
+			Type: string(prepared[0].Type()),
+			Path: prepared[0].LocalPath,
+		}
+		fm, err = filemanager.NewFileManager(prepared[0].LocalPath, ctx.Logger)
+		if err != nil {
+			ctx.Logger.Error("Failed to initialize FileManager", "error", err)
+		}
 	}
 
 	return SaveRulesModel{
@@ -135,6 +190,9 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		spinner:          s,
 		filePicker:       nil, // created after scan
 		nameInput:        nameInput,
+		preparedRepos:    prepared,
+		repositoryList:   repoListModel,
+		selectedRepoItem: selectedRepo,
 		markdownFiles:    []filemanager.FileItem{},
 		selectedFile:     filemanager.FileItem{},
 		newFileName:      "",
@@ -146,7 +204,21 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 }
 
 // Init starts asynchronous scanning for markdown files.
+// For single repository, scanning starts immediately.
+// For multiple repositories, we scan first, then prompt for repository selection before saving.
 func (m SaveRulesModel) Init() tea.Cmd {
+	// For multiple repos, we don't need FileManager until repository is selected
+	// We still scan current directory for markdown files first
+	if len(m.preparedRepos) > 1 {
+		// Create a temporary FileManager just for scanning current directory
+		// We'll create the real one when repository is selected
+		return tea.Batch(
+			m.scanForFilesCmdNoManager(),
+			m.spinner.Tick,
+		)
+	}
+
+	// Single repository case - FileManager should already be initialized
 	if m.fileManager == nil {
 		return func() tea.Msg {
 			return SaveFileErrorMsg{
@@ -162,7 +234,6 @@ func (m SaveRulesModel) Init() tea.Cmd {
 }
 
 func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-
 	// Update layout
 	m.layout, _ = m.layout.Update(msg)
 
@@ -182,12 +253,22 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filePicker = fp
 			}
 		}
+
+		// Propagate to repository list (T008) - only if we have prepared repos
+		// Skip when in error state to avoid nil pointer dereference
+		if m.state != StateError && m.preparedRepos != nil {
+			width := m.layout.ContentWidth()
+			height := m.layout.ContentHeight()
+			m.repositoryList.SetSize(width, height)
+		}
+
 		return m, tea.Batch(cmds...)
 
 	case FileScanCompleteMsg:
 		m.logger.Debug("Save rules model - File scan completed", "files_count", len(message.Files))
-		// Convert relative paths from ScanCurrDirectory to absolute paths for FilePicker
-		m.markdownFiles = m.fileManager.ConvertToAbsolutePathsCWD(message.Files)
+
+		// Files already have absolute paths from scanning
+		m.markdownFiles = message.Files
 		m.state = StateFileSelection
 		m.err = nil
 
@@ -282,6 +363,14 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				m.commitOrDefaultFilename()
 				m.nameInput.Blur()
+
+				// T008: If multiple repositories, prompt for selection before saving
+				if len(m.preparedRepos) > 1 {
+					m.state = StateRepositorySelection
+					return m, nil
+				}
+
+				// Single repository - proceed directly to saving
 				m.state = StateSaving
 				newNamePtr := m.optionalNewNamePtr()
 				return m, tea.Batch(
@@ -294,6 +383,54 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.nameInput, cmd = m.nameInput.Update(message)
 				m.newFileName = m.nameInput.Value()
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
+
+		case StateRepositorySelection:
+			// T008: Handle repository selection for multi-repo support
+			switch message.String() {
+			case "enter":
+				// Get the selected repository
+				selected, _ := repolist.GetSelectedRepository(m.repositoryList)
+				if selected == nil {
+					m.logger.Warn("No repository selected")
+					return m, nil
+				}
+
+				m.selectedRepoItem = selected
+				m.logger.Debug("Repository selected for save", "repo_id", selected.ID, "repo_name", selected.Name)
+
+				// Initialize FileManager for the selected repository
+				var err error
+				m.fileManager, err = filemanager.NewFileManager(selected.Path, m.logger)
+				if err != nil {
+					m.logger.Error("Failed to initialize FileManager for selected repo", "error", err)
+					m.err = fmt.Errorf("failed to access repository '%s': %w", selected.Name, err)
+					m.state = StateError
+					return m, nil
+				}
+
+				// Proceed to saving
+				m.state = StateSaving
+				newNamePtr := m.optionalNewNamePtr()
+				return m, tea.Batch(
+					m.saveFileCmd(m.selectedFile.Path, newNamePtr, false),
+					m.spinner.Tick,
+				)
+			case "esc":
+				// Go back to filename input
+				m.nameInput.Focus()
+				m.state = StateFileNameInput
+				return m, textinput.Blink
+			case "q":
+				// Return to main menu
+				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
+			default:
+				// Delegate to repository list for navigation/filtering
+				m.repositoryList, cmd = m.repositoryList.Update(message)
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -385,6 +522,8 @@ func (m SaveRulesModel) View() string {
 		return m.filePicker.View()
 	case StateFileNameInput:
 		return m.viewFileNameInput()
+	case StateRepositorySelection:
+		return m.viewRepositorySelection()
 	case StateConfirmation:
 		return m.viewConfirmation()
 	case StateSaving:
@@ -417,11 +556,33 @@ func (m SaveRulesModel) viewFileNameInput() string {
 		HelpText: "Enter filename (or keep default) • Enter to continue • Esc to go back",
 	})
 
-	content := fmt.Sprintf("File will be saved to: %s\n\n", m.fileManager.GetStorageDir())
+	// Handle the case where FileManager may not be initialized yet (multi-repo)
+	storageDir := "central repository"
+	if m.fileManager != nil {
+		storageDir = m.fileManager.GetStorageDir()
+	} else if m.selectedRepoItem != nil {
+		storageDir = m.selectedRepoItem.Path
+	}
+
+	content := fmt.Sprintf("File will be saved to: %s\n\n", storageDir)
 	content += "Filename:\n"
 	content += m.nameInput.View()
 	content += "\n\n"
 	content += "Preview: " + m.nameInput.Value()
+
+	return m.layout.Render(content)
+}
+
+// viewRepositorySelection renders the repository selection UI for multi-repo support (T008)
+func (m SaveRulesModel) viewRepositorySelection() string {
+	m.layout = m.layout.SetConfig(components.LayoutConfig{
+		Title:    "💾 Save Rules File - Select Repository",
+		Subtitle: fmt.Sprintf("File: %s", m.newFileName),
+		HelpText: "Select destination repository • Enter to continue • Esc to change filename • q to cancel",
+	})
+
+	content := "Choose which repository to save the file to:\n\n"
+	content += m.repositoryList.View()
 
 	return m.layout.Render(content)
 }
@@ -433,9 +594,17 @@ func (m SaveRulesModel) viewConfirmation() string {
 		HelpText: "y to overwrite • n to change filename • Esc to cancel",
 	})
 
+	// Handle case where FileManager may not be initialized (multi-repo)
+	storageDir := "the storage directory"
+	if m.fileManager != nil {
+		storageDir = m.fileManager.GetStorageDir()
+	} else if m.selectedRepoItem != nil {
+		storageDir = m.selectedRepoItem.Path
+	}
+
 	content := fmt.Sprintf("A file named '%s' already exists in the storage directory.\n\n", m.newFileName)
 	content += "Do you want to overwrite it?\n\n"
-	content += "Storage directory: " + m.fileManager.GetStorageDir()
+	content += "Storage directory: " + storageDir
 	return m.layout.Render(content)
 }
 
@@ -497,6 +666,7 @@ func (m *SaveRulesModel) optionalNewNamePtr() *string {
 // COMMANDS
 
 // scanForFilesCmd asynchronously scans current directory tree for markdown files.
+// Uses the initialized FileManager instance.
 func (m SaveRulesModel) scanForFilesCmd() tea.Cmd {
 	m.logger.Debug("File scan started")
 	return func() tea.Msg {
@@ -504,6 +674,34 @@ func (m SaveRulesModel) scanForFilesCmd() tea.Cmd {
 		if err != nil {
 			return FileScanErrorMsg{Err: err}
 		}
+		return FileScanCompleteMsg{Files: files}
+	}
+}
+
+// scanForFilesCmdNoManager scans for markdown files without needing a FileManager.
+// Used for multi-repo case where we scan CWD before repository selection.
+// Creates a temporary FileManager using the first prepared repo's path just for scanning.
+func (m SaveRulesModel) scanForFilesCmdNoManager() tea.Cmd {
+	m.logger.Debug("File scan started (no manager mode)")
+	return func() tea.Msg {
+		// Create a temporary FileManager just for scanning current directory
+		// We use the first repo's path since we just need a valid FileManager instance
+		// to call ScanCurrDirectory (which doesn't use the storage path)
+		if len(m.preparedRepos) == 0 {
+			return FileScanErrorMsg{Err: fmt.Errorf("no repositories available")}
+		}
+
+		tempFm, err := filemanager.NewFileManager(m.preparedRepos[0].LocalPath, m.logger)
+		if err != nil {
+			return FileScanErrorMsg{Err: fmt.Errorf("failed to create file scanner: %w", err)}
+		}
+
+		files, err := tempFm.ScanCurrDirectory()
+		if err != nil {
+			return FileScanErrorMsg{Err: err}
+		}
+
+		// Files already have absolute paths from ScanCurrDirectory
 		return FileScanCompleteMsg{Files: files}
 	}
 }

@@ -18,3 +18,11 @@ dist/
 .vscode/
 specs/
 .specify/
+.idea/
+
+# compiled test binaries
+*.test
+
+# local credentials must never be committed
+credential
+creds

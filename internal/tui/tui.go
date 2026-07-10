@@ -393,9 +393,10 @@ func (m *MainModel) handleMenuSelection(selectedItem item) (tea.Model, tea.Cmd) 
 		cmds = append(cmds, modelInitCmd)
 	}
 
-	// Send window size if layout has dimensions
-	if m.layout.ContentWidth() > 0 && m.layout.ContentHeight() > 0 {
-		windowMsg := tea.WindowSizeMsg{Width: m.layout.ContentWidth(), Height: m.layout.ContentHeight()}
+	// Send the real window size so submodels lay themselves out exactly as
+	// they would on a genuine terminal resize (they apply their own margins).
+	if m.hasValidDimensions() {
+		windowMsg := tea.WindowSizeMsg{Width: m.windowWidth, Height: m.windowHeight}
 		updatedModel, windowCmd := model.Update(windowMsg)
 		m.activeModel = updatedModel.(MenuItemModel)
 		if windowCmd != nil {

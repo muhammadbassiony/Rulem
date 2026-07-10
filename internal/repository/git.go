@@ -962,7 +962,7 @@ func (gs GitSource) checkoutBranch(repo *git.Repository, worktree *git.Worktree,
 
 	// Try to get local branch reference
 	_, err = repo.Reference(localBranchRef, true)
-	
+
 	if err == plumbing.ErrReferenceNotFound {
 		// Local branch doesn't exist, create it
 		if logger != nil {

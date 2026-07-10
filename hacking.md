@@ -3,7 +3,7 @@
 ## Local setup
 
 1. Clone the repository and enter it: `git clone https://github.com/muhammadbassiony/rulem && cd rulem`.
-2. Ensure Go 1.24+ is installed (`go version`).
+2. Ensure Go 1.26+ is installed (`go version`).
 3. Install Task (optional): `brew install go-task/tap/go-task` or use your package manager.
 4. Use `go install ./...` to fetch any tooling dependencies.
 5. Initialize your config if needed by running `rulem` once and walking through the setup wizard; this creates `~/.config/rulem/config.yaml`.

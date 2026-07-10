@@ -62,6 +62,11 @@ type SaveRulesModel struct {
 	// Filepicker instance
 	filePicker *filepicker.FilePicker
 
+	// Last known terminal dimensions, needed to size the FilePicker
+	// correctly when it is created after the initial WindowSizeMsg.
+	windowWidth  int
+	windowHeight int
+
 	// Filename input (optional rename)
 	nameInput textinput.Model
 
@@ -110,6 +115,8 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		ctx.Logger.Error("Failed to prepare repositories", "error", err)
 		return SaveRulesModel{
 			logger:           ctx.Logger,
+			windowWidth:      ctx.Width,
+			windowHeight:     ctx.Height,
 			state:            StateError,
 			layout:           layout,
 			spinner:          s,
@@ -132,6 +139,8 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		ctx.Logger.Error("No repositories configured")
 		return SaveRulesModel{
 			logger:           ctx.Logger,
+			windowWidth:      ctx.Width,
+			windowHeight:     ctx.Height,
 			state:            StateError,
 			layout:           layout,
 			spinner:          s,
@@ -185,6 +194,8 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 
 	return SaveRulesModel{
 		logger:           ctx.Logger,
+		windowWidth:      ctx.Width,
+		windowHeight:     ctx.Height,
 		state:            StateLoading,
 		layout:           layout,
 		spinner:          s,
@@ -242,6 +253,11 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch message := msg.(type) {
 	case tea.WindowSizeMsg:
+		// Remember dimensions so the FilePicker can be sized correctly when
+		// it is created later (after the file scan completes).
+		m.windowWidth = message.Width
+		m.windowHeight = message.Height
+
 		// Propagate window sizing to FilePicker if it exists & we are in selection state.
 		if m.filePicker != nil {
 			updated, fpCmd := m.filePicker.Update(message)
@@ -272,10 +288,10 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateFileSelection
 		m.err = nil
 
-		// Build FilePicker once files are available
-		// Use reasonable default dimensions since we don't have actual terminal size yet
-		// The FilePicker will be updated with correct dimensions when WindowSizeMsg is received
-		ctx := helpers.NewUIContext(100, 30, nil, m.logger)
+		// Build FilePicker once files are available, using the last known
+		// terminal dimensions. Bubble Tea only sends WindowSizeMsg on startup
+		// and real resizes, so the picker must be born with correct sizes.
+		ctx := helpers.NewUIContext(m.windowWidth, m.windowHeight, nil, m.logger)
 		fp := filepicker.NewFilePicker(
 			"💾 Save Rules File",
 			"Select a markdown file to save to your central rules repository (press Enter). \nUse / to filter, arrows to navigate, g to toggle formatting.",

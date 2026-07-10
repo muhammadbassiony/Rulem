@@ -91,6 +91,11 @@ type ImportRulesModel struct {
 	// Filepicker instance
 	filePicker *filepicker.FilePicker
 
+	// Last known terminal dimensions, needed to size the FilePicker
+	// correctly when it is created after the initial WindowSizeMsg.
+	windowWidth  int
+	windowHeight int
+
 	// Lists
 	importModeList     list.Model
 	selectedImportMode CopyMode
@@ -164,6 +169,8 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 		ctx.Logger.Error("Failed to prepare repositories", "error", err)
 		return &ImportRulesModel{
 			logger:           ctx.Logger,
+			windowWidth:      ctx.Width,
+			windowHeight:     ctx.Height,
 			state:            StateError,
 			layout:           layout,
 			spinner:          s,
@@ -182,6 +189,8 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 		ctx.Logger.Error("No repositories configured")
 		return &ImportRulesModel{
 			logger:           ctx.Logger,
+			windowWidth:      ctx.Width,
+			windowHeight:     ctx.Height,
 			state:            StateError,
 			layout:           layout,
 			spinner:          s,
@@ -211,6 +220,8 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 
 	return &ImportRulesModel{
 		logger:           ctx.Logger,
+		windowWidth:      ctx.Width,
+		windowHeight:     ctx.Height,
 		state:            StateLoading,
 		layout:           layout,
 		spinner:          s,
@@ -257,6 +268,11 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch message := msg.(type) {
 	case tea.WindowSizeMsg:
+		// Remember dimensions so the FilePicker can be sized correctly when
+		// it is created later (after the file scan completes).
+		m.windowWidth = message.Width
+		m.windowHeight = message.Height
+
 		// Propagate window resizing to lists
 		width := m.layout.ContentWidth()
 		height := m.layout.ContentHeight()
@@ -286,9 +302,11 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateFileSelection
 		m.err = nil
 
-		// Build FilePicker once files are available
-		ctx := helpers.NewUIContext(m.layout.ContentWidth(), m.layout.ContentHeight(), nil, m.logger)
-		m.logger.Debug("Import rules model - Creating FilePicker", "content_width", m.layout.ContentWidth(), "content_height", m.layout.ContentHeight())
+		// Build FilePicker once files are available, using the last known
+		// terminal dimensions. Bubble Tea only sends WindowSizeMsg on startup
+		// and real resizes, so the picker must be born with correct sizes.
+		ctx := helpers.NewUIContext(m.windowWidth, m.windowHeight, nil, m.logger)
+		m.logger.Debug("Import rules model - Creating FilePicker", "width", m.windowWidth, "height", m.windowHeight)
 
 		// Files now have repository metadata (RepositoryName, RepositoryType) for subtitle display
 		fp := filepicker.NewFilePicker(

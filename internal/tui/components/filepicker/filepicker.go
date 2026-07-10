@@ -243,13 +243,13 @@ func NewFilePicker(title, subtitle string, files []filemanager.FileItem, ctx hel
 		items[i] = f
 	}
 
-	fileList := list.New(items, list.NewDefaultDelegate(), ctx.Width, ctx.Height)
+	fileList := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	fileList.Title = "Files"
 	fileList.SetShowStatusBar(false)
 	fileList.SetFilteringEnabled(true)
 	fileList.SetShowHelp(false)
 
-	viewport := viewport.New(ctx.Width, ctx.Height)
+	viewport := viewport.New(0, 0)
 	viewport.MouseWheelEnabled = true
 
 	keys := DefaultKeyMap()
@@ -257,7 +257,7 @@ func NewFilePicker(title, subtitle string, files []filemanager.FileItem, ctx hel
 
 	renderCounter := uint64(0)
 
-	return FilePicker{
+	fp := FilePicker{
 		logger:               ctx.Logger,
 		title:                title,
 		subtitle:             subtitle,
@@ -279,6 +279,84 @@ func NewFilePicker(title, subtitle string, files []filemanager.FileItem, ctx hel
 		useGlamour:           true,
 		focusPane:            focusList,
 	}
+
+	// Size the panes immediately: the picker is usually created after program
+	// start (post file-scan), so it cannot rely on a future tea.WindowSizeMsg
+	// to receive the terminal dimensions.
+	fp.SetSize(ctx.Width, ctx.Height)
+
+	return fp
+}
+
+// SetSize recomputes the list/preview pane dimensions from the total window
+// size, accounting for every styling layer View() adds around the content.
+func (fp *FilePicker) SetSize(width, height int) {
+	fp.windowWidth = width
+	fp.windowHeight = height
+	fp.help.Width = width
+
+	// Horizontal space consumed around pane content. GetFrameSize already
+	// includes both borders and padding for one pane.
+	frameW, frameH := styles.PaneStyle.GetFrameSize()
+	totalExtras := frameW*2 + styles.MainContainerStyle.GetHorizontalFrameSize()
+
+	// Available width for content after accounting for all styling
+	avail := max(width-totalExtras, 0)
+
+	// Content widths: list gets 1/3, preview gets 2/3
+	listWidth := avail / 3
+	vpWidth := avail - listWidth
+
+	// Minimum width constraints
+	if listWidth < 20 {
+		listWidth = 20
+	}
+	if vpWidth < 30 {
+		vpWidth = 30
+	}
+
+	// Ensure total width doesn't exceed available space
+	totalRequested := listWidth + vpWidth
+	if totalRequested > avail {
+		// Scale down proportionally if needed
+		scale := float64(avail) / float64(totalRequested)
+		listWidth = int(float64(listWidth) * scale)
+		vpWidth = int(float64(vpWidth) * scale)
+
+		// Reapply minimum constraints after scaling
+		if listWidth < 20 {
+			listWidth = 20
+			vpWidth = avail - listWidth
+		}
+		if vpWidth < 30 {
+			vpWidth = 30
+			listWidth = avail - vpWidth
+		}
+	}
+
+	// Calculate dynamic heights: header (title+subtitle) and help.
+	// Use the same styles that View() uses so measured height matches rendered height.
+	headerView := styles.TitleStyle.Render(fp.title)
+	if fp.subtitle != "" {
+		headerView = lipgloss.JoinVertical(lipgloss.Left, headerView, styles.SubtitleStyle.Render(fp.subtitle))
+	}
+	headerView = styles.HeaderContainerStyle.Render(headerView)
+
+	helpView := styles.HelpContainerStyle.Render(styles.HelpStyle.Render(fp.help.View(fp.keys)))
+
+	headerH := lipgloss.Height(headerView)
+	helpH := lipgloss.Height(helpView)
+
+	contentHeight := max(height-headerH-helpH-frameH, 5)
+
+	fp.fileList.SetSize(listWidth, contentHeight)
+	fp.viewport.Width = vpWidth
+	fp.viewport.Height = contentHeight
+
+	fp.logger.Debug("FilePicker resized",
+		"width", width, "height", height,
+		"list_width", listWidth, "viewport_width", vpWidth,
+		"content_height", contentHeight, "total_extras", totalExtras, "avail", avail)
 }
 
 func (fp *FilePicker) Init() tea.Cmd {
@@ -312,79 +390,13 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		fp.windowWidth = msg.Width
-		fp.windowHeight = msg.Height
-		fp.help.Width = msg.Width
-
-		// Compute frame sizes and padding from the pane style to avoid clipping.
-		frameW, frameH := styles.PaneStyle.GetFrameSize()
-
-		// Account for all horizontal styling layers:
-		// 1. MainContainerStyle margin (applied in View())
-		// 2. Pane borders (2 panes × 2 borders each)
-		// 3. Pane padding (2 panes × (left + right) padding)
-		mainContainerMargin := 1       // MainContainerStyle.MarginLeft
-		totalBorders := frameW * 2 * 2 // 2 panes × 2 borders each
-		totalPadding := (2 + 1) * 2    // (left + right) padding × 2 panes
-
-		// Total horizontal extras = container margin + borders + padding
-		totalExtras := mainContainerMargin + totalBorders + totalPadding
-
-		// Available width for content after accounting for all styling
-		avail := max(msg.Width-totalExtras, 0)
-
-		// Content widths: list gets 1/3, preview gets 2/3
-		listWidth := avail / 3
-		vpWidth := avail - listWidth
-
-		// Minimum width constraints
-		if listWidth < 20 {
-			listWidth = 20
+		fp.SetSize(msg.Width, msg.Height)
+		// Cached previews are word-wrapped to the old viewport width; drop
+		// them and re-render the current selection at the new width.
+		fp.contentCache.Clear()
+		if item := fp.fileList.SelectedItem(); item != nil {
+			return fp, fp.scheduleDebouncedPreview(item.(filemanager.FileItem).Path)
 		}
-		if vpWidth < 30 {
-			vpWidth = 30
-		}
-
-		// Ensure total width doesn't exceed available space
-		totalRequested := listWidth + vpWidth
-		if totalRequested > avail {
-			// Scale down proportionally if needed
-			scale := float64(avail) / float64(totalRequested)
-			listWidth = int(float64(listWidth) * scale)
-			vpWidth = int(float64(vpWidth) * scale)
-
-			// Reapply minimum constraints after scaling
-			if listWidth < 20 {
-				listWidth = 20
-				vpWidth = avail - listWidth
-			}
-			if vpWidth < 30 {
-				vpWidth = 30
-				listWidth = avail - vpWidth
-			}
-		}
-
-		// Calculate dynamic heights: header (title+subtitle) and help.
-		// Use the same styles that View() uses so measured height matches rendered height.
-		headerView := styles.TitleStyle.Render(fp.title)
-		if fp.subtitle != "" {
-			headerView = lipgloss.JoinVertical(lipgloss.Left, headerView, styles.SubtitleStyle.Render(fp.subtitle))
-		}
-		headerView = styles.HeaderContainerStyle.Render(headerView)
-
-		helpView := styles.HelpContainerStyle.Render(styles.HelpStyle.Render(fp.help.View(fp.keys)))
-
-		headerH := lipgloss.Height(headerView)
-		helpH := lipgloss.Height(helpView)
-
-		contentHeight := max(msg.Height-headerH-helpH-frameH, 5)
-		fp.logger.Debug("Resizing heights", "Reported height", msg.Height, "help height", helpH, "header height", headerH, "content height", contentHeight)
-
-		fp.fileList.SetSize(listWidth, contentHeight)
-		fp.viewport.Width = vpWidth
-		fp.viewport.Height = contentHeight
-
-		fp.logger.Debug("Window resized", "width", msg.Width, "height", msg.Height, "list_width", listWidth, "viewport_width", vpWidth, "total_extras", totalExtras, "avail", avail)
 		return fp, nil
 
 	case tea.MouseMsg:

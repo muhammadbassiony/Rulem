@@ -828,8 +828,10 @@ func TestSaveRulesModel_WindowSizeMsg(t *testing.T) {
 		t.Error("FilePicker should still exist")
 	}
 
-	if cmd != nil {
-		t.Error("Should not return a command when propagating to FilePicker")
+	// The FilePicker schedules a debounced preview re-render on resize so the
+	// preview is re-wrapped to the new viewport width.
+	if cmd == nil {
+		t.Error("Should return the FilePicker's preview re-render command on resize")
 	}
 }
 

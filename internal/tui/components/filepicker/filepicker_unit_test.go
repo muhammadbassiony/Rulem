@@ -102,11 +102,23 @@ func TestNewFilePicker_InitialSizingAndState(t *testing.T) {
 	if fp.title != "Unit Title" || fp.subtitle != "Sub" {
 		t.Fatalf("title/subtitle not set correctly")
 	}
-	if fp.fileList.Width() != 120 || fp.fileList.Height() != 40 {
-		t.Fatalf("fileList initial size mismatch got %dx%d", fp.fileList.Width(), fp.fileList.Height())
+
+	// The constructor must split the window between the panes right away:
+	// the picker is typically created after program start and cannot rely on
+	// a future WindowSizeMsg to size itself.
+	frameW, _ := styles.PaneStyle.GetFrameSize()
+	totalExtras := frameW*2 + styles.MainContainerStyle.GetHorizontalFrameSize()
+	avail := 120 - totalExtras
+	if sum := fp.fileList.Width() + fp.viewport.Width; sum != avail {
+		t.Fatalf("expected initial widths sum %d, got %d (list=%d, vp=%d)", avail, sum, fp.fileList.Width(), fp.viewport.Width)
 	}
-	if fp.viewport.Width != 120 || fp.viewport.Height != 40 {
-		t.Fatalf("viewport initial size mismatch got %dx%d", fp.viewport.Width, fp.viewport.Height)
+	if fp.fileList.Height() != fp.viewport.Height {
+		t.Fatalf("list and viewport heights do not match: %d vs %d", fp.fileList.Height(), fp.viewport.Height)
+	}
+
+	// Regression guard: the rendered view must never be wider than the window.
+	if w := lipgloss.Width(fp.View()); w > 120 {
+		t.Fatalf("rendered view overflows window: %d > 120", w)
 	}
 }
 
@@ -125,12 +137,10 @@ func TestWindowResize_HeightsMatchAndWidthsSum(t *testing.T) {
 		t.Fatalf("list and viewport heights do not match: %d vs %d", fp.fileList.Height(), fp.viewport.Height)
 	}
 
-	// Widths should sum to available width after accounting for all styling layers
+	// Widths should sum to available width after accounting for all styling
+	// layers: each pane's border+padding (frame) plus the container margin.
 	frameW, _ := styles.PaneStyle.GetFrameSize()
-	mainContainerMargin := 1       // MainContainerStyle.MarginLeft
-	totalBorders := frameW * 2 * 2 // 2 panes × 2 borders each
-	totalPadding := (2 + 1) * 2    // (left + right) padding × 2 panes
-	totalExtras := mainContainerMargin + totalBorders + totalPadding
+	totalExtras := frameW*2 + styles.MainContainerStyle.GetHorizontalFrameSize()
 	avail := msg.Width - totalExtras
 	sum := fp.fileList.Width() + fp.viewport.Width
 	if sum != avail {
@@ -141,6 +151,11 @@ func TestWindowResize_HeightsMatchAndWidthsSum(t *testing.T) {
 	out := fp.View()
 	if !strings.Contains(out, "Unit Title") {
 		t.Fatalf("expected title to be present in view")
+	}
+
+	// Regression guard: the rendered view must never be wider than the window.
+	if w := lipgloss.Width(out); w > msg.Width {
+		t.Fatalf("rendered view overflows window: %d > %d", w, msg.Width)
 	}
 }
 
@@ -457,10 +472,7 @@ func TestHeaderAndHelpMeasurementMatchesView(t *testing.T) {
 	_, _ = fp.Update(tea.WindowSizeMsg{Width: w, Height: h})
 
 	frameW, frameH := styles.PaneStyle.GetFrameSize()
-	mainContainerMargin := 1       // MainContainerStyle.MarginLeft
-	totalBorders := frameW * 2 * 2 // 2 panes × 2 borders each
-	totalPadding := (2 + 1) * 2    // (left + right) padding × 2 panes
-	totalExtras := mainContainerMargin + totalBorders + totalPadding
+	totalExtras := frameW*2 + styles.MainContainerStyle.GetHorizontalFrameSize()
 	availW := w - totalExtras
 	if fp.fileList.Width()+fp.viewport.Width != availW {
 		t.Fatalf("width allocation mismatch: list+vp=%d expected=%d (totalExtras=%d)", fp.fileList.Width()+fp.viewport.Width, availW, totalExtras)

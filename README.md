@@ -36,7 +36,7 @@ Config lives at `~/.config/rulem/config.yaml`. The CLI initializes it on first r
 
 ## Development highlights
 
-- **Prereqs**: Go 1.24+. Task is optional (`task build/test/lint`).
+- **Prereqs**: Go 1.26+. Task is optional (`task build/test/lint`).
 - **Common commands**: `go mod tidy`, `go test ./...`, `go build ./cmd/rulem`, `go run ./cmd/rulem`.
 - **Testing note**: Tests that mutate config must call `helpers.SetTestConfigPath(t)` to avoid touching your real settings.
 - **Code layout**: Core logic lives under `cmd/rulem`, `internal/` (config, filemanager, logging, tui), and `pkg/fileops`. The settings menu and its multi-repo flows are documented in `internal/tui/settingsmenu/README.md` and `hacking.md`.

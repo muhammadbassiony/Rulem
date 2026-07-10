@@ -20,9 +20,10 @@
 // interfaces for configuration operations, making it suitable for both CLI
 // and TUI contexts.
 //
-// Default configuration location:
-//   - Linux/macOS: ~/.config/rulem/config.yaml
-//   - Windows: %APPDATA%\rulem\config.yaml
+// Default configuration location (XDG config home via adrg/xdg):
+//   - Linux: ~/.config/rulem/config.yaml
+//   - macOS: ~/Library/Application Support/rulem/config.yaml
+//   - Windows: %LOCALAPPDATA%\rulem\config.yaml
 //
 // Environment variables:
 //   - RULEM_CONFIG_PATH: Override default config path (primarily for testing)

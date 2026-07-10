@@ -236,6 +236,22 @@ func detectGlamourStyle(timeout time.Duration) string {
 	}
 }
 
+// fileListDelegate builds the list delegate for the given files. The second
+// row (FileItem.Description, the source repository) is only shown when the
+// files actually span more than one repository; otherwise it is pure noise
+// and the list renders compact single-line items.
+func fileListDelegate(files []filemanager.FileItem) list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+	repos := make(map[string]struct{})
+	for _, f := range files {
+		if f.RepositoryName != "" {
+			repos[f.RepositoryName] = struct{}{}
+		}
+	}
+	d.ShowDescription = len(repos) > 1
+	return d
+}
+
 func NewFilePicker(title, subtitle string, files []filemanager.FileItem, ctx helpers.UIContext) FilePicker {
 	// convert files to list Items
 	items := make([]list.Item, len(files))
@@ -243,7 +259,7 @@ func NewFilePicker(title, subtitle string, files []filemanager.FileItem, ctx hel
 		items[i] = f
 	}
 
-	fileList := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	fileList := list.New(items, fileListDelegate(files), 0, 0)
 	fileList.Title = "Files"
 	fileList.SetShowStatusBar(false)
 	fileList.SetFilteringEnabled(true)
@@ -514,6 +530,7 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, f := range fp.files {
 			items[i] = f
 		}
+		fp.fileList.SetDelegate(fileListDelegate(fp.files))
 		fp.fileList.SetItems(items)
 		fp.fileList.ResetSelected()
 		fp.logger.Debug("File list updated with new files", "count", len(fp.files))

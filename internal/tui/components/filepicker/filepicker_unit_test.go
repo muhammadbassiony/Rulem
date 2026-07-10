@@ -484,3 +484,40 @@ func TestHeaderAndHelpMeasurementMatchesView(t *testing.T) {
 			fp.fileList.Height(), fp.viewport.Height, contentH, headerH, helpH, frameH)
 	}
 }
+
+func TestFileList_RepoRowOnlyForMultipleRepos(t *testing.T) {
+	dir := t.TempDir()
+	multiRepo := []filemanager.FileItem{
+		{Name: "a.md", Path: filepath.Join(dir, "a.md"), RepositoryID: "r1", RepositoryName: "personal", RepositoryType: "local"},
+		{Name: "b.md", Path: filepath.Join(dir, "b.md"), RepositoryID: "r2", RepositoryName: "work", RepositoryType: "github"},
+	}
+	fp := newTestPicker(t, "T", "S", multiRepo, 120, 40)
+	if out := fp.View(); !strings.Contains(out, "personal") || !strings.Contains(out, "work") {
+		t.Fatalf("expected repository names as second row when files span multiple repos")
+	}
+
+	singleRepo := []filemanager.FileItem{
+		{Name: "a.md", Path: filepath.Join(dir, "a.md"), RepositoryID: "r1", RepositoryName: "personal", RepositoryType: "local"},
+		{Name: "b.md", Path: filepath.Join(dir, "b.md"), RepositoryID: "r1", RepositoryName: "personal", RepositoryType: "local"},
+	}
+	fp = newTestPicker(t, "T", "S", singleRepo, 120, 40)
+	if out := fp.View(); strings.Contains(out, "personal") {
+		t.Fatalf("repository row should be hidden when all files come from one repo")
+	}
+
+	// Delegate must be recomputed when a new file set arrives at runtime.
+	updated, _ := fp.Update(FilesReadyMsg{Files: multiRepo})
+	fp = updated.(*FilePicker)
+	if out := fp.View(); !strings.Contains(out, "work") {
+		t.Fatalf("expected repository row after FilesReadyMsg with multi-repo files")
+	}
+
+	noRepo := []filemanager.FileItem{
+		{Name: "a.md", Path: filepath.Join(dir, "a.md")},
+	}
+	fp = newTestPicker(t, "T", "S", noRepo, 120, 40)
+	if got := fileListDelegate(noRepo); got.ShowDescription {
+		t.Fatalf("CWD scans without repo metadata should render single-line items")
+	}
+	_ = fp
+}

@@ -26,7 +26,7 @@ A compact CLI for managing instruction files and MCP tooling across multiple rep
 
 ## Configuration
 
-Config lives at `~/.config/rulem/config.yaml`. The CLI initializes it on first run and exposes it through the TUI settings menu (storage paths, version info, timestamps). Refer to the settings menu flows in `internal/tui/settingsmenu` when adjusting how multiple repositories are handled simultaneously.
+Config lives in your platform's XDG config directory: `~/Library/Application Support/rulem/config.yaml` on macOS, `~/.config/rulem/config.yaml` on Linux. The CLI initializes it on first run and exposes it through the TUI settings menu (storage paths, version info, timestamps). Refer to the settings menu flows in `internal/tui/settingsmenu` when adjusting how multiple repositories are handled simultaneously.
 
 ## MCP integration
 

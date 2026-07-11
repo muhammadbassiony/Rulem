@@ -714,6 +714,22 @@ func (fp *FilePicker) View() string {
 	// Add some margins around header using container style
 	header = styles.HeaderContainerStyle.Render(header)
 
+	left, right := fp.paneViews()
+	panes := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	// Left padding for the main panes using container style
+	panes = styles.MainContainerStyle.Render(panes)
+
+	// Help with padding and margin using container style
+	helpView := styles.HelpContainerStyle.Render(styles.HelpStyle.Render(fp.help.View(fp.keys)))
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, panes, helpView)
+}
+
+// paneViews renders the bordered list (left) and preview (right) panes. It is
+// factored out of View so the equal-height invariant can be asserted directly
+// on each bordered box: once JoinHorizontal has aligned them to the tallest
+// pane, a height difference is no longer observable from the combined string.
+func (fp *FilePicker) paneViews() (left, right string) {
 	// Focus-aware pane styles using centralized styles
 	listStyle := styles.PaneStyle
 	vpStyle := styles.PaneStyle
@@ -724,23 +740,19 @@ func (fp *FilePicker) View() string {
 		vpStyle = styles.PaneFocusedStyle
 	}
 
-	// Respect sizes computed in WindowSizeMsg (SetSize + Width)
-	// Apply explicit widths based on list/viewport sizes and keep header at the top.
-	listStyle = listStyle.Width(fp.fileList.Width()).Height(fp.fileList.Height())
-	vpStyle = vpStyle.Width(fp.viewport.Width).Height(fp.viewport.Height)
+	// Respect sizes computed in WindowSizeMsg (SetSize + Width). The list and
+	// viewport wrap their content to fp.fileList.Width()/fp.viewport.Width. A
+	// lipgloss style reserves its horizontal padding *inside* the width we set,
+	// so we must add that padding back — otherwise the pane's text area is
+	// narrower than the width the content was wrapped to, and full-width lines
+	// (e.g. a plain-text preview) get re-wrapped inside the pane, making it
+	// render taller than its counterpart. Add the padding so both panes keep an
+	// identical, fixed height and their bottom borders always line up.
+	padH := styles.PaneStyle.GetHorizontalPadding()
+	listStyle = listStyle.Width(fp.fileList.Width() + padH).Height(fp.fileList.Height())
+	vpStyle = vpStyle.Width(fp.viewport.Width + padH).Height(fp.viewport.Height)
 
-	panes := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		listStyle.Render(fp.fileList.View()),
-		vpStyle.Render(fp.viewport.View()),
-	)
-	// Left padding for the main panes using container style
-	panes = styles.MainContainerStyle.Render(panes)
-
-	// Help with padding and margin using container style
-	helpView := styles.HelpContainerStyle.Render(styles.HelpStyle.Render(fp.help.View(fp.keys)))
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, panes, helpView)
+	return listStyle.Render(fp.fileList.View()), vpStyle.Render(fp.viewport.View())
 }
 
 //  HELPERS / COMMANDS

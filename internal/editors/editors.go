@@ -10,12 +10,16 @@
 //   - EditorRuleConfigs: Registry of all supported editors and assistants
 //
 // Supported editors and assistants:
+//   - AGENTS.md (the recommended default: an open standard read by most AI tools)
 //   - GitHub Copilot (Both general rules and custom instructions)
 //   - Cursor
 //   - Claude code
 //   - Gemini CLI
-//   - Opencode
 //   - And more as the registry grows
+//
+// The first entry in EditorRuleConfigs is treated as the default: the import UI
+// builds its selection list directly from this slice order, so AGENTS.md is the
+// pre-selected recommendation.
 //
 // Each configuration specifies:
 //   - The display name and description
@@ -63,41 +67,41 @@ type EditorRuleConfig struct {
 
 var EditorRuleConfigs = []EditorRuleConfig{
 	{
-		// https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file
-		Name:         "Github Copilot - General instructions",
-		Explanation:  "This is a general instructions file that will be added to all messages.\nFor more information, see https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file",
-		RulePath:     ".github/",
-		RenameOption: RenameOptionFull,
-		NewName:      "copilot-instructions.md",
-	},
-	{
-		// https://code.visualstudio.com/docs/copilot/copilot-customization#_use-instructionsmd-files
-		Name:         "Github Copilot - Instructions",
-		Explanation:  "These are instructions that Github Copilot will be attached to all messages but used depending on the files in the chat's context.\nFor more information, see https://code.visualstudio.com/docs/copilot/copilot-customization#_use-instructionsmd-files",
-		RulePath:     ".github/instructions/",
-		RenameOption: RenameOptionSuffix,
-		NewName:      ".instructions.md",
-	},
-	{
-		// https://opencode.ai/docs/rules/
-		Name:         "AGENTS.md",
-		Explanation:  "This is a general instructions file that will be added to all messages. This name is expected by some tools such as SST Opencode.\nFor more information, see https://opencode.ai/docs/rules/",
+		// https://agents.md
+		Name:         "AGENTS.md (recommended)",
+		Explanation:  "Open standard supported by most AI coding tools (Cursor, GitHub Copilot, Gemini CLI, Zed, Jules and 20+ more). Stewarded by the Agentic AI Foundation under the Linux Foundation. Placed at the project root so any compatible agent picks it up automatically. Start here unless you specifically need a tool-specific file below.\nFor more information, see https://agents.md",
 		RulePath:     "./",
 		RenameOption: RenameOptionFull,
 		NewName:      "AGENTS.md",
 	},
 	{
-		// https://docs.cursor.com/en/context/rules
-		Name:         "Cursor rules",
-		Explanation:  "This is a general instructions file that will be added to all messages. Cursor supports having scoped rules per directory, to use this run this tool inside the directory where you want to save these rules.\nFor more information, see https://docs.cursor.com/en/context/rules",
-		RulePath:     ".cursor/rules/",
-		RenameOption: RenameOptionNone,
-		NewName:      "",
+		// https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-githubcopilot-instructionsmd-file
+		Name:         "Github Copilot - General instructions",
+		Explanation:  "Repository-wide instructions applied to all Copilot chat requests in this workspace.\nFor more information, see https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-a-githubcopilot-instructionsmd-file",
+		RulePath:     ".github/",
+		RenameOption: RenameOptionFull,
+		NewName:      "copilot-instructions.md",
 	},
 	{
-		// https://docs.anthropic.com/en/docs/claude-code/memory#determine-memory-type
+		// https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-instructionsmd-files
+		Name:         "Github Copilot - Instructions",
+		Explanation:  "Path-scoped instructions Copilot applies depending on the files in the chat's context. Note: these files normally need an 'applyTo' frontmatter property to be scoped; since rulem copies the file verbatim, add that frontmatter yourself or prefer the repository-wide 'General instructions' option above.\nFor more information, see https://code.visualstudio.com/docs/copilot/customization/custom-instructions#_use-instructionsmd-files",
+		RulePath:     ".github/instructions/",
+		RenameOption: RenameOptionSuffix,
+		NewName:      ".instructions.md",
+	},
+	{
+		// https://cursor.com/docs/context/rules
+		Name:         "Cursor rules",
+		Explanation:  "Directory-scoped Cursor rule. Cursor only reads '.mdc' files under .cursor/rules/ (plain .md files are ignored), so the file is saved with a .mdc extension. Because rulem copies the file verbatim it has no frontmatter, so Cursor treats it as a manual/@-referenced rule rather than always-applied. For always-on rules, use the recommended AGENTS.md option, which Cursor also reads natively. Run this tool inside the directory where you want the scoped rule.\nFor more information, see https://cursor.com/docs/context/rules",
+		RulePath:     ".cursor/rules/",
+		RenameOption: RenameOptionSuffix,
+		NewName:      ".mdc",
+	},
+	{
+		// https://code.claude.com/docs/en/memory
 		Name:         "Claude code",
-		Explanation:  "This is a general instructions file that will be added to all messages.\nFor more information, see https://docs.anthropic.com/en/docs/claude-code/memory#determine-memory-type",
+		Explanation:  "This is a general instructions file that will be added to all messages. Claude Code reads CLAUDE.md, not AGENTS.md.\nFor more information, see https://code.claude.com/docs/en/memory",
 		RulePath:     "./",
 		RenameOption: RenameOptionFull,
 		NewName:      "CLAUDE.md",

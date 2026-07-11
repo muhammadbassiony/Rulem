@@ -181,14 +181,24 @@ func TestGenerateRuleFileFullPath(t *testing.T) {
 			expected:    ".github/instructions/react-rules.instructions.md",
 		},
 		{
-			name: "cursor rules no rename",
+			name: "cursor rules use .mdc extension",
 			config: EditorRuleConfig{
 				RulePath:     ".cursor/rules/",
-				RenameOption: RenameOptionNone,
-				NewName:      "",
+				RenameOption: RenameOptionSuffix,
+				NewName:      ".mdc",
 			},
 			currentName: "typescript.md",
-			expected:    ".cursor/rules/typescript.md",
+			expected:    ".cursor/rules/typescript.mdc",
+		},
+		{
+			name: "cursor rules .mdc with no source extension",
+			config: EditorRuleConfig{
+				RulePath:     ".cursor/rules/",
+				RenameOption: RenameOptionSuffix,
+				NewName:      ".mdc",
+			},
+			currentName: "react-guidelines",
+			expected:    ".cursor/rules/react-guidelines.mdc",
 		},
 		{
 			name: "AGENTS.md full replacement",
@@ -358,6 +368,62 @@ func TestEditorRuleConfigsIntegrity(t *testing.T) {
 			_ = config.GenerateRuleFileFullPath(".hidden")
 		})
 	}
+}
+
+func TestAgentsMdIsDefaultFirstEntry(t *testing.T) {
+	configs := GetAllEditorRuleConfigs()
+	if len(configs) == 0 {
+		t.Fatal("expected at least one editor rule config")
+	}
+
+	// The import UI builds its selection list directly from this slice order,
+	// so the first entry is the pre-selected default and must be AGENTS.md.
+	first := configs[0]
+	if first.NewName != "AGENTS.md" {
+		t.Errorf("expected first (default) config NewName to be %q, got %q", "AGENTS.md", first.NewName)
+	}
+	if got := first.GenerateRuleFileFullPath("my-rules.md"); got != "./AGENTS.md" {
+		t.Errorf("expected default config to target %q, got %q", "./AGENTS.md", got)
+	}
+	if !stringContains(first.Name, "recommended") {
+		t.Errorf("expected the default config Name to signal it is recommended, got %q", first.Name)
+	}
+}
+
+func TestCursorEntryUsesMdcExtension(t *testing.T) {
+	var cursor *EditorRuleConfig
+	for i := range EditorRuleConfigs {
+		if stringContains(EditorRuleConfigs[i].Name, "Cursor") {
+			cursor = &EditorRuleConfigs[i]
+			break
+		}
+	}
+	if cursor == nil {
+		t.Fatal("expected a Cursor editor rule config")
+	}
+
+	// Cursor ignores plain .md files under .cursor/rules/, so the rule file must
+	// be saved with a .mdc extension.
+	got := cursor.GenerateRuleFileFullPath("frontend.md")
+	if got != ".cursor/rules/frontend.mdc" {
+		t.Errorf("expected Cursor config to target %q, got %q", ".cursor/rules/frontend.mdc", got)
+	}
+}
+
+// stringContains is a simple substring check to avoid importing strings.
+func stringContains(s, substr string) bool {
+	if len(substr) == 0 {
+		return true
+	}
+	if len(substr) > len(s) {
+		return false
+	}
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // stringHasPrefix is a simple prefix check since we can't import strings in tests without dependencies

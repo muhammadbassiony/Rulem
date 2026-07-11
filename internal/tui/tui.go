@@ -32,6 +32,7 @@ import (
 	"rulem/internal/tui/components"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/importrulesmenu"
+	"rulem/internal/tui/repostatusmenu"
 	saverulesmodel "rulem/internal/tui/saverulesmodel"
 	settingsmenu "rulem/internal/tui/settingsmenu"
 
@@ -53,7 +54,7 @@ const (
 	StateSettings
 	StateSaveRules
 	StateImportCopy
-	StateFetchGithub
+	StateRepoStatus
 )
 
 // Custom messages for internal state transitions
@@ -145,9 +146,9 @@ func NewMainModel(cfg *config.Config, logger *logging.AppLogger) *MainModel {
 			state:       StateImportCopy,
 		},
 		item{
-			title:       "⬇️  Fetch rules from Github",
-			description: "Download a new rules file from a Github repository or gist.\nThis will fetch the file and save it to the central rules repository.",
-			state:       StateFetchGithub,
+			title:       "🔄  Refresh GitHub repositories",
+			description: "See whether your GitHub repositories are in sync and refetch them.\nRepositories with local changes are skipped so your edits are never lost.",
+			state:       StateRepoStatus,
 		},
 		item{
 			title:       "⚙️  Update settings",
@@ -287,7 +288,7 @@ func (m *MainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case StateSettings, StateSaveRules, StateImportCopy, StateFetchGithub:
+		case StateSettings, StateSaveRules, StateImportCopy, StateRepoStatus:
 			// Delegate all messages to active model - they handle their own navigation
 			if m.activeModel != nil {
 				updatedModel, modelCmd := m.activeModel.Update(msg)
@@ -436,11 +437,9 @@ func (m *MainModel) getOrInitializeModel(state AppState) MenuItemModel {
 		m.logger.Debug("Creating fresh import rules model")
 		return importrulesmenu.NewImportRulesModel(ctx)
 
-	case StateFetchGithub:
-		// TODO: Initialize fetch github model when implemented
-		// return NewFetchGithubModel(ctx)
-		m.logger.Debug("Fetch GitHub model not yet implemented")
-		return nil
+	case StateRepoStatus:
+		m.logger.Debug("Creating fresh repository status model")
+		return repostatusmenu.NewRepoStatusModel(ctx)
 
 	default:
 		m.logger.Warn("Unknown state requested for model initialization", "state", state)

@@ -760,7 +760,7 @@ func TestValidateStoragePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test directory under home: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(nestedParent) })
+	t.Cleanup(func() { _ = os.RemoveAll(nestedParent) })
 
 	tests := []struct {
 		name      string

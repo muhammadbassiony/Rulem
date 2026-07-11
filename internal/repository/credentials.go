@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/config"
+	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/transport/http"
 	"github.com/go-git/go-git/v6/storage/memory"
 	"github.com/zalando/go-keyring"
@@ -98,7 +99,7 @@ func (cm *CredentialManager) ValidateGitHubTokenWithRepo(ctx context.Context, to
 
 	// Create a custom context-aware list options
 	listOpts := &git.ListOptions{
-		Auth: auth,
+		ClientOptions: []client.Option{client.WithHTTPAuth(auth)},
 	}
 
 	// Attempt to list remote references

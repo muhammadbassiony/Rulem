@@ -163,7 +163,9 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	s.Style = styles.SpinnerStyle
 	s.Spinner = spinner.Pulse
 
-	// T009: Prepare all repositories using multi-repository orchestration
+	// T009: Prepare all repositories using multi-repository orchestration.
+	// Partial failures are tolerated: unavailable repositories are excluded
+	// and the import proceeds with the usable ones.
 	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to prepare repositories", "error", err)
@@ -185,7 +187,15 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 		}
 	}
 
-	if len(prepared) == 0 {
+	available := repository.AvailableRepositories(prepared)
+	for _, prep := range prepared {
+		if !prep.IsAvailable() {
+			ctx.Logger.Warn("Repository unavailable, excluded from import sources",
+				"repository", prep.Name(), "error", prep.SyncResult.Error)
+		}
+	}
+
+	if len(available) == 0 {
 		ctx.Logger.Error("No repositories configured")
 		return &ImportRulesModel{
 			logger:           ctx.Logger,
@@ -206,7 +216,7 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	}
 
 	// Log sync results for user awareness
-	for _, prep := range prepared {
+	for _, prep := range available {
 		if prep.SyncResult.Status != repository.SyncStatusSuccess {
 			msg := prep.SyncResult.GetMessage()
 			if msg != "" {
@@ -228,7 +238,7 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 		filePicker:       nil, // created after scan
 		importModeList:   importModeList,
 		editorList:       editorsList,
-		preparedRepos:    prepared,
+		preparedRepos:    available,
 		ruleFiles:        nil, // will be populated after scan
 		selectedFile:     filemanager.FileItem{},
 		isOverwriteError: false,

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -419,21 +418,91 @@ func TestSecureDirectoryScanner_SymlinkProtection(t *testing.T) {
 		t.Fatalf("ScanDirectory() failed: %v", err)
 	}
 
-	// Verify that only files within the scan root are found
-	// The symlink itself should be found, but it cannot access content outside the root
-	expectedFiles := []string{"safe.txt", "bad_link.txt"}
-	if len(files) < 1 || len(files) > 2 {
-		t.Errorf("Expected 1-2 files, got %d: %v", len(files), files)
+	// Under the symlink-skip policy the symlink (bad_link.txt) must NOT appear
+	// in results at all - only the real file inside the scan root is listed.
+	if len(files) != 1 {
+		t.Fatalf("Expected exactly 1 file, got %d: %v", len(files), files)
+	}
+	if files[0].Path != "safe.txt" {
+		t.Errorf("Expected only safe.txt, got %q", files[0].Path)
+	}
+	for _, file := range files {
+		if file.Path == "bad_link.txt" || file.Name == "bad_link.txt" {
+			t.Errorf("Symlink %q must not appear in scan results", file.Path)
+		}
+	}
+}
+
+// TestSecureDirectoryScanner_SymlinkToDirectoryNotRecursed verifies that a
+// symlink pointing at a directory inside the scan root is neither emitted as a
+// bogus "file" nor recursed into, and that a symlink-to-file is skipped entirely.
+func TestSecureDirectoryScanner_SymlinkToDirectoryNotRecursed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Symlink test not supported on Windows")
 	}
 
-	for _, file := range files {
-		found := false
-		if slices.Contains(expectedFiles, file.Path) {
-			found = true
-			break
+	tempDir := createTempDir(t)
+	defer os.RemoveAll(tempDir)
+
+	// Real directory with a file inside it.
+	realDir := filepath.Join(tempDir, "realdir")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatalf("Failed to create real directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "inner.txt"), []byte("inner"), 0644); err != nil {
+		t.Fatalf("Failed to create inner file: %v", err)
+	}
+
+	// Real file at the top level.
+	if err := os.WriteFile(filepath.Join(tempDir, "top.txt"), []byte("top"), 0644); err != nil {
+		t.Fatalf("Failed to create top file: %v", err)
+	}
+
+	// Symlink pointing at the directory (inside the scan root).
+	if err := os.Symlink(realDir, filepath.Join(tempDir, "dirlink")); err != nil {
+		t.Fatalf("Failed to create dir symlink: %v", err)
+	}
+
+	// Symlink pointing at a file (inside the scan root).
+	if err := os.Symlink(filepath.Join(realDir, "inner.txt"), filepath.Join(tempDir, "filelink")); err != nil {
+		t.Fatalf("Failed to create file symlink: %v", err)
+	}
+
+	scanner, err := NewDirectoryScanner(tempDir, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scanner: %v", err)
+	}
+	defer scanner.Close()
+
+	files, err := scanner.ScanDirectory()
+	if err != nil {
+		t.Fatalf("ScanDirectory() failed: %v", err)
+	}
+
+	got := make(map[string]bool)
+	for _, f := range files {
+		got[f.Path] = true
+	}
+
+	// Only the two real files should be present.
+	want := []string{"top.txt", filepath.Join("realdir", "inner.txt")}
+	if len(files) != len(want) {
+		t.Fatalf("Expected exactly %d files, got %d: %v", len(want), len(files), files)
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("Expected to find %q in results", w)
 		}
-		if !found {
-			t.Errorf("Found unexpected file: %s", file.Path)
+	}
+
+	// The symlinks must not appear as files, under any path form.
+	for _, f := range files {
+		if f.Name == "dirlink" || f.Name == "filelink" {
+			t.Errorf("Symlink %q must not appear in scan results", f.Path)
+		}
+		// A recursed symlink-to-dir would surface inner.txt under "dirlink".
+		if strings.HasPrefix(f.Path, "dirlink") {
+			t.Errorf("Symlink-to-directory must not be recursed; found %q", f.Path)
 		}
 	}
 }

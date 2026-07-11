@@ -289,19 +289,17 @@ func (s *SecureDirectoryScanner) scanRecursive(relativePath string, depth int) e
 	for _, entry := range entries {
 		entryPath := filepath.Join(relativePath, entry.Name())
 
-		if entry.IsDir() {
-			// Built-in symlink security validation - always enabled
-			fullEntryPath := filepath.Join(s.scanRoot, entryPath)
-			if isLink, err := IsSymlink(fullEntryPath); err == nil && isLink {
-				// Validate symlink security with scan root as allowed path
-				if err := ValidateSymlinkSecurity(fullEntryPath, []string{s.scanRoot}); err != nil {
-					if s.opts.SkipUnreadableDirs {
-						continue // Skip unsafe symlinks
-					}
-					return fmt.Errorf("symlink security check failed for %s: %w", entryPath, err)
-				}
-			}
+		// Skip symlinks entirely. entry.IsDir() is false for a symlink (even one
+		// pointing at a directory), so symlinks must be handled before the
+		// dir/file branch below - otherwise a symlink-to-directory would be
+		// emitted as a bogus "file". The scanner already operates within an
+		// os.Root, which refuses to traverse symlinks, so containment is safe;
+		// this policy simply keeps symlinks out of the results entirely.
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue // Skip symlinks (not listed, not recursed)
+		}
 
+		if entry.IsDir() {
 			// Recursively scan subdirectory
 			if err := s.scanRecursive(entryPath, depth+1); err != nil {
 				return err

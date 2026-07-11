@@ -1515,7 +1515,13 @@ This is outside content.`
 	if err == nil {
 		t.Error("Expected error for symlink pointing outside storage directory")
 	} else if !strings.Contains(err.Error(), "symlink security check failed") &&
-		!strings.Contains(err.Error(), "symlink target validation failed") {
+		!strings.Contains(err.Error(), "symlink target validation failed") &&
+		// ValidateFileInDirectory now correctly detects escaping symlinks (it
+		// uses os.Lstat instead of os.Stat), so containment validation rejects
+		// this case before the dedicated symlink checks run. Either rejection
+		// path satisfies the security requirement.
+		!strings.Contains(err.Error(), "containment validation failed") &&
+		!strings.Contains(err.Error(), "resolves outside base directory") {
 		t.Errorf("Expected symlink security error, got: %v", err)
 	}
 }

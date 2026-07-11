@@ -147,12 +147,14 @@ func ValidateFileInDirectory(filePath, baseDir string) error {
 		return fmt.Errorf("cannot determine relative path: %w", err)
 	}
 
-	if strings.HasPrefix(relPath, "..") {
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("file is not within base directory")
 	}
 
-	// Check if file exists and is accessible
-	fileInfo, err := os.Stat(absFilePath)
+	// Check if file exists and is accessible. Use Lstat so that symlinks are
+	// detected here rather than transparently followed (os.Stat follows links,
+	// which would make the symlink check below dead code).
+	fileInfo, err := os.Lstat(absFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file does not exist: %s", filepath.Base(filePath))
@@ -160,27 +162,39 @@ func ValidateFileInDirectory(filePath, baseDir string) error {
 		return fmt.Errorf("cannot access file: %w", err)
 	}
 
-	// Ensure it's a regular file
-	if fileInfo.IsDir() {
-		return fmt.Errorf("path is a directory, not a file")
-	}
-
-	// Basic symlink validation - resolve and check final destination
+	// Symlink validation - resolve and ensure the final destination is still
+	// contained within the base directory. This must run before the directory
+	// check so a symlink pointing outside the base dir is rejected.
 	if fileInfo.Mode()&os.ModeSymlink != 0 {
 		resolved, err := filepath.EvalSymlinks(absFilePath)
 		if err != nil {
 			return fmt.Errorf("cannot resolve symlink: %w", err)
 		}
 
+		// Resolve the base directory too so the comparison is done between two
+		// fully-resolved paths. Without this, a base dir that itself contains a
+		// symlink component (e.g. macOS /var -> /private/var) would make every
+		// resolved symlink appear to escape the base.
+		resolvedBase := absBaseDir
+		if rb, err := filepath.EvalSymlinks(absBaseDir); err == nil {
+			resolvedBase = rb
+		}
+
 		// Ensure resolved path is still within base directory
-		relResolved, err := filepath.Rel(absBaseDir, resolved)
+		relResolved, err := filepath.Rel(resolvedBase, resolved)
 		if err != nil {
 			return fmt.Errorf("cannot determine resolved relative path: %w", err)
 		}
 
-		if strings.HasPrefix(relResolved, "..") {
+		if relResolved == ".." || strings.HasPrefix(relResolved, ".."+string(os.PathSeparator)) {
 			return fmt.Errorf("symlink resolves outside base directory")
 		}
+	}
+
+	// Ensure it's a regular file (not a directory). For symlinks this reflects
+	// the link itself; the resolved-target containment is validated above.
+	if fileInfo.IsDir() {
+		return fmt.Errorf("path is a directory, not a file")
 	}
 
 	return nil
@@ -526,11 +540,9 @@ func ValidateDirectoryWritable(dirPath string) error {
 		return fmt.Errorf("no write permission in directory: %w", err)
 	}
 
-	// Clean up test file
-	if err := os.Remove(testFile); err != nil {
-		// Log but don't fail - the directory is usable
-		// Note: In a library, we can't log directly, so we just ignore cleanup failures
-	}
+	// Clean up test file. Ignore cleanup failures: the directory is still
+	// usable, and a library has no safe way to surface a log here.
+	_ = os.Remove(testFile)
 
 	return nil
 }

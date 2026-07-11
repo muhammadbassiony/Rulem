@@ -3,6 +3,7 @@ package fileops
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -248,6 +249,49 @@ func TestValidateFileInDirectory(t *testing.T) {
 		err := ValidateFileInDirectory(validFile, "")
 		if err == nil {
 			t.Error("Expected error for empty base directory")
+		}
+	})
+
+	t.Run("symlink inside base pointing outside base is rejected", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Symlink test not supported on Windows")
+		}
+
+		// Victim file lives OUTSIDE the base directory.
+		outsideDir := createTempDir(t)
+		defer os.RemoveAll(outsideDir)
+		outsideTarget := createTestFile(t, outsideDir, "secret.txt", "secret")
+
+		// Symlink placed INSIDE the base directory, pointing at the outside file.
+		escapingLink := filepath.Join(tempDir, "escaping_link.txt")
+		if err := os.Symlink(outsideTarget, escapingLink); err != nil {
+			t.Fatalf("Failed to create escaping symlink: %v", err)
+		}
+		defer os.Remove(escapingLink)
+
+		err := ValidateFileInDirectory(escapingLink, tempDir)
+		if err == nil {
+			t.Fatal("Expected error for symlink resolving outside base directory")
+		}
+		if !strings.Contains(err.Error(), "outside base directory") {
+			t.Errorf("Expected 'outside base directory' error, got: %v", err)
+		}
+	})
+
+	t.Run("symlink inside base pointing inside base is allowed", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Symlink test not supported on Windows")
+		}
+
+		// Symlink inside the base directory pointing at another file inside it.
+		insideLink := filepath.Join(tempDir, "inside_link.txt")
+		if err := os.Symlink(validFile, insideLink); err != nil {
+			t.Fatalf("Failed to create inside symlink: %v", err)
+		}
+		defer os.Remove(insideLink)
+
+		if err := ValidateFileInDirectory(insideLink, tempDir); err != nil {
+			t.Errorf("Expected no error for symlink contained within base, got: %v", err)
 		}
 	})
 }

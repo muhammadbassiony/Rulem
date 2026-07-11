@@ -115,10 +115,9 @@ func NewGitSource(remoteURL string, branch *string, localPath string) GitSource 
 //   - Creates secure parent directories using fileops functions
 //
 // **Update Fetch (DirectoryStatusSameRepo):**
-//   - Detects dirty working tree and preserves local changes
-//   - Performs shallow fetch to get latest remote commits
-//   - Resets to remote HEAD for clean sync (cache-focused approach)
-//   - Provides user guidance when local changes block sync
+//   - Detects dirty working tree and preserves local changes (sync skipped)
+//   - Fetches latest remote commits
+//   - Hard-resets the clean working tree to origin/<branch> (cache-focused approach)
 //
 // **Directory Conflict Resolution:**
 //   - Validates existing directories contain the same Git repository
@@ -443,10 +442,12 @@ func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAu
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
-	// Configure clone options
+	// Configure clone options. Depth 1 keeps clones fast — rulem only ever
+	// serves the latest state of the rule files, never history.
 	cloneOpts := &git.CloneOptions{
 		URL:      remoteURL,
 		Progress: nil, // Set to os.Stdout for debug
+		Depth:    1,
 	}
 
 	// Add authentication if provided
@@ -518,9 +519,11 @@ func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLo
 // Fetch process:
 //  1. Open existing repository and validate it's accessible
 //  2. Check working tree status for uncommitted changes (dirty detection)
-//  3. If dirty, preserve local changes and inform user (no data loss)
-//  4. If clean, fetch remote updates with shallow fetch for consistency
-//  5. Reset local branch to remote HEAD for clean sync (cache-focused approach)
+//  3. If dirty, preserve local changes and skip the sync (no data loss)
+//  4. If clean, fetch remote updates into the remote-tracking refs
+//  5. Check out the configured branch when one is set
+//  6. Hard-reset the working tree to origin/<branch> so the served files
+//     actually reflect the remote (cache-focused approach)
 //
 // go-git library functions explained:
 //   - git.PlainOpen: Opens existing Git repository from filesystem path
@@ -572,10 +575,12 @@ func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger 
 		return fmt.Errorf("failed to get origin remote: %w", err)
 	}
 
-	// Fetch updates from remote
+	// Fetch updates from remote.
+	// Force is intentional: the local clone is a read-mostly cache of the
+	// remote, so remote-tracking refs must mirror the remote even across
+	// force-pushes. Local work is protected by the dirty check above.
 	fetchOpts := &git.FetchOptions{
-		// TODO should we raise an error or show a message here? do we really want to force?
-		Force: true, // Force update to handle force-pushes
+		Force: true,
 	}
 
 	// Add authentication if provided
@@ -612,6 +617,53 @@ func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger 
 		}
 	}
 
+	// Fetch only updates refs/remotes/origin/*; without this step the local
+	// branch (and therefore the files rulem serves) would stay on the old
+	// commit forever.
+	return gs.syncWorktreeToRemote(repo, worktree, logger)
+}
+
+// syncWorktreeToRemote hard-resets the currently checked-out branch to its
+// remote-tracking counterpart (origin/<branch>) after a fetch.
+//
+// The hard reset is safe here by construction: performFetch only reaches this
+// point when the working tree was verified clean, so no local work can be
+// lost. Repositories managed by rulem are treated as read-mostly caches of
+// the remote, which is why we mirror instead of merging.
+func (gs GitSource) syncWorktreeToRemote(repo *git.Repository, worktree *git.Worktree, logger *logging.AppLogger) error {
+	head, err := repo.Head()
+	if err != nil {
+		return fmt.Errorf("failed to resolve HEAD after fetch: %w", err)
+	}
+
+	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", head.Name().Short()), true)
+	if err != nil {
+		// No remote-tracking ref for this branch (e.g. a local-only branch):
+		// nothing to sync to, and not an error.
+		if logger != nil {
+			logger.Debug("No remote-tracking ref for current branch, skipping worktree sync",
+				"branch", head.Name().Short())
+		}
+		return nil
+	}
+
+	if head.Hash() == remoteRef.Hash() {
+		return nil
+	}
+
+	if err := worktree.Reset(&git.ResetOptions{
+		Commit: remoteRef.Hash(),
+		Mode:   git.HardReset,
+	}); err != nil {
+		return fmt.Errorf("failed to update working tree to %s: %w", remoteRef.Hash().String()[:8], err)
+	}
+
+	if logger != nil {
+		logger.Info("Working tree updated to remote",
+			"branch", head.Name().Short(),
+			"from", head.Hash().String()[:8],
+			"to", remoteRef.Hash().String()[:8])
+	}
 	return nil
 }
 

@@ -753,6 +753,15 @@ func TestValidateStoragePath(t *testing.T) {
 		t.Skip("Cannot determine home directory")
 	}
 
+	// ValidateStoragePath requires the parent of the expanded path to exist,
+	// so create a real subdirectory under home for the nested tilde case
+	// (directories like ~/Documents don't exist on headless Linux CI runners).
+	nestedParent, err := os.MkdirTemp(homeDir, "rulem-validation-test-")
+	if err != nil {
+		t.Fatalf("Failed to create test directory under home: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(nestedParent) })
+
 	tests := []struct {
 		name      string
 		path      string
@@ -772,8 +781,18 @@ func TestValidateStoragePath(t *testing.T) {
 			errorText: "storage directory cannot be empty",
 		},
 		{
+			// The parent of the expanded path must exist, so anchor the case
+			// directly under the home directory ("~") which exists on every
+			// platform, unlike e.g. ~/Documents on headless Linux CI runners.
 			name:      "valid home relative path",
-			path:      "~/Documents/myapp",
+			path:      "~/rulem-test-storage",
+			wantError: false,
+		},
+		{
+			// Nested tilde path whose parent is a real directory created
+			// under home for this test (see MkdirTemp setup above).
+			name:      "valid nested home relative path",
+			path:      "~/" + filepath.Base(nestedParent) + "/myapp",
 			wantError: false,
 		},
 		{

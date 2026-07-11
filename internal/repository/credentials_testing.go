@@ -13,10 +13,13 @@ import (
 // # Why This File Exists
 //
 // Testing credential management requires special handling because:
-//   1. We need to use the ACTUAL OS keyring (not mocks) to test real keyring behavior
-//   2. Tests must not interfere with production credentials stored on the developer's machine
-//   3. Tests must clean up after themselves to avoid polluting the keyring
-//   4. Tests should skip gracefully in CI environments where keyring may not be available
+//   1. Tests must not interfere with production credentials stored on the developer's machine
+//   2. Tests must clean up after themselves to avoid polluting the keyring
+//   3. Tests must run on headless CI environments where no OS keyring is available
+//
+// Test binaries in this package (and other packages exercising CredentialManager)
+// install go-keyring's in-memory mock via keyring.MockInit() in TestMain, so these
+// helpers never touch the real OS credential store during tests.
 //
 // # When To Use These Helpers
 //

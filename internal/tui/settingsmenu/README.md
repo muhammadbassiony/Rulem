@@ -45,8 +45,8 @@ Two cross-cutting mechanisms support this:
   - `editClonePathDirtyStateMsg` → Edit Clone Path flow
   - `refreshDirtyStateMsg` → Manual Refresh flow
 
-> Note: `deleteDirtyStateMsg` is declared in `types.go` but is **not wired up** — the
-> delete flow performs no dirty check (see [Known issues](#known-issues)).
+> Note: the delete flow intentionally performs **no** dirty check (see
+> [Design notes](#design-notes)).
 
 ---
 
@@ -74,23 +74,20 @@ returns the short names used below and in log output.
   and returns `config.ReloadConfig()`.
 - `config.LoadConfigMsg` — carries a (re)loaded config; rebuilds `preparedRepos` and the
   list items.
-- `refreshCompleteMsg{success, err}` — manual refresh finished.
+- `refreshCompleteMsg{success, err}` — manual refresh finished. A non-nil `err` routes to
+  `RefreshError`; success returns to `MainMenu`.
 - Dirty-state results: `editBranchDirtyStateMsg`, `editClonePathDirtyStateMsg`,
-  `refreshDirtyStateMsg` (and the unused `deleteDirtyStateMsg`).
+  `refreshDirtyStateMsg`.
 - Flow-specific errors: `addLocalErrorMsg`, `addGitHubErrorMsg`, `deleteErrorMsg`,
   `editBranchErrorMsg`, `editClonePathErrorMsg`, `editNameErrorMsg`, `updatePATErrorMsg`.
 - `addGitHubPATNeededMsg` — Add GitHub flow needs an inline PAT entry.
-
-Declared-but-unused message types: `refreshInitiateMsg`, `refreshInProgressMsg`.
 
 ### `ChangeOption` enum
 
 `ChangeOptionManualRefresh`, `ChangeOptionGitHubBranch`, `ChangeOptionGitHubPath`,
 `ChangeOptionChangeRepoName`, `ChangeOptionDelete`, `ChangeOptionAddNewRepository`,
-`ChangeOptionGitHubPAT`, `ChangeOptionBack`.
-
-> `ChangeOptionDelete` is defined but the repository-actions menu tags the delete entry
-> with the magic value `ChangeOption(999)` instead; the handler matches on that value.
+`ChangeOptionGitHubPAT`, `ChangeOptionBack`. The repository-actions menu tags the delete
+entry with `ChangeOptionDelete`, and `handleRepositoryActionsKeys` matches on it.
 
 ---
 
@@ -357,11 +354,13 @@ flowchart TD
 ```
 
 `handleConfirmDeleteKeys` calls `deleteRepository()` directly on confirm — there is **no
-dirty-state check** for delete. `deleteRepository` refuses to remove the last repository,
-removes the entry, saves, re-prepares, rebuilds the list, clears `selectedRepositoryID`,
-and returns `settingsCompleteMsg`. The clone directory on disk is not deleted (see the
-cleanup warning). The delete menu entry is only offered when more than one repository is
-configured.
+dirty-state check** for delete, by design (see [Design notes](#design-notes)).
+`deleteRepository` refuses to remove the last repository, removes the entry from the
+config, saves, re-prepares, rebuilds the list, clears `selectedRepositoryID`, and returns
+`settingsCompleteMsg`. It only edits `config.Repositories` — the clone directory / local
+files on disk are **not** deleted (the confirmation screen warns the user to clean them up
+manually; see `getCleanupWarning`). The delete menu entry is only offered when more than
+one repository is configured.
 
 ### Manual refresh (GitHub)
 
@@ -383,12 +382,10 @@ flowchart TD
 ```
 
 `RefreshInProgress` blocks input while `triggerRefresh` runs the git pull. When
-`refreshCompleteMsg` arrives, the `Update` handler returns to `MainMenu`.
-
-> The design intent is that a **failed** refresh routes to `RefreshError`, but the
-> current `refreshCompleteMsg` handler always clears the error and returns to `MainMenu`.
-> As a result `RefreshError` is only reachable from the dirty-state branch, and a failed
-> git pull is silently swallowed. See [Known issues](#known-issues).
+`refreshCompleteMsg` arrives, the `Update` handler routes a **failed** refresh (non-nil
+`err`) to `RefreshError` — where `viewRefreshError` shows `lastRefreshError` — and a
+**successful** one back to `MainMenu`. `RefreshError` is also reached from the dirty-state
+branch when the repository has uncommitted changes.
 
 ### Update GitHub PAT (global)
 
@@ -436,9 +433,6 @@ confirm and error states, and mutations funnel through:
 `settingsCompleteMsg` sets `Complete` and returns `config.ReloadConfig()`;
 `handleCompleteKeys` returns `NavigateToMainMenuMsg` on any key.
 
-> `handleConfirmationKeys`, `viewConfirmation`, and `viewError` remain in the source but
-> are legacy/unreferenced — no state routes to them.
-
 ---
 
 ## Source file map
@@ -448,7 +442,7 @@ confirm and error states, and mutations funnel through:
 | `settingsmenu.go` | `SettingsModel`, `NewSettingsModel`, `Init`/`Update`/`View`, `handleKeyPress` dispatch, transitions, `saveChanges`/`performConfigUpdate`, `checkDirtyState`, main-menu view |
 | `types.go` | `SettingsState` + `String()`, all message types, `ChangeOption` enum, `ChangeOptionInfo` |
 | `helpers.go` | `SettingsActionListItem`, `BuildSettingsMainMenuItems`, action-item selection helpers |
-| `view_common.go` | Shared/legacy views (`viewComplete`, deprecated `viewConfirmation`/`viewError`, formatters) |
+| `view_common.go` | Shared views (`viewComplete`) and formatters (`formatChangesSummary`, `formatCurrentConfig`, `renderErrorWithContext`) |
 | `flow_repository_actions.go` | Repository actions menu (`getMenuOptions`, handler, view) |
 | `flow_add_repo_select_type.go` | Local-vs-GitHub type picker |
 | `flow_add_local.go` | Add Local flow |
@@ -476,27 +470,14 @@ confirm and error states, and mutations funnel through:
 
 ---
 
-## Known issues
+## Design notes
 
-These are documented for accuracy; **no fixes are included here.**
-
-1. **Failed manual refresh is silently swallowed.** In `settingsmenu.go`, the
-   `refreshCompleteMsg` handler sets `lastRefreshError = msg.err` only to unconditionally
-   run `lastRefreshError = nil` on the next line, then always sets state to `MainMenu` and
-   clears the layout error. Consequently the `success`/`err` fields are effectively
-   ignored, `RefreshError` is never reached from a failed git pull, and the user gets no
-   feedback that the refresh failed.
-
-2. **Delete flow never checks for uncommitted changes.** `deleteDirtyStateMsg` is
-   declared in `types.go` but is never produced or handled, and `handleConfirmDeleteKeys`
-   calls `deleteRepository()` directly. Despite the "destructive GitHub operations run a
-   dirty check" design intent, deletion does not.
-
-3. **`pluralize` produces malformed output.** In `flow_update_pat.go`, `pluralize` appends
-   `"ies"` to the whole word, so `pluralize("repository", n>1)` yields "repositoryies" in
-   the PAT confirmation summary.
-
-4. **Dead / legacy code.** `refreshInitiateMsg` and `refreshInProgressMsg` are unused;
-   `handleConfirmationKeys`, `viewConfirmation`, and `viewError` are unreferenced; and the
-   delete menu item uses the magic value `ChangeOption(999)` instead of the defined
-   `ChangeOptionDelete`.
+**Delete does not run a dirty-state check — by design.** Unlike the Edit Branch, Edit
+Clone Path, and Manual Refresh flows, the Delete flow deliberately skips the
+uncommitted-changes check. Deleting a repository only removes its entry from the config;
+it never touches the clone directory or local files on disk, so there is nothing on disk
+to lose by proceeding while the working tree is dirty. The confirmation screen
+(`viewConfirmDelete` / `getCleanupWarning`) already tells the user that the clone
+directory will **not** be deleted and that they may want to clean it up manually. Because
+the operation is non-destructive to on-disk content, gating it behind a dirty check would
+add friction without protecting anything.

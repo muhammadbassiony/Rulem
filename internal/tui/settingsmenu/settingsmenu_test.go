@@ -572,35 +572,6 @@ func TestHandleManualRefreshKeys(t *testing.T) {
 	}
 }
 
-func TestHandleConfirmationKeys(t *testing.T) {
-	t.Skip("Deprecated - confirmation states are now flow-specific")
-	model := createTestModel(t)
-	model.state = SettingsStateEditBranchConfirm
-	model.hasChanges = true
-
-	// Test yes saves
-	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")}
-	_, cmd := model.handleConfirmationKeys(keyMsg)
-
-	if cmd == nil {
-		t.Error("Confirming should return save command")
-	}
-
-	// Test no discards
-	model.state = SettingsStateEditBranchConfirm
-	model.newStorageDir = "/test/path"
-	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
-	updatedModel, _ := model.handleConfirmationKeys(keyMsg)
-
-	if updatedModel.newStorageDir != "" {
-		t.Error("No should reset temporary changes")
-	}
-
-	if updatedModel.state != SettingsStateRepositoryActions {
-		t.Errorf("No should return to SelectChange, got %v", updatedModel.state)
-	}
-}
-
 func TestUpdateTextInput(t *testing.T) {
 	model := createTestModel(t)
 	model.hasChanges = false

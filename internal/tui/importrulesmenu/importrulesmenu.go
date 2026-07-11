@@ -1,6 +1,7 @@
 package importrulesmenu
 
 import (
+	"context"
 	"fmt"
 	"rulem/internal/editors"
 	"rulem/internal/filemanager"
@@ -163,8 +164,11 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	s.Style = styles.SpinnerStyle
 	s.Spinner = spinner.Pulse
 
-	// T009: Prepare all repositories using multi-repository orchestration
-	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+	// T009: Prepare all repositories using multi-repository orchestration.
+	// Bound the clone/fetch network work so a hung remote can't freeze startup.
+	prepCtx, cancel := context.WithTimeout(context.Background(), repository.CloneTimeout)
+	defer cancel()
+	prepared, err := repository.PrepareAllRepositories(prepCtx, ctx.Config.Repositories, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to prepare repositories", "error", err)
 		return &ImportRulesModel{

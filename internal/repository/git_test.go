@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"rulem/internal/logging"
@@ -19,7 +20,7 @@ func TestGitSource_Prepare_InitialClone_Success(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	gotPath, err := gs.Prepare(logger)
+	gotPath, err := gs.Prepare(context.Background(), logger)
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for initial clone: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestGitSource_Prepare_InitialClone_WithBranch(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	gs := NewGitSource(remoteURL, &branch, clonePath)
-	gotPath, err := gs.Prepare(logger)
+	gotPath, err := gs.Prepare(context.Background(), logger)
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for branch clone: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestGitSource_Prepare_FetchRefresh_Success(t *testing.T) {
 
 	// First clone should succeed
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, err := gs.Prepare(logger)
+	_, err := gs.Prepare(context.Background(), logger)
 	if err != nil {
 		t.Fatalf("First Prepare() failed: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestGitSource_Prepare_FetchRefresh_Success(t *testing.T) {
 	}
 
 	// Second prepare should fetch updates
-	_, err = gs.Prepare(logger)
+	_, err = gs.Prepare(context.Background(), logger)
 	if err != nil {
 		t.Fatalf("Second Prepare() failed: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestGitSource_Prepare_PATAuth_Required(t *testing.T) {
 	gs := NewGitSource(remoteURL, nil, clonePath)
 
 	// Without PAT configured, should fail with auth error
-	_, err := gs.Prepare(logger)
+	_, err := gs.Prepare(context.Background(), logger)
 	if err == nil {
 		t.Fatalf("Prepare() should fail without PAT for private repo")
 	}
@@ -146,7 +147,7 @@ func TestGitSource_Prepare_DirtyWorkingTree_Message(t *testing.T) {
 
 	// First, clone the repository
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, err := gs.Prepare(logger)
+	_, err := gs.Prepare(context.Background(), logger)
 	if err != nil {
 		t.Fatalf("Initial clone failed: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestGitSource_Prepare_DirtyWorkingTree_Message(t *testing.T) {
 
 	// Second prepare should succeed even with dirty state
 	// (GitSource doesn't fail on dirty working tree, it just skips updates)
-	_, err = gs.Prepare(logger)
+	_, err = gs.Prepare(context.Background(), logger)
 	if err != nil {
 		t.Fatalf("Prepare() with dirty tree failed: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestGitSource_Prepare_InvalidURL(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			gs := NewGitSource(tc.remoteURL, nil, clonePath)
-			_, err := gs.Prepare(logger)
+			_, err := gs.Prepare(context.Background(), logger)
 
 			if err == nil {
 				t.Errorf("Prepare() should fail for invalid URL: %s", tc.remoteURL)
@@ -237,7 +238,7 @@ func TestGitSource_Prepare_DirectoryConflict(t *testing.T) {
 	}
 
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, err := gs.Prepare(logger)
+	_, err := gs.Prepare(context.Background(), logger)
 
 	if err == nil {
 		t.Fatalf("Prepare() should fail for directory conflict")
@@ -261,7 +262,7 @@ func TestGitSource_Prepare_EmptyPath_Error(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	gs := NewGitSource(remoteURL, nil, "")
-	_, err := gs.Prepare(logger)
+	_, err := gs.Prepare(context.Background(), logger)
 
 	if err == nil {
 		t.Fatalf("Prepare() should fail for empty clone path")
@@ -290,7 +291,7 @@ func TestGitSource_Prepare_PATExpired_Error(t *testing.T) {
 	_ = credMgr.StoreGitHubToken(invalidToken)
 
 	gs := NewGitSource(remoteURL, nil, clonePath)
-	_, err := gs.Prepare(logger)
+	_, err := gs.Prepare(context.Background(), logger)
 
 	if err == nil {
 		t.Fatalf("Prepare() should fail with expired/invalid PAT")
@@ -938,7 +939,7 @@ func TestCheckRepositoryStatus(t *testing.T) {
 		remoteURL := "https://github.com/octocat/Hello-World.git"
 
 		gs := NewGitSource(remoteURL, nil, clonePath)
-		_, err := gs.Prepare(logger)
+		_, err := gs.Prepare(context.Background(), logger)
 		if err != nil {
 			t.Skipf("Cannot clone repository for testing (network issue?): %v", err)
 		}
@@ -961,7 +962,7 @@ func TestCheckRepositoryStatus(t *testing.T) {
 		remoteURL := "https://github.com/octocat/Hello-World.git"
 
 		gs := NewGitSource(remoteURL, nil, clonePath)
-		_, err := gs.Prepare(logger)
+		_, err := gs.Prepare(context.Background(), logger)
 		if err != nil {
 			t.Skipf("Cannot clone repository for testing (network issue?): %v", err)
 		}
@@ -1007,7 +1008,7 @@ func TestValidateRemoteBranchExists(t *testing.T) {
 				tempDir := t.TempDir()
 				clonePath := filepath.Join(tempDir, "test-repo")
 				gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
-				_, err := gs.Prepare(logger)
+				_, err := gs.Prepare(context.Background(), logger)
 				if err != nil {
 					t.Fatalf("Failed to prepare test repository: %v", err)
 				}
@@ -1022,7 +1023,7 @@ func TestValidateRemoteBranchExists(t *testing.T) {
 				tempDir := t.TempDir()
 				clonePath := filepath.Join(tempDir, "test-repo")
 				gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
-				_, err := gs.Prepare(logger)
+				_, err := gs.Prepare(context.Background(), logger)
 				if err != nil {
 					t.Fatalf("Failed to prepare test repository: %v", err)
 				}
@@ -1037,7 +1038,7 @@ func TestValidateRemoteBranchExists(t *testing.T) {
 				tempDir := t.TempDir()
 				clonePath := filepath.Join(tempDir, "test-repo")
 				gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
-				_, err := gs.Prepare(logger)
+				_, err := gs.Prepare(context.Background(), logger)
 				if err != nil {
 					t.Fatalf("Failed to prepare test repository: %v", err)
 				}
@@ -1061,7 +1062,7 @@ func TestValidateRemoteBranchExists(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repoPath := tt.setupRepo(t)
-			err := ValidateRemoteBranchExists(repoPath, tt.branchName, logger)
+			err := ValidateRemoteBranchExists(context.Background(), repoPath, tt.branchName, logger)
 
 			if tt.expectError {
 				if err == nil {
@@ -1087,7 +1088,7 @@ func TestGitSource_checkoutBranch(t *testing.T) {
 
 		// Clone repository with default branch
 		gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
-		_, err := gs.Prepare(logger)
+		_, err := gs.Prepare(context.Background(), logger)
 		if err != nil {
 			t.Fatalf("Failed to prepare test repository: %v", err)
 		}
@@ -1125,7 +1126,7 @@ func TestGitSource_checkoutBranch(t *testing.T) {
 		clonePath := filepath.Join(tempDir, "test-repo")
 
 		gs := NewGitSource("https://github.com/octocat/Hello-World.git", nil, clonePath)
-		_, err := gs.Prepare(logger)
+		_, err := gs.Prepare(context.Background(), logger)
 		if err != nil {
 			t.Fatalf("Failed to prepare test repository: %v", err)
 		}
@@ -1157,7 +1158,7 @@ func TestGitSource_checkoutBranch(t *testing.T) {
 		// Clone with specific branch
 		masterBranch := "master"
 		gs := NewGitSource("https://github.com/octocat/Hello-World.git", &masterBranch, clonePath)
-		_, err := gs.Prepare(logger)
+		_, err := gs.Prepare(context.Background(), logger)
 		if err != nil {
 			t.Fatalf("Failed to prepare test repository: %v", err)
 		}

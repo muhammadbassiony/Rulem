@@ -1,6 +1,7 @@
 package settingsmenu
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -326,7 +327,7 @@ func TestHandleMainMenuKeys(t *testing.T) {
 
 			// Prepare repos and rebuild list
 			var err error
-			model.preparedRepos, err = repository.PrepareAllRepositories(
+			model.preparedRepos, err = repository.PrepareAllRepositories(context.Background(),
 				model.currentConfig.Repositories,
 				model.logger,
 			)

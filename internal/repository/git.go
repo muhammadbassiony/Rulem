@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -136,10 +138,14 @@ func NewGitSource(remoteURL string, branch *string, localPath string) GitSource 
 //
 // Implementation follows the Source interface contract defined in contracts/README.md
 //
+// Parameters:
+//   - ctx: Context bounding all network operations (clone/fetch). A cancelled
+//     or timed-out context aborts the operation promptly.
+//
 // Returns:
 //   - localPath: Absolute path to the prepared repository (ready for FileManager)
 //   - error: Preparation failures with actionable error messages
-func (gs GitSource) Prepare(logger *logging.AppLogger) (string, error) {
+func (gs GitSource) Prepare(ctx context.Context, logger *logging.AppLogger) (string, error) {
 	if logger != nil {
 		logger.Info("Preparing Git repository source",
 			"remoteURL", gs.RemoteURL,
@@ -180,13 +186,13 @@ func (gs GitSource) Prepare(logger *logging.AppLogger) (string, error) {
 	// Try without authentication first, fall back to PAT if needed
 	switch dirStatus {
 	case DirectoryStatusEmpty:
-		err = gs.performCloneWithAuth(cleanPath, normalizedURL, logger)
+		err = gs.performCloneWithAuth(ctx, cleanPath, normalizedURL, logger)
 		if err != nil {
 			return "", err
 		}
 
 	case DirectoryStatusSameRepo:
-		err = gs.performFetchWithAuth(cleanPath, logger)
+		err = gs.performFetchWithAuth(ctx, cleanPath, logger)
 		if err != nil {
 			return "", err
 		}
@@ -250,11 +256,11 @@ func (gs GitSource) normalizeRemoteURL() (string, error) {
 // Example:
 //
 //	source := repository.NewGitSource(url, &branch, path)
-//	err := source.FetchUpdates(logger)
+//	err := source.FetchUpdates(ctx, logger)
 //	if err != nil {
 //	    return fmt.Errorf("failed to fetch updates: %w", err)
 //	}
-func (gs GitSource) FetchUpdates(logger *logging.AppLogger) error {
+func (gs GitSource) FetchUpdates(ctx context.Context, logger *logging.AppLogger) error {
 	if logger != nil {
 		logger.Info("Manual fetch requested", "url", gs.RemoteURL, "path", gs.Path)
 	}
@@ -264,7 +270,7 @@ func (gs GitSource) FetchUpdates(logger *logging.AppLogger) error {
 		return fmt.Errorf("repository does not exist at %s - cannot fetch updates", gs.Path)
 	}
 
-	return gs.performFetchWithAuth(gs.Path, logger)
+	return gs.performFetchWithAuth(ctx, gs.Path, logger)
 }
 
 // CheckGithubRepositoryStatus checks if the repository at the given path has uncommitted changes.
@@ -381,9 +387,9 @@ func (gs GitSource) getAuthentication(logger *logging.AppLogger) (*http.BasicAut
 //  3. If non-auth error occurs, return original error for proper handling
 //
 // This approach minimizes credential usage and supports both public and private repositories.
-func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *logging.AppLogger) error {
+func (gs GitSource) performCloneWithAuth(ctx context.Context, localPath, remoteURL string, logger *logging.AppLogger) error {
 	// First try without authentication (for public repositories)
-	err := gs.performClone(localPath, remoteURL, nil, logger)
+	err := gs.performClone(ctx, localPath, remoteURL, nil, logger)
 	if err == nil {
 		return nil
 	}
@@ -404,7 +410,7 @@ func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *lo
 		}
 
 		// Retry with authentication
-		return gs.performClone(localPath, remoteURL, auth, logger)
+		return gs.performClone(ctx, localPath, remoteURL, auth, logger)
 	}
 
 	// Not an auth error, return original error
@@ -420,11 +426,12 @@ func (gs GitSource) performCloneWithAuth(localPath, remoteURL string, logger *lo
 //   - Provides user-friendly error translation for common failure scenarios
 //
 // go-git library functions used:
-//   - git.PlainClone: Creates repository clone in specified directory
+//   - git.PlainCloneContext: Creates repository clone in specified directory,
+//     aborting when the context is cancelled or its deadline is exceeded
 //   - CloneOptions.Depth: Shallow clone depth (1 = latest commit only)
 //   - CloneOptions.ReferenceName: Specific branch to clone
 //   - CloneOptions.SingleBranch: Clone only the specified branch
-func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAuth, logger *logging.AppLogger) error {
+func (gs GitSource) performClone(ctx context.Context, localPath, remoteURL string, auth *http.BasicAuth, logger *logging.AppLogger) error {
 	if logger != nil {
 		logger.Info("Cloning repository", "remoteURL", remoteURL, "localPath", localPath)
 	}
@@ -461,8 +468,9 @@ func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAu
 		cloneOpts.SingleBranch = true
 	}
 
-	// Perform the clone
-	_, err := git.PlainClone(localPath, cloneOpts)
+	// Perform the clone. The context bounds the network transfer so a hung
+	// connection aborts instead of blocking forever.
+	_, err := git.PlainCloneContext(ctx, localPath, cloneOpts)
 	if err != nil {
 		// Provide user-friendly error messages for common failures
 		return gs.translateCloneError(err)
@@ -484,9 +492,9 @@ func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAu
 //
 // This approach maintains consistency with clone operations and supports repository
 // visibility changes (public to private or vice versa).
-func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLogger) error {
+func (gs GitSource) performFetchWithAuth(ctx context.Context, localPath string, logger *logging.AppLogger) error {
 	// First try without authentication (for public repositories)
-	err := gs.performFetch(localPath, nil, logger)
+	err := gs.performFetch(ctx, localPath, nil, logger)
 	if err == nil {
 		return nil
 	}
@@ -507,7 +515,7 @@ func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLo
 		}
 
 		// Retry with authentication
-		return gs.performFetch(localPath, auth, logger)
+		return gs.performFetch(ctx, localPath, auth, logger)
 	}
 
 	// Not an auth error, return original error
@@ -537,7 +545,7 @@ func (gs GitSource) performFetchWithAuth(localPath string, logger *logging.AppLo
 //
 // The shallow fetch + reset approach avoids complex merge scenarios in favor of
 // clean synchronization, which is appropriate for a cache-focused use case.
-func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger *logging.AppLogger) error {
+func (gs GitSource) performFetch(ctx context.Context, localPath string, auth *http.BasicAuth, logger *logging.AppLogger) error {
 	if logger != nil {
 		logger.Info("Fetching repository updates", "localPath", localPath)
 	}
@@ -588,7 +596,7 @@ func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger 
 		fetchOpts.ClientOptions = []client.Option{client.WithHTTPAuth(auth)}
 	}
 
-	err = remote.Fetch(fetchOpts)
+	err = remote.FetchContext(ctx, fetchOpts)
 	if err != nil && err != git.NoErrAlreadyUpToDate {
 		return gs.translateFetchError(err)
 	}
@@ -667,6 +675,26 @@ func (gs GitSource) syncWorktreeToRemote(repo *git.Repository, worktree *git.Wor
 	return nil
 }
 
+// errTimedOutContactingRemote is the friendly message surfaced when a network
+// operation is cancelled or exceeds its context deadline.
+var errTimedOutContactingRemote = fmt.Errorf("timed out contacting the remote — check your connection")
+
+// isContextError reports whether err was caused by context cancellation or a
+// deadline being exceeded. It checks the error chain first and falls back to
+// string matching, because some go-git transports surface the context failure
+// as a plain error that no longer wraps the sentinel.
+func isContextError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "context deadline exceeded") ||
+		strings.Contains(errStr, "context canceled")
+}
+
 // translateCloneError provides user-friendly error messages for clone failures.
 //
 // This function translates technical Git errors into actionable user guidance:
@@ -677,6 +705,12 @@ func (gs GitSource) syncWorktreeToRemote(repo *git.Repository, worktree *git.Wor
 //
 // All error messages include specific next steps for resolution.
 func (gs GitSource) translateCloneError(err error) error {
+	// Timeout / cancellation takes priority - a bounded context that expired
+	// means we never finished contacting the remote.
+	if isContextError(err) {
+		return errTimedOutContactingRemote
+	}
+
 	errMsg := err.Error()
 	errStr := strings.ToLower(errMsg)
 
@@ -744,6 +778,12 @@ func (gs GitSource) containsAuthErrorPatterns(errMsg string) bool {
 // Fetch errors are often less critical than clone errors since the local
 // repository can continue operating with cached content.
 func (gs GitSource) translateFetchError(err error) error {
+	// Timeout / cancellation takes priority over the generic network branch so
+	// the caller (e.g. the TUI spinner) gets a clear, friendly message.
+	if isContextError(err) {
+		return errTimedOutContactingRemote
+	}
+
 	errMsg := err.Error()
 	errStr := strings.ToLower(errMsg)
 
@@ -1061,14 +1101,26 @@ func (gs GitSource) checkoutBranch(repo *git.Repository, worktree *git.Worktree,
 // ValidateRemoteBranchExists validates that a branch exists on the remote repository.
 // This function is used before saving branch configuration to ensure the branch is valid.
 //
+// This check reads the local remote-tracking refs (refs/remotes/origin/*) that
+// a previous fetch populated; it performs no network round-trip of its own.
+// The ctx parameter keeps the signature consistent with the rest of the
+// network path and lets an already-cancelled context short-circuit the check;
+// callers pass a ValidationTimeout-bounded context.
+//
 // Parameters:
+//   - ctx: Context for cancellation (no network call is made here)
 //   - repoPath: Local path to the git repository
 //   - branchName: Name of the branch to validate (empty string means default branch, always valid)
 //   - logger: Logger for operation tracking
 //
 // Returns:
 //   - error: If branch doesn't exist on remote or validation fails
-func ValidateRemoteBranchExists(repoPath string, branchName string, logger *logging.AppLogger) error {
+func ValidateRemoteBranchExists(ctx context.Context, repoPath string, branchName string, logger *logging.AppLogger) error {
+	// Honor an already-cancelled/expired context before doing any work.
+	if err := ctx.Err(); err != nil {
+		return errTimedOutContactingRemote
+	}
+
 	// Empty branch name means use default - always valid
 	if strings.TrimSpace(branchName) == "" {
 		return nil

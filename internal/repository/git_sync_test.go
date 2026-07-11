@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,7 +100,7 @@ func TestFetchUpdates_UpdatesWorkingTree(t *testing.T) {
 	pushToOrigin(t, writer)
 
 	gs := GitSource{Path: reader}
-	if err := gs.FetchUpdates(logger); err != nil {
+	if err := gs.FetchUpdates(context.Background(), logger); err != nil {
 		t.Fatalf("FetchUpdates: %v", err)
 	}
 
@@ -121,7 +123,7 @@ func TestFetchUpdates_DirtyTreeIsPreserved(t *testing.T) {
 	pushToOrigin(t, writer)
 
 	gs := GitSource{Path: reader}
-	if err := gs.FetchUpdates(logger); err != nil {
+	if err := gs.FetchUpdates(context.Background(), logger); err != nil {
 		t.Fatalf("FetchUpdates on dirty tree should not error: %v", err)
 	}
 
@@ -149,7 +151,7 @@ func TestFetchUpdates_AfterShallowClone(t *testing.T) {
 	shallow := filepath.Join(filepath.Dir(writer), "shallow")
 
 	gs := GitSource{Path: shallow}
-	if err := gs.performClone(shallow, origin, nil, logger); err != nil {
+	if err := gs.performClone(context.Background(), shallow, origin, nil, logger); err != nil {
 		t.Fatalf("shallow clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(shallow, "second.md")); err != nil {
@@ -160,10 +162,71 @@ func TestFetchUpdates_AfterShallowClone(t *testing.T) {
 	commitFile(t, writer, "third.md", "# three\n")
 	pushToOrigin(t, writer)
 
-	if err := gs.FetchUpdates(logger); err != nil {
+	if err := gs.FetchUpdates(context.Background(), logger); err != nil {
 		t.Fatalf("FetchUpdates after shallow clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(shallow, "third.md")); err != nil {
 		t.Fatalf("working tree missing new commit after shallow fetch: %v", err)
+	}
+}
+
+// TestPerformClone_CancelledContext proves that a cancelled context aborts a
+// clone promptly instead of hanging, and that the failure surfaces as the
+// friendly timeout message. The origin is a local bare repo, so any delay here
+// would come from the (missing) cancellation handling, not the network.
+func TestPerformClone_CancelledContext(t *testing.T) {
+	origin, _, _ := setupOriginAndClone(t)
+	logger, _ := logging.NewTestLogger()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the operation starts
+
+	dest := filepath.Join(t.TempDir(), "clone-dest")
+	gs := GitSource{Path: dest}
+
+	start := time.Now()
+	err := gs.performClone(ctx, dest, origin, nil, logger)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected clone with cancelled context to fail")
+	}
+	if !errors.Is(err, errTimedOutContactingRemote) {
+		t.Fatalf("expected friendly timeout error, got: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("clone with cancelled context took too long (%v) - cancellation not honored", elapsed)
+	}
+}
+
+// TestFetchUpdates_CancelledContext proves the same for the fetch/sync path:
+// an already-cancelled context aborts the fetch and is reported as the friendly
+// timeout message rather than blocking the caller (e.g. the TUI spinner).
+func TestFetchUpdates_CancelledContext(t *testing.T) {
+	_, writer, reader := setupOriginAndClone(t)
+	logger, _ := logging.NewTestLogger()
+
+	// Advance the origin so the fetch has real work to do (and therefore must
+	// contact the remote, where cancellation is observed).
+	commitFile(t, writer, "new-rule.md", "# new rule\n")
+	pushToOrigin(t, writer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the operation starts
+
+	gs := GitSource{Path: reader}
+
+	start := time.Now()
+	err := gs.FetchUpdates(ctx, logger)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected fetch with cancelled context to fail")
+	}
+	if !errors.Is(err, errTimedOutContactingRemote) {
+		t.Fatalf("expected friendly timeout error, got: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("fetch with cancelled context took too long (%v) - cancellation not honored", elapsed)
 	}
 }

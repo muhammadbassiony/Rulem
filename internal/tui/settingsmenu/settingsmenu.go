@@ -119,7 +119,9 @@ func NewSettingsModel(ctx helpers.UIContext) *SettingsModel {
 	var preparedRepos []repository.PreparedRepository
 	if ctx.Config != nil {
 		var err error
-		preparedRepos, err = repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+		prepCtx, cancel := context.WithTimeout(context.Background(), repository.CloneTimeout)
+		preparedRepos, err = repository.PrepareAllRepositories(prepCtx, ctx.Config.Repositories, ctx.Logger)
+		cancel()
 		if err != nil {
 			ctx.Logger.Error("Failed to prepare repositories for settings menu", "error", err)
 		}
@@ -196,7 +198,9 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Config != nil {
 			m.currentConfig = msg.Config
 			var err error
-			m.preparedRepos, err = repository.PrepareAllRepositories(msg.Config.Repositories, m.logger)
+			prepCtx, cancel := context.WithTimeout(context.Background(), repository.CloneTimeout)
+			m.preparedRepos, err = repository.PrepareAllRepositories(prepCtx, msg.Config.Repositories, m.logger)
+			cancel()
 			if err != nil {
 				m.logger.Warn("Failed to reload repositories after config load", "error", err)
 				// Don't fail completely - let the user work with what we have

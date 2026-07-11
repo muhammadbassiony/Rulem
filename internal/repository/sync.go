@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -97,6 +98,7 @@ func (r *RepositorySyncResult) GetMessage() string {
 // 4. Track duration and status for each operation
 //
 // Parameters:
+//   - ctx: Context bounding the fetch network operations across all repos
 //   - repos: List of repository entries to synchronize
 //   - logger: Logger for structured logging (can be nil)
 //
@@ -105,11 +107,11 @@ func (r *RepositorySyncResult) GetMessage() string {
 //
 // Usage:
 //
-//	results := repository.SyncAllRepositories(cfg.Repositories, logger)
+//	results := repository.SyncAllRepositories(ctx, cfg.Repositories, logger)
 //	for _, result := range results {
 //	    fmt.Printf("%s: %s\n", result.RepositoryName, result.GetMessage())
 //	}
-func SyncAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) []RepositorySyncResult {
+func SyncAllRepositories(ctx context.Context, repos []RepositoryEntry, logger *logging.AppLogger) []RepositorySyncResult {
 	if logger != nil {
 		logger.Info("Starting multi-repository sync", "repository_count", len(repos))
 	}
@@ -117,7 +119,7 @@ func SyncAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) []R
 	results := make([]RepositorySyncResult, 0, len(repos))
 
 	for _, repo := range repos {
-		result := syncSingleRepository(repo, logger)
+		result := syncSingleRepository(ctx, repo, logger)
 		results = append(results, result)
 
 		if logger != nil {
@@ -157,7 +159,7 @@ func SyncAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) []R
 
 // syncSingleRepository synchronizes a single repository and returns the result.
 // This is an internal helper function used by SyncAllRepositories.
-func syncSingleRepository(repo RepositoryEntry, logger *logging.AppLogger) RepositorySyncResult {
+func syncSingleRepository(ctx context.Context, repo RepositoryEntry, logger *logging.AppLogger) RepositorySyncResult {
 	startTime := time.Now()
 
 	result := RepositorySyncResult{
@@ -191,7 +193,7 @@ func syncSingleRepository(repo RepositoryEntry, logger *logging.AppLogger) Repos
 
 	// Perform sync operation
 	gitSource := NewGitSource(*repo.RemoteURL, repo.Branch, repo.Path)
-	err = gitSource.FetchUpdates(logger)
+	err = gitSource.FetchUpdates(ctx, logger)
 	if err != nil {
 		result.Status = SyncStatusFailed
 		result.Error = fmt.Errorf("fetch updates failed: %w", err)

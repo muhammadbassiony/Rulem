@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ func TestLocalSource_Prepare_ValidPath(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	ls := LocalSource{Path: tempDir}
-	gotPath, err := ls.Prepare(logger)
+	gotPath, err := ls.Prepare(context.Background(), logger)
 	if err != nil {
 		t.Fatalf("Prepare() unexpected error for valid path: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestLocalSource_Prepare_MissingDirectory(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	ls := LocalSource{Path: missingPath}
-	_, err := ls.Prepare(logger)
+	_, err := ls.Prepare(context.Background(), logger)
 	if err == nil {
 		t.Fatalf("Prepare() expected error for missing directory but got none")
 	}
@@ -52,7 +53,7 @@ func TestLocalSource_Prepare_PathTraversalRejected(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	ls := LocalSource{Path: invalidPath}
-	_, err := ls.Prepare(logger)
+	_, err := ls.Prepare(context.Background(), logger)
 	if err == nil {
 		t.Fatalf("Prepare() expected error for traversal path but got none")
 	}
@@ -73,7 +74,7 @@ func TestLocalSource_Prepare_NotADirectory(t *testing.T) {
 
 	logger, _ := logging.NewTestLogger()
 	ls := LocalSource{Path: filePath}
-	_, err := ls.Prepare(logger)
+	_, err := ls.Prepare(context.Background(), logger)
 	if err == nil {
 		t.Fatalf("Prepare() expected error for file path but got none")
 	}

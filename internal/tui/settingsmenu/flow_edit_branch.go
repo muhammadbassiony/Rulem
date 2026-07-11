@@ -2,6 +2,7 @@
 package settingsmenu
 
 import (
+	"context"
 	"fmt"
 	"rulem/internal/config"
 	"rulem/internal/repository"
@@ -129,7 +130,10 @@ func (m *SettingsModel) updateGitHubBranch(cfg *config.Config) error {
 	// (skip validation for empty branch as it means "use default")
 	if m.newGitHubBranch != "" {
 		m.logger.Debug("Validating branch exists on remote", "branch", m.newGitHubBranch, "path", repo.Path)
-		if err := repository.ValidateRemoteBranchExists(repo.Path, m.newGitHubBranch, m.logger); err != nil {
+		validateCtx, cancel := context.WithTimeout(context.Background(), repository.ValidationTimeout)
+		err := repository.ValidateRemoteBranchExists(validateCtx, repo.Path, m.newGitHubBranch, m.logger)
+		cancel()
+		if err != nil {
 			return fmt.Errorf("branch validation failed: %w", err)
 		}
 		m.logger.Debug("Branch exists on remote", "branch", m.newGitHubBranch)
@@ -175,7 +179,9 @@ func (m *SettingsModel) updateGitHubBranch(cfg *config.Config) error {
 		repo.Path,
 	)
 
-	if err := source.FetchUpdates(m.logger); err != nil {
+	fetchCtx, cancel := context.WithTimeout(context.Background(), repository.FetchTimeout)
+	defer cancel()
+	if err := source.FetchUpdates(fetchCtx, m.logger); err != nil {
 		m.logger.Warn("Failed to fetch after branch update (config saved successfully)", "error", err)
 		// Don't return error - config was saved successfully
 		// The fetch will happen on next manual refresh

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/client"
 	"github.com/go-git/go-git/v6/plumbing/transport/http"
 )
 
@@ -450,7 +451,7 @@ func (gs GitSource) performClone(localPath, remoteURL string, auth *http.BasicAu
 
 	// Add authentication if provided
 	if auth != nil {
-		cloneOpts.Auth = auth
+		cloneOpts.ClientOptions = []client.Option{client.WithHTTPAuth(auth)}
 	}
 
 	// Add branch specification if provided
@@ -573,9 +574,13 @@ func (gs GitSource) performFetch(localPath string, auth *http.BasicAuth, logger 
 
 	// Fetch updates from remote
 	fetchOpts := &git.FetchOptions{
-		Auth: auth,
 		// TODO should we raise an error or show a message here? do we really want to force?
 		Force: true, // Force update to handle force-pushes
+	}
+
+	// Add authentication if provided
+	if auth != nil {
+		fetchOpts.ClientOptions = []client.Option{client.WithHTTPAuth(auth)}
 	}
 
 	err = remote.Fetch(fetchOpts)

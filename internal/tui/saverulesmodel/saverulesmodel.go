@@ -314,6 +314,11 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isOverwriteError = false
 		return m, nil
 
+	case filepicker.CancelledMsg:
+		// User dismissed the picker (q/esc while not filtering). Return to menu.
+		m.logger.Debug("Save rules model - File picker cancelled")
+		return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
+
 	case filepicker.FileSelectedMsg:
 		// File chosen in picker; transition to filename entry
 		m.logger.Debug("Save rules model - File selected from picker", "path", message.File.Path)
@@ -357,12 +362,11 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch m.state {
 		case StateFileSelection:
-			// Intercept 'q' and 'esc' to return to main menu instead of quitting
-			if message.String() == "q" || message.String() == "esc" {
-				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
-			}
-
-			// Delegate everything else to FilePicker
+			// Delegate all keys to the FilePicker. It owns filtering (where q/esc
+			// edit or dismiss the filter) and the quit binding; when the user
+			// quits while not filtering it emits filepicker.CancelledMsg, which we
+			// handle above to navigate back. We must not sniff raw q/esc here or we
+			// would break filtering and steal keys the picker needs.
 			if m.filePicker != nil {
 				updated, fpCmd := m.filePicker.Update(message)
 				if fpCmd != nil {

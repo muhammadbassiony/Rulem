@@ -332,6 +332,11 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isOverwriteError = false
 		return m, nil
 
+	case filepicker.CancelledMsg:
+		// User dismissed the picker (q/esc while not filtering). Return to menu.
+		m.logger.Debug("Import rules model - File picker cancelled")
+		return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
+
 	case filepicker.FileSelectedMsg:
 		m.logger.Debug("Import rules model - File selected from picker", "path", message.File.Path)
 		m.selectedFile = message.File
@@ -367,6 +372,20 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case list.FilterMatchesMsg:
 		switch m.state {
+		case StateFileSelection:
+			// The picker owns its own list; forward filter-match updates to it so
+			// filtering results refresh instead of being swallowed here.
+			if m.filePicker != nil {
+				updated, fpCmd := m.filePicker.Update(message)
+				if fpCmd != nil {
+					cmds = append(cmds, fpCmd)
+				}
+				if fp, ok := updated.(*filepicker.FilePicker); ok {
+					m.filePicker = fp
+				}
+			}
+			return m, tea.Batch(cmds...)
+
 		case StateImportModeSelection:
 			m.importModeList, cmd = m.importModeList.Update(message)
 			if cmd != nil {
@@ -387,10 +406,11 @@ func (m *ImportRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch m.state {
 		case StateFileSelection:
-			if message.String() == KeyQuit || message.String() == KeyEscape {
-				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
-			}
-
+			// Delegate all keys to the FilePicker. It owns filtering (where q/esc
+			// edit or dismiss the filter) and the quit binding; when the user
+			// quits while not filtering it emits filepicker.CancelledMsg, which we
+			// handle above to navigate back. We must not sniff raw q/esc here or we
+			// would break filtering and steal keys the picker needs.
 			if m.filePicker != nil {
 				updated, fpCmd := m.filePicker.Update(message)
 				if fpCmd != nil {

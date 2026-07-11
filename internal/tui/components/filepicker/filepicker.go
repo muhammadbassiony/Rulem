@@ -115,6 +115,12 @@ type (
 		File filemanager.FileItem
 	}
 
+	// CancelledMsg is emitted when the user dismisses the picker via the quit
+	// binding (q/esc) while NOT filtering. A child component must never return
+	// tea.Quit (that would kill the whole program), so it defers the decision
+	// to the parent, which typically navigates back.
+	CancelledMsg struct{}
+
 	// internal: sent after a debounce period to trigger preview
 	debouncedPreviewMsg struct {
 		path string
@@ -128,6 +134,11 @@ type (
 		path     string
 		renderID uint64
 		cacheKey string
+		// generation stamps the content cache generation that was current when
+		// the render was scheduled. A resize bumps the generation and clears the
+		// cache; a render that completes with a stale generation was wrapped to
+		// an old viewport width and must be neither cached nor applied.
+		generation uint64
 	}
 
 	FileReadErrorMsg struct {
@@ -149,8 +160,12 @@ type lruEntry struct {
 type lruCache struct {
 	capacityBytes int
 	currentBytes  int
-	ll            *clist.List
-	items         map[string]*clist.Element
+	// generation is bumped every time the cache is cleared. Callers stamp the
+	// current generation into in-flight render commands so results produced
+	// against a stale (pre-clear, pre-resize) cache can be discarded.
+	generation uint64
+	ll         *clist.List
+	items      map[string]*clist.Element
 }
 
 func newLRU(capacity int) *lruCache {
@@ -202,6 +217,7 @@ func (c *lruCache) Clear() {
 	c.ll.Init()
 	c.items = make(map[string]*clist.Element)
 	c.currentBytes = 0
+	c.generation++
 }
 
 // detectGlamourStyle attempts to detect terminal background using termenv,
@@ -392,6 +408,13 @@ func (fp *FilePicker) Init() tea.Cmd {
 	return nil
 }
 
+// IsFiltering reports whether the list's filter input is currently active
+// (the user is typing a filter query). Parents can use this to avoid
+// intercepting keys (like q/esc) that the picker needs while filtering.
+func (fp *FilePicker) IsFiltering() bool {
+	return fp.fileList.FilterState() == list.Filtering
+}
+
 func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	fp.logger.Debug("FilePicker received message", "type", fmt.Sprintf("%T", msg))
 
@@ -439,6 +462,19 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"renderID", msg.renderID,
 			"currentRenderID", fp.currentRenderID,
 			"content_length", len(msg.content))
+
+		// Drop renders produced against a stale cache generation. These were
+		// word-wrapped to a viewport width that no longer applies (a resize
+		// cleared the cache and bumped the generation since this render was
+		// scheduled), so caching them would poison future width-agnostic
+		// cache lookups and applying them would show mis-wrapped content.
+		if msg.generation != fp.contentCache.generation {
+			fp.logger.Debug("Ignoring stale-generation render",
+				"path", msg.path,
+				"msgGeneration", msg.generation,
+				"currentGeneration", fp.contentCache.generation)
+			return fp, nil
+		}
 
 		// Always cache the content regardless of staleness
 		key := msg.cacheKey
@@ -546,12 +582,26 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return fp, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
-		// If filtering is active, ESC should only exit the filter (not quit the app)
-		if msg.String() == "esc" && fp.fileList.FilterState() == list.Filtering {
-			var lcmd tea.Cmd
-			fp.fileList, lcmd = fp.fileList.Update(msg)
-			if lcmd != nil {
-				cmds = append(cmds, lcmd)
+		// While the list's filter input is active the user is typing a query.
+		// Forward every key straight to the list so it edits the filter text and
+		// handles enter/esc/backspace itself. Crucially we must NOT fall through
+		// to the action bindings below: plain runes like f/g/q would otherwise
+		// trigger loads, format toggles or quit, enter would select the top match
+		// instead of accepting the filter, and left/right would be eaten by
+		// pane-focus switching instead of moving the text cursor.
+		if fp.fileList.FilterState() == list.Filtering {
+			fp.fileList, cmd = fp.fileList.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			// If this key ended filtering (enter applied / esc cancelled),
+			// refresh the preview for the now-selected item.
+			if fp.fileList.FilterState() != list.Filtering {
+				if sel := fp.fileList.SelectedItem(); sel != nil {
+					p := sel.(filemanager.FileItem).Path
+					fp.logger.Debug("Filtering ended; scheduling preview", "path", p)
+					cmds = append(cmds, fp.scheduleDebouncedPreview(p))
+				}
 			}
 			return fp, tea.Batch(cmds...)
 		}
@@ -603,7 +653,11 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, fp.keys.Quit):
-			return fp, tea.Quit
+			// A child component must not kill the whole program. This branch is
+			// only reachable when not filtering (the filtering guard above returns
+			// early), so q/esc here means "dismiss the picker". Let the parent
+			// decide what to do via CancelledMsg.
+			return fp, func() tea.Msg { return CancelledMsg{} }
 
 		case key.Matches(msg, fp.keys.Full):
 			// Load full preview for current selection
@@ -765,6 +819,16 @@ func (fp *FilePicker) scheduleDebouncedPreview(p string) tea.Cmd {
 func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) tea.Cmd {
 	renderID := atomic.AddUint64(fp.renderCounter, 1)
 
+	// Capture all mutable picker state synchronously before returning the
+	// closure. The closure runs on a background goroutine while the Update
+	// goroutine may concurrently mutate these fields (e.g. SetSize changes the
+	// viewport, keys flip glamourStyle/useGlamour), which would be a data race.
+	largeFileThreshold := fp.largeFileThreshold
+	maxPreviewBytes := fp.maxPreviewBytes
+	vpWidth := fp.viewport.Width - 2
+	glamourStyle := fp.glamourStyle
+	generation := fp.contentCache.generation
+
 	return func() tea.Msg {
 		fp.logger.Debug("Reading and rendering file", "path", path, "renderID", renderID)
 		// detect file size
@@ -777,11 +841,11 @@ func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) 
 		// Decide how many bytes to read
 		var toRead = fi.Size()
 		truncated := false
-		fp.logger.Debug("Checking truncation", "path", path, "size", fi.Size(), "full", full, "largeFileThreshold", fp.largeFileThreshold, "bigger ? ", fi.Size() > int64(fp.largeFileThreshold), "renderID", renderID)
-		if !full && fi.Size() > int64(fp.largeFileThreshold) {
+		fp.logger.Debug("Checking truncation", "path", path, "size", fi.Size(), "full", full, "largeFileThreshold", largeFileThreshold, "bigger ? ", fi.Size() > int64(largeFileThreshold), "renderID", renderID)
+		if !full && fi.Size() > int64(largeFileThreshold) {
 			// truncated preview for large files
-			if int64(fp.maxPreviewBytes) < toRead {
-				toRead = int64(fp.maxPreviewBytes)
+			if int64(maxPreviewBytes) < toRead {
+				toRead = int64(maxPreviewBytes)
 			}
 			truncated = true
 		}
@@ -802,10 +866,9 @@ func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) 
 		}
 		content := buf[:n]
 
-		vpWidth := fp.viewport.Width - 2
 		if vpWidth <= 0 {
+			fp.logger.Debug("Using fallback viewport width", "width", 80, "viewport_width", vpWidth+2)
 			vpWidth = 80
-			fp.logger.Debug("Using fallback viewport width", "width", vpWidth, "viewport_width", fp.viewport.Width)
 		}
 
 		// Build header if truncated or indicate formatting mode
@@ -817,7 +880,7 @@ func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) 
 		var renderedContent string
 		if glamourOn {
 			renderer, err := glamour.NewTermRenderer(
-				glamour.WithStandardStyle(fp.glamourStyle),
+				glamour.WithStandardStyle(glamourStyle),
 				glamour.WithWordWrap(vpWidth),
 			)
 			if err != nil {
@@ -837,6 +900,6 @@ func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) 
 		}
 
 		fp.logger.Debug("File rendered successfully", "path", path, "renderID", renderID, "content_length", len(renderedContent), "truncated", truncated, "glamour", glamourOn)
-		return FileRenderedMsg{content: renderedContent, path: path, renderID: renderID, cacheKey: fp.cacheKey(path, !truncated, glamourOn)}
+		return FileRenderedMsg{content: renderedContent, path: path, renderID: renderID, cacheKey: fp.cacheKey(path, !truncated, glamourOn), generation: generation}
 	}
 }

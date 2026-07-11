@@ -29,6 +29,23 @@ jobs:
       - name: Test
         run: go test -race -cover ./...
 
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Fails only on vulnerabilities reachable from this module's code
+      # (govulncheck's default symbol-level analysis); purely informational
+      # module-level findings do not fail the job.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:

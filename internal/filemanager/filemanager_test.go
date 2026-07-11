@@ -125,6 +125,146 @@ func TestHappyPath(t *testing.T) {
 	})
 }
 
+// 2.1b Subdirectory Save Tests
+//
+// Saving into a subdirectory of the central repository should create any
+// intermediate directories and place the file inside the storage root.
+func TestCopyFileToStorageSubdirectories(t *testing.T) {
+	logger := createTestLogger()
+	testContent := "# Subdir rules\ncontent"
+
+	t.Run("saves into nested subdirectory creating intermediate dirs", func(t *testing.T) {
+		storageDir := createTempStorage(t)
+		defer os.RemoveAll(storageDir)
+
+		fm, err := NewFileManager(storageDir, logger)
+		if err != nil {
+			t.Fatalf("Failed to create FileManager: %v", err)
+		}
+
+		tempDir := createTempStorage(t)
+		defer os.RemoveAll(tempDir)
+		srcPath := createTestFile(t, tempDir, "source.md", testContent)
+
+		newName := "sub/dir/name.md"
+		destPath, err := fm.CopyFileToStorage(srcPath, &newName, false)
+		if err != nil {
+			t.Fatalf("CopyFileToStorage into subdirectory failed: %v", err)
+		}
+
+		expectedDest := filepath.Join(storageDir, "sub", "dir", "name.md")
+		if destPath != expectedDest {
+			t.Errorf("Expected dest path %s, got %s", expectedDest, destPath)
+		}
+		if !fileExists(destPath) {
+			t.Error("Destination file was not created inside subdirectory")
+		}
+
+		// Intermediate directory should exist with 0755 permissions.
+		info, err := os.Stat(filepath.Join(storageDir, "sub"))
+		if err != nil {
+			t.Fatalf("intermediate dir not created: %v", err)
+		}
+		if !info.IsDir() {
+			t.Error("expected 'sub' to be a directory")
+		}
+		if perm := info.Mode().Perm(); perm != 0755 {
+			t.Errorf("expected intermediate dir perms 0755, got %o", perm)
+		}
+
+		if content := readFileContent(t, destPath); content != testContent {
+			t.Errorf("Content mismatch. Expected %q, got %q", testContent, content)
+		}
+	})
+
+	t.Run("single subdirectory segment", func(t *testing.T) {
+		storageDir := createTempStorage(t)
+		defer os.RemoveAll(storageDir)
+
+		fm, err := NewFileManager(storageDir, logger)
+		if err != nil {
+			t.Fatalf("Failed to create FileManager: %v", err)
+		}
+
+		tempDir := createTempStorage(t)
+		defer os.RemoveAll(tempDir)
+		srcPath := createTestFile(t, tempDir, "source.md", testContent)
+
+		newName := "backend/api-rules.md"
+		destPath, err := fm.CopyFileToStorage(srcPath, &newName, false)
+		if err != nil {
+			t.Fatalf("CopyFileToStorage failed: %v", err)
+		}
+		expectedDest := filepath.Join(storageDir, "backend", "api-rules.md")
+		if destPath != expectedDest {
+			t.Errorf("Expected dest path %s, got %s", expectedDest, destPath)
+		}
+		if !fileExists(destPath) {
+			t.Error("Destination file was not created")
+		}
+	})
+
+	t.Run("plain filename still lands in storage root", func(t *testing.T) {
+		storageDir := createTempStorage(t)
+		defer os.RemoveAll(storageDir)
+
+		fm, err := NewFileManager(storageDir, logger)
+		if err != nil {
+			t.Fatalf("Failed to create FileManager: %v", err)
+		}
+
+		tempDir := createTempStorage(t)
+		defer os.RemoveAll(tempDir)
+		srcPath := createTestFile(t, tempDir, "source.md", testContent)
+
+		newName := "flat.md"
+		destPath, err := fm.CopyFileToStorage(srcPath, &newName, false)
+		if err != nil {
+			t.Fatalf("CopyFileToStorage failed: %v", err)
+		}
+		expectedDest := filepath.Join(storageDir, "flat.md")
+		if destPath != expectedDest {
+			t.Errorf("Expected dest path %s, got %s", expectedDest, destPath)
+		}
+	})
+
+	t.Run("rejects unsafe subdirectory paths", func(t *testing.T) {
+		storageDir := createTempStorage(t)
+		defer os.RemoveAll(storageDir)
+
+		fm, err := NewFileManager(storageDir, logger)
+		if err != nil {
+			t.Fatalf("Failed to create FileManager: %v", err)
+		}
+
+		tempDir := createTempStorage(t)
+		defer os.RemoveAll(tempDir)
+		srcPath := createTestFile(t, tempDir, "source.md", testContent)
+
+		badNames := []string{
+			"../evil.md",
+			"backend/../../evil.md",
+			"/abs.md",
+			"a//b.md",
+			"a/./b.md",
+		}
+		for _, name := range badNames {
+			name := name
+			t.Run(name, func(t *testing.T) {
+				n := name
+				_, err := fm.CopyFileToStorage(srcPath, &n, false)
+				if err == nil {
+					t.Errorf("expected error for unsafe path %q, got none", name)
+				}
+				// Ensure nothing escaped the storage root.
+				if _, statErr := os.Stat(filepath.Join(tempDir, "evil.md")); statErr == nil {
+					t.Errorf("unsafe path %q escaped storage root", name)
+				}
+			})
+		}
+	})
+}
+
 // 2.2 Source File Validation Tests
 
 func TestSourceValidation(t *testing.T) {
@@ -243,10 +383,11 @@ func TestFilenameValidation(t *testing.T) {
 		{
 			name:        "path traversal with ../",
 			newFileName: stringPtr("../../../etc/passwd"),
-			expectError: false,
+			expectError: true,
+			errorText:   "traversal",
 		},
 		{
-			name:        "filename with forward slash",
+			name:        "filename with forward slash (subdirectory)",
 			newFileName: stringPtr("folder/file.md"),
 			expectError: false,
 		},
@@ -403,7 +544,8 @@ func TestSecurity(t *testing.T) {
 				maliciousName := "../../../etc/passwd"
 				return srcPath, &maliciousName
 			},
-			expectError: false,
+			expectError: true,
+			errorText:   "traversal",
 		},
 		{
 			name: "encoded path traversal",

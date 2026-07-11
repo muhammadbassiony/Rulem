@@ -105,7 +105,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 
 	// Filename input configuration
 	nameInput := textinput.New()
-	nameInput.Placeholder = "Enter new filename (optional)"
+	nameInput.Placeholder = "Enter filename or sub/dir/name.md (optional)"
 	nameInput.CharLimit = 255
 	nameInput.Width = 50
 
@@ -569,7 +569,7 @@ func (m SaveRulesModel) viewFileNameInput() string {
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "💾 Save Rules File",
 		Subtitle: fmt.Sprintf("Selected: %s", m.selectedFile.Name),
-		HelpText: "Enter filename (or keep default) • Enter to continue • Esc to go back",
+		HelpText: "Enter filename or sub/dir path (e.g. backend/api.md) • Enter to continue • Esc to go back",
 	})
 
 	// Handle the case where FileManager may not be initialized yet (multi-repo)
@@ -581,7 +581,7 @@ func (m SaveRulesModel) viewFileNameInput() string {
 	}
 
 	content := fmt.Sprintf("File will be saved to: %s\n\n", storageDir)
-	content += "Filename:\n"
+	content += "Filename (use / to save into a subdirectory):\n"
 	content += m.nameInput.View()
 	content += "\n\n"
 	content += "Preview: " + m.nameInput.Value()

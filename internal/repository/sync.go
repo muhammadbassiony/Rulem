@@ -98,8 +98,7 @@ func (r *RepositorySyncResult) GetMessage() string {
 // 4. Track duration and status for each operation
 //
 // Parameters:
-//   - ctx: Context for cancellation across all repos. Per-fetch network
-//     timeouts are applied internally by the repository package.
+//   - ctx: Context for cancellation across all repos
 //   - repos: List of repository entries to synchronize
 //   - logger: Logger for structured logging (can be nil)
 //

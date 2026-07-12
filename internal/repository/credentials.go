@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/config"
@@ -87,7 +86,7 @@ func (cm *CredentialManager) ValidateGitHubTokenWithRepo(ctx context.Context, to
 	}
 
 	// Set a reasonable timeout for the operation
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, validationTimeout)
 	defer cancel()
 
 	// Attempt to list references (ls-remote) which is a lightweight operation

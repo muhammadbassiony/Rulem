@@ -137,8 +137,7 @@ func (m *SettingsModel) createLocalRepository() tea.Cmd {
 			return addLocalErrorMsg{fmt.Errorf("failed to save configuration: %w", err)}
 		}
 
-		// Reload repositories. The repository package bounds each network
-		// operation internally.
+		// Reload repositories
 		var err error
 		m.preparedRepos, err = repository.PrepareAllRepositories(
 			context.Background(),

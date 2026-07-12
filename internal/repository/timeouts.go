@@ -18,7 +18,7 @@ const (
 	// (FetchUpdates, manual refresh, post-branch-change sync).
 	fetchTimeout = 60 * time.Second
 
-	// validationTimeout bounds lightweight checks such as ls-remote and branch
-	// validation.
-	validationTimeout = 30 * time.Second
+	// validationTimeout bounds lightweight remote checks such as the ls-remote
+	// used to validate a PAT and repository access.
+	validationTimeout = 10 * time.Second
 )

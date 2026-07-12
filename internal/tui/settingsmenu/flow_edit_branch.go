@@ -177,7 +177,6 @@ func (m *SettingsModel) updateGitHubBranch(cfg *config.Config) error {
 		repo.Path,
 	)
 
-	// The repository package bounds the fetch network operation internally.
 	if err := source.FetchUpdates(context.Background(), m.logger); err != nil {
 		m.logger.Warn("Failed to fetch after branch update (config saved successfully)", "error", err)
 		// Don't return error - config was saved successfully

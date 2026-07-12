@@ -93,7 +93,6 @@ func (m *SettingsModel) triggerRefresh() tea.Cmd {
 			selectedRepo.Path,
 		)
 
-		// The repository package bounds the fetch network operation internally.
 		err = source.FetchUpdates(context.Background(), m.logger)
 		if err != nil {
 			m.logger.Error("Failed to refresh repository", "error", err, "path", selectedRepo.Path)

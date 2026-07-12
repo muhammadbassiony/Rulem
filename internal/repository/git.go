@@ -139,9 +139,7 @@ func NewGitSource(remoteURL string, branch *string, localPath string) GitSource 
 // Implementation follows the Source interface contract defined in contracts/README.md
 //
 // Parameters:
-//   - ctx: Context for cancellation. Per-operation network timeouts (clone/
-//     fetch) are applied internally by this package; a cancelled context still
-//     aborts the operation promptly.
+//   - ctx: Context for cancellation
 //
 // Returns:
 //   - localPath: Absolute path to the prepared repository (ready for FileManager)
@@ -469,10 +467,7 @@ func (gs GitSource) performClone(ctx context.Context, localPath, remoteURL strin
 		cloneOpts.SingleBranch = true
 	}
 
-	// Perform the clone. Apply the clone timeout here, at the network boundary,
-	// so this transfer gets its own budget; a hung connection aborts instead of
-	// blocking forever. Cancelling the caller's context still aborts early
-	// because the deadline is derived from it.
+	// Perform the clone, bounded so a hung connection can't block forever
 	opCtx, cancel := context.WithTimeout(ctx, cloneTimeout)
 	defer cancel()
 
@@ -602,10 +597,7 @@ func (gs GitSource) performFetch(ctx context.Context, localPath string, auth *ht
 		fetchOpts.ClientOptions = []client.Option{client.WithHTTPAuth(auth)}
 	}
 
-	// Apply the fetch timeout here, at the network boundary, so this fetch gets
-	// its own budget independent of any other repository in the same batch.
-	// Cancelling the caller's context still aborts early because the deadline is
-	// derived from it.
+	// Bound the fetch so a hung connection can't block forever
 	opCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
@@ -1116,11 +1108,6 @@ func (gs GitSource) checkoutBranch(repo *git.Repository, worktree *git.Worktree,
 //
 // This check reads the local remote-tracking refs (refs/remotes/origin/*) that
 // a previous fetch populated; it performs no network round-trip of its own.
-// The ctx parameter keeps the signature consistent with the rest of the
-// network path and lets an already-cancelled context short-circuit the check.
-// Because no network call is made here, no timeout is applied; the timeout for
-// genuine network operations is applied internally by this package at each such
-// operation.
 //
 // Parameters:
 //   - ctx: Context for cancellation (no network call is made here)

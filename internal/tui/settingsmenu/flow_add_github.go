@@ -343,8 +343,7 @@ func (m *SettingsModel) createGitHubRepository() tea.Cmd {
 			return addGitHubErrorMsg{fmt.Errorf("failed to save configuration: %w", err)}
 		}
 
-		// Reload repositories (this will trigger clone if needed). The
-		// repository package bounds each network operation internally.
+		// Reload repositories (this will trigger clone if needed)
 		m.preparedRepos, err = repository.PrepareAllRepositories(
 			context.Background(),
 			m.currentConfig.Repositories,
@@ -549,8 +548,7 @@ func (m *SettingsModel) createGitHubRepositoryWithPAT(pat string) tea.Cmd {
 			return addGitHubErrorMsg{fmt.Errorf("failed to save configuration: %w", err)}
 		}
 
-		// Reload repositories (this will trigger clone if needed). The
-		// repository package bounds each network operation internally.
+		// Reload repositories (this will trigger clone if needed)
 		m.preparedRepos, err = repository.PrepareAllRepositories(
 			context.Background(),
 			m.currentConfig.Repositories,

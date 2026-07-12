@@ -47,8 +47,6 @@ func (s *Server) Start() error {
 
 	// Prepare all repositories
 	// This validates, prepares, syncs, and logs all repositories.
-	// The repository package bounds each network operation (clone/fetch)
-	// internally, so a hung remote can't block startup.
 	prepared, err := repository.PrepareAllRepositories(context.Background(), s.config.Repositories, s.logger)
 	if err != nil {
 		s.logger.Error("Multi-repository preparation failed", "error", err)
@@ -215,8 +213,6 @@ func (s *Server) getRulefileToolHandler(toolName string) (server.ToolHandlerFunc
 func (s *Server) InitializeComponents() error {
 	// Prepare all repositories for multi-repository support
 	// This validates, prepares, syncs, and logs all repositories.
-	// The repository package bounds each network operation (clone/fetch)
-	// internally, so a hung remote can't block startup.
 	prepared, err := repository.PrepareAllRepositories(context.Background(), s.config.Repositories, s.logger)
 	if err != nil {
 		s.logger.Error("Multi-repository preparation failed", "error", err)

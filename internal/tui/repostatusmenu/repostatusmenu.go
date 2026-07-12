@@ -55,6 +55,7 @@ type (
 	}
 )
 
+// RepoStatusModel is the Bubble Tea model for the repository status screen.
 type RepoStatusModel struct {
 	logger  *logging.AppLogger
 	layout  components.LayoutModel
@@ -69,6 +70,7 @@ type RepoStatusModel struct {
 	lastSync map[string]string
 }
 
+// NewRepoStatusModel creates the status screen model from the shared UI context.
 func NewRepoStatusModel(ctx helpers.UIContext) *RepoStatusModel {
 	layout := components.NewLayout(components.LayoutConfig{
 		MarginX:  2,
@@ -93,10 +95,12 @@ func NewRepoStatusModel(ctx helpers.UIContext) *RepoStatusModel {
 	}
 }
 
+// Init starts the initial status check and the spinner.
 func (m *RepoStatusModel) Init() tea.Cmd {
 	return tea.Batch(m.checkStatusCmd(), m.spinner.Tick)
 }
 
+// Update handles status/refresh results, key presses, and spinner ticks.
 func (m *RepoStatusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.layout, _ = m.layout.Update(msg)
 
@@ -144,6 +148,7 @@ func (m *RepoStatusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View renders the status board, or a spinner while checking/refreshing.
 func (m *RepoStatusModel) View() string {
 	help := "q/esc back"
 	if m.hasGitHubRepos() {
@@ -193,9 +198,9 @@ func (m *RepoStatusModel) renderRows() string {
 	}
 	var b strings.Builder
 	for _, row := range m.rows {
-		b.WriteString(fmt.Sprintf("%s  (%s)\n", row.Name, row.Kind))
-		b.WriteString(fmt.Sprintf("    %s\n", row.Path))
-		b.WriteString(fmt.Sprintf("    %s\n\n", row.Status))
+		fmt.Fprintf(&b, "%s  (%s)\n", row.Name, row.Kind)
+		fmt.Fprintf(&b, "    %s\n", row.Path)
+		fmt.Fprintf(&b, "    %s\n\n", row.Status)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

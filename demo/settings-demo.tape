@@ -39,7 +39,11 @@ Sleep 1s
 Enter
 Sleep 2.5s
 
-# --- Repositories list: open the "Demo Rules" repository's actions.
+# --- Repositories list: browse the configured repos, then open the first one's actions.
+Sleep 1s
+Down
+Sleep 1.5s
+Up
 Sleep 1.5s
 Enter
 Sleep 2s

@@ -28,20 +28,9 @@ A compact CLI for managing instruction files and MCP tooling across multiple rep
 - **Snap/Linux**: `sudo snap install rulem`
 - **Binary**: Download the latest release from [GitHub Releases](https://github.com/muhammadbassiony/rulem/releases/latest)
 - **Source**: `git clone https://github.com/muhammadbassiony/rulem && go build -o rulem ./cmd/rulem`
-
-## Configuration
-
-Config lives in your platform's XDG config directory: `~/Library/Application Support/rulem/config.yaml` on macOS, `~/.config/rulem/config.yaml` on Linux. The CLI initializes it on first run and exposes it through the TUI settings menu (storage paths, version info, timestamps). Refer to the settings menu flows in `internal/tui/settingsmenu` when adjusting how multiple repositories are handled simultaneously.
-
+<!--TODO improve the MCP section with clear instructions about how to add it-->
 ## MCP integration
 
 - Start the MCP server with `rulem mcp` (add `--debug` for verbose logging).
 - Rule files with YAML frontmatter are auto-registered as MCP tools; each repo contributes tools that share the stored PAT/token.
 - Use MCP inspectors (e.g., `mcp-inspector`) to confirm tool registration and invocation flows.
-
-## Development highlights
-
-- **Prereqs**: Go 1.26+. Task is optional (`task build/test/lint`).
-- **Common commands**: `go mod tidy`, `go test ./...`, `go build ./cmd/rulem`, `go run ./cmd/rulem`.
-- **Testing note**: Tests that mutate config must call `helpers.SetTestConfigPath(t)` to avoid touching your real settings.
-- **Code layout**: Core logic lives under `cmd/rulem`, `internal/` (config, filemanager, logging, tui), and `pkg/fileops`. The settings menu and its multi-repo flows are documented in `internal/tui/settingsmenu/README.md` and `hacking.md`.

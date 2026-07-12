@@ -1,7 +1,8 @@
 # main-demo.tape — the hero demo shown at the top of the README.
 #
 # Flow: launch rulem -> main menu -> "Save rules file" -> browse the file
-# picker with its live markdown preview -> pick a file -> rename it -> save.
+# picker with its live markdown preview -> pick a file -> rename it -> choose
+# which central repository to save into -> save.
 #
 # Render (requires ttyd + ffmpeg on PATH):
 #   ./demo/setup-demo-env.sh && vhs demo/main-demo.tape
@@ -47,6 +48,14 @@ Sleep 1.5s
 Ctrl+U
 Sleep 500ms
 Type "coding-style.md"
+Sleep 1.5s
+Enter
+Sleep 2s
+
+# --- Destination repo: several central repos are configured, so pick one.
+Down
+Sleep 1.5s
+Up
 Sleep 1.5s
 Enter
 Sleep 2.5s

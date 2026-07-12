@@ -27,6 +27,11 @@ tasks:
         fi
         golangci-lint run ./...
 
+  vuln:
+    desc: Scan for known vulnerabilities with govulncheck
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   clean:
     desc: Remove built binaries and temporary files
     cmds:

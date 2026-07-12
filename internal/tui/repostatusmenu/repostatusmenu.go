@@ -12,6 +12,7 @@
 package repostatusmenu
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -214,7 +215,7 @@ func (m *RepoStatusModel) refreshCmd() tea.Cmd {
 	cfg := m.cfg
 	logger := m.logger
 	return func() tea.Msg {
-		prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+		prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 		return refreshDoneMsg{prepared: prepared, err: err}
 	}
 }

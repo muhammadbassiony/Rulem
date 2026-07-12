@@ -2,6 +2,7 @@
 package settingsmenu
 
 import (
+	"context"
 	"fmt"
 	"rulem/internal/config"
 	"rulem/internal/repository"
@@ -139,6 +140,7 @@ func (m *SettingsModel) createLocalRepository() tea.Cmd {
 		// Reload repositories
 		var err error
 		m.preparedRepos, err = repository.PrepareAllRepositories(
+			context.Background(),
 			m.currentConfig.Repositories,
 			m.logger,
 		)

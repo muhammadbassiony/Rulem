@@ -46,7 +46,7 @@ import (
 
 // Type definitions have been moved to types.go for better organization.
 // This includes: SettingsState, ChangeOption, ChangeOptionInfo,
-// and all message types (settingsCompleteMsg, refreshInitiateMsg, etc.).
+// and all message types (settingsCompleteMsg, refreshCompleteMsg, etc.).
 
 type credentialManager interface {
 	ValidateGitHubToken(token string) error
@@ -119,7 +119,7 @@ func NewSettingsModel(ctx helpers.UIContext) *SettingsModel {
 	var preparedRepos []repository.PreparedRepository
 	if ctx.Config != nil {
 		var err error
-		preparedRepos, err = repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+		preparedRepos, err = repository.PrepareAllRepositories(context.Background(), ctx.Config.Repositories, ctx.Logger)
 		if err != nil {
 			ctx.Logger.Error("Failed to prepare repositories for settings menu", "error", err)
 		}
@@ -196,7 +196,7 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Config != nil {
 			m.currentConfig = msg.Config
 			var err error
-			m.preparedRepos, err = repository.PrepareAllRepositories(msg.Config.Repositories, m.logger)
+			m.preparedRepos, err = repository.PrepareAllRepositories(context.Background(), msg.Config.Repositories, m.logger)
 			if err != nil {
 				m.logger.Warn("Failed to reload repositories after config load", "error", err)
 				// Don't fail completely - let the user work with what we have
@@ -215,9 +215,12 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshCompleteMsg:
 		m.refreshInProgress = false
 		if msg.err != nil {
+			// Surface the failure to the user via the RefreshError state.
 			m.logger.Error("Refresh failed", "error", msg.err)
 			m.lastRefreshError = msg.err
+			return m.transitionTo(SettingsStateRefreshError), nil
 		}
+		// Success: clear any prior error and return to the main menu.
 		m.lastRefreshError = nil
 		m.state = SettingsStateMainMenu
 		m.layout = m.layout.ClearError()
@@ -479,22 +482,6 @@ func (m *SettingsModel) handleMainMenuKeys(msg tea.KeyMsg) (*SettingsModel, tea.
 		m.repoList, cmd = m.repoList.Update(msg)
 		return m, cmd
 	}
-}
-
-func (m *SettingsModel) handleConfirmationKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
-	switch msg.String() {
-	case "y", "Y", "enter":
-		m.logger.LogUserAction("settings_confirmation_accept", "saving changes")
-		return m, m.saveChanges()
-	case "n", "N":
-		m.logger.LogUserAction("settings_confirmation_reject", "discarding changes")
-		m.resetTemporaryChanges()
-		return m.transitionTo(SettingsStateRepositoryActions), nil
-	case "esc":
-		// Go back to the appropriate input state
-		return m.transitionBack(), nil
-	}
-	return m, nil
 }
 
 func (m *SettingsModel) handleCompleteKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {

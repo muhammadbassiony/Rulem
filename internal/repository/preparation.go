@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -31,6 +32,7 @@ import (
 //   - Returns the absolute path to the cloned repository
 //
 // Parameters:
+//   - ctx: Context for cancellation
 //   - repo: Repository entry with type and configuration
 //   - logger: Logger for structured logging during preparation (can be nil)
 //
@@ -40,7 +42,7 @@ import (
 //
 // Usage:
 //
-//	localPath, err := repository.PrepareRepository(repo, logger)
+//	localPath, err := repository.PrepareRepository(ctx, repo, logger)
 //	if err != nil {
 //	    return fmt.Errorf("repository preparation failed: %w", err)
 //	}
@@ -51,7 +53,7 @@ import (
 //   - Local repos: Directory not found, permission denied, security violations
 //   - GitHub repos: Clone failures, authentication errors, network issues
 //   - All errors are suitable for display to end users
-func PrepareRepository(repo RepositoryEntry, logger *logging.AppLogger) (string, error) {
+func PrepareRepository(ctx context.Context, repo RepositoryEntry, logger *logging.AppLogger) (string, error) {
 	if logger != nil {
 		if repo.IsRemote() {
 			logger.Info("Preparing Git repository source",
@@ -81,7 +83,7 @@ func PrepareRepository(repo RepositoryEntry, logger *logging.AppLogger) (string,
 	}
 
 	// Prepare the source and get the local path
-	localPath, err := source.Prepare(logger)
+	localPath, err := source.Prepare(ctx, logger)
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare repository %s (%s): %w",
 			repo.ID, repo.Name, err)
@@ -109,6 +111,7 @@ func PrepareRepository(repo RepositoryEntry, logger *logging.AppLogger) (string,
 // 4. Logs sync results for each repository (success, failed, skipped)
 //
 // Parameters:
+//   - ctx: Context for cancellation across all repos
 //   - repos: List of repository entries to prepare
 //   - logger: Logger for structured logging (can be nil)
 //
@@ -122,14 +125,14 @@ func PrepareRepository(repo RepositoryEntry, logger *logging.AppLogger) (string,
 //
 // Usage:
 //
-//	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	prepared, err := repository.PrepareAllRepositories(ctx, cfg.Repositories, logger)
 //	if err != nil {
 //	    return fmt.Errorf("repository preparation failed: %w", err)
 //	}
 //	for _, prep := range prepared {
 //	    fmt.Printf("Repository %s ready at: %s\n", prep.ID(), prep.LocalPath)
 //	}
-func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) ([]PreparedRepository, error) {
+func PrepareAllRepositories(ctx context.Context, repos []RepositoryEntry, logger *logging.AppLogger) ([]PreparedRepository, error) {
 	if logger != nil {
 		logger.Info("Starting multi-repository preparation", "repository_count", len(repos))
 	}
@@ -152,7 +155,7 @@ func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) 
 			)
 		}
 
-		localPath, err := PrepareRepository(repo, logger)
+		localPath, err := PrepareRepository(ctx, repo, logger)
 		if err != nil {
 			errorMsg := fmt.Sprintf("repository %s (%s): %v", repo.ID, repo.Name, err)
 			preparationErrors = append(preparationErrors, errorMsg)
@@ -225,7 +228,7 @@ func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) 
 			repoEntries[i] = p.Entry
 		}
 
-		syncResults := SyncAllRepositories(repoEntries, logger)
+		syncResults := SyncAllRepositories(ctx, repoEntries, logger)
 
 		// Update prepared repositories with sync results
 		syncResultMap := make(map[string]RepositorySyncResult)

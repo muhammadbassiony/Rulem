@@ -202,14 +202,6 @@ func (s SettingsState) String() string {
 // Transitions model to SettingsStateComplete and triggers config reload.
 type settingsCompleteMsg struct{}
 
-// refreshInitiateMsg signals the start of a manual refresh operation.
-// Sent when user confirms manual refresh from GitHub.
-type refreshInitiateMsg struct{}
-
-// refreshInProgressMsg indicates refresh operation is currently running.
-// Used to update UI during async refresh operations.
-type refreshInProgressMsg struct{}
-
 // refreshCompleteMsg signals completion of manual refresh operation.
 // Contains the outcome of the refresh attempt.
 type refreshCompleteMsg struct {
@@ -234,14 +226,6 @@ type editBranchDirtyStateMsg struct {
 // If isDirty=true, transitions to SettingsStateRefreshError.
 // If isDirty=false, proceeds with triggerRefresh().
 type refreshDirtyStateMsg struct {
-	isDirty bool  // true if repository has uncommitted changes
-	err     error // error from dirty state check, if any
-}
-
-// deleteDirtyStateMsg reports dirty state check result for delete flow.
-// If isDirty=true, transitions to SettingsStateDeleteError.
-// If isDirty=false, proceeds with deleteRepository().
-type deleteDirtyStateMsg struct {
 	isDirty bool  // true if repository has uncommitted changes
 	err     error // error from dirty state check, if any
 }

@@ -1082,7 +1082,7 @@ Content from repo 3`
 	logger, _ := logging.NewTestLogger()
 
 	// Prepare repositories directly
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1162,7 +1162,7 @@ name: "coding_standards"
 	logger, _ := logging.NewTestLogger()
 
 	// Prepare repositories and scan files
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1252,7 +1252,7 @@ Just plain content`
 	logger, _ := logging.NewTestLogger()
 
 	// Prepare and scan repositories
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}

@@ -782,11 +782,13 @@ func TestMessageHandling_RefreshError(t *testing.T) {
 	model := NewSettingsModel(ctx)
 	model.currentConfig = createGitHubConfig("/test/path", "https://github.com/test/repo.git", "main")
 	model.refreshInProgress = true
+	model.state = SettingsStateRefreshInProgress
 
 	// Error case
+	refreshErr := &testError{"refresh failed"}
 	refreshMsg := refreshCompleteMsg{
 		success: false,
-		err:     &testError{"refresh failed"},
+		err:     refreshErr,
 	}
 
 	updatedModel, _ := model.Update(refreshMsg)
@@ -796,10 +798,14 @@ func TestMessageHandling_RefreshError(t *testing.T) {
 		t.Error("refreshInProgress should be cleared even on error")
 	}
 
-	// Note: The implementation may return to MainMenu instead of Error state on refresh error
-	// This is acceptable behavior as the error is logged
-	if settingsModel.state != SettingsStateRefreshError && settingsModel.state != SettingsStateMainMenu {
-		t.Errorf("Expected RefreshError or MainMenu state after refresh error, got %v", settingsModel.state)
+	// A failed refresh must surface to the user via the RefreshError state.
+	if settingsModel.state != SettingsStateRefreshError {
+		t.Errorf("Expected RefreshError state after failed refresh, got %v", settingsModel.state)
+	}
+
+	// The error must be retained so viewRefreshError can display it.
+	if settingsModel.lastRefreshError != refreshErr {
+		t.Errorf("Expected lastRefreshError to hold the refresh error, got %v", settingsModel.lastRefreshError)
 	}
 }
 

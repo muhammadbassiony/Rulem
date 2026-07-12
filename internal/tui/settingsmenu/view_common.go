@@ -28,36 +28,6 @@ func (m *SettingsModel) viewComplete() string {
 	return m.layout.Render(content)
 }
 
-// viewConfirmation renders the generic confirmation screen for reviewing changes.
-// Shows a summary of changes and prompts for confirmation.
-// DEPRECATED: Most flows now use flow-specific confirmation views.
-func (m *SettingsModel) viewConfirmation() string {
-	m.layout = m.layout.SetConfig(components.LayoutConfig{
-		Title:    "💾 Confirm Changes",
-		Subtitle: "Review your changes",
-		HelpText: "y to save • n to discard • Esc to go back",
-	})
-
-	content := m.formatChangesSummary()
-	content += "\n\nSave these changes? (Y/n)"
-
-	return m.layout.Render(content)
-}
-
-// viewError renders a generic error screen.
-// DEPRECATED: Most flows now use flow-specific error views.
-func (m *SettingsModel) viewError() string {
-	m.layout = m.layout.SetConfig(components.LayoutConfig{
-		Title:    "❌ Error",
-		Subtitle: "Failed to update settings",
-		HelpText: "Press any key to continue",
-	})
-
-	content := "An error occurred while updating your settings.\nPlease check the error message above and try again."
-
-	return m.layout.Render(content)
-}
-
 // formatChangesSummary formats a summary of pending changes for confirmation views.
 // Shows what will be changed when the user confirms.
 func (m *SettingsModel) formatChangesSummary() string {

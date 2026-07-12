@@ -503,3 +503,23 @@ func TestIntegration_UpdatePAT_StoreError(t *testing.T) {
 		t.Errorf("error should contain 'failed to store GitHub token', got %q", errMsg.err.Error())
 	}
 }
+
+// TestPluralize verifies the y→ies pluralization used in the PAT confirmation summary.
+func TestPluralize(t *testing.T) {
+	tests := []struct {
+		word     string
+		count    int
+		expected string
+	}{
+		{"repository", 1, "repository"},
+		{"repository", 2, "repositories"},
+		{"repository", 0, "repositories"},
+		{"token", 3, "tokens"},
+	}
+
+	for _, tt := range tests {
+		if got := pluralize(tt.word, tt.count); got != tt.expected {
+			t.Errorf("pluralize(%q, %d) = %q, want %q", tt.word, tt.count, got, tt.expected)
+		}
+	}
+}

@@ -5,8 +5,6 @@ linters:
     - govet
     - staticcheck
     - revive
-    - gofmt
-    - goimports
 
 run:
   timeout: 3m

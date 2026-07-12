@@ -4,20 +4,21 @@ import "time"
 
 // Network operation timeouts bound the go-git operations that contact a remote
 // so a hung connection can never freeze the caller (for example the TUI's
-// spinner, which would otherwise spin forever). They are applied at the call
-// boundaries via context.WithTimeout and flow through the package's network
-// path as a context.Context.
+// spinner, which would otherwise spin forever). They are applied inside this
+// package, at each network operation, by deriving a context.WithTimeout from
+// the caller-supplied context. Callers therefore pass a plain context (usually
+// context.Background()) and never need to know these values; they may cancel
+// that context to abort the work early, and the cancellation still propagates
+// through the internally derived deadline.
 const (
-	// CloneTimeout bounds initial clone paths, which transfer the most data.
-	// PrepareRepository / PrepareAllRepositories may clone, so their boundaries
-	// use this larger budget.
-	CloneTimeout = 120 * time.Second
+	// cloneTimeout bounds initial clone paths, which transfer the most data.
+	cloneTimeout = 120 * time.Second
 
-	// FetchTimeout bounds fetch/sync paths against already-cloned repositories
+	// fetchTimeout bounds fetch/sync paths against already-cloned repositories
 	// (FetchUpdates, manual refresh, post-branch-change sync).
-	FetchTimeout = 60 * time.Second
+	fetchTimeout = 60 * time.Second
 
-	// ValidationTimeout bounds lightweight checks such as ls-remote and branch
+	// validationTimeout bounds lightweight checks such as ls-remote and branch
 	// validation.
-	ValidationTimeout = 30 * time.Second
+	validationTimeout = 30 * time.Second
 )

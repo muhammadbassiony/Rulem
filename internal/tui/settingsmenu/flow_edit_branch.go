@@ -130,9 +130,7 @@ func (m *SettingsModel) updateGitHubBranch(cfg *config.Config) error {
 	// (skip validation for empty branch as it means "use default")
 	if m.newGitHubBranch != "" {
 		m.logger.Debug("Validating branch exists on remote", "branch", m.newGitHubBranch, "path", repo.Path)
-		validateCtx, cancel := context.WithTimeout(context.Background(), repository.ValidationTimeout)
-		err := repository.ValidateRemoteBranchExists(validateCtx, repo.Path, m.newGitHubBranch, m.logger)
-		cancel()
+		err := repository.ValidateRemoteBranchExists(context.Background(), repo.Path, m.newGitHubBranch, m.logger)
 		if err != nil {
 			return fmt.Errorf("branch validation failed: %w", err)
 		}
@@ -179,9 +177,8 @@ func (m *SettingsModel) updateGitHubBranch(cfg *config.Config) error {
 		repo.Path,
 	)
 
-	fetchCtx, cancel := context.WithTimeout(context.Background(), repository.FetchTimeout)
-	defer cancel()
-	if err := source.FetchUpdates(fetchCtx, m.logger); err != nil {
+	// The repository package bounds the fetch network operation internally.
+	if err := source.FetchUpdates(context.Background(), m.logger); err != nil {
 		m.logger.Warn("Failed to fetch after branch update (config saved successfully)", "error", err)
 		// Don't return error - config was saved successfully
 		// The fetch will happen on next manual refresh

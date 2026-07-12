@@ -111,10 +111,9 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	nameInput.Width = 50
 
 	// Prepare all repositories using multi-repository orchestration (T008).
-	// Bound the clone/fetch network work so a hung remote can't freeze startup.
-	prepCtx, cancel := context.WithTimeout(context.Background(), repository.CloneTimeout)
-	defer cancel()
-	prepared, err := repository.PrepareAllRepositories(prepCtx, ctx.Config.Repositories, ctx.Logger)
+	// The repository package bounds each network operation (clone/fetch)
+	// internally, so a hung remote can't freeze startup.
+	prepared, err := repository.PrepareAllRepositories(context.Background(), ctx.Config.Repositories, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to prepare repositories", "error", err)
 		return SaveRulesModel{

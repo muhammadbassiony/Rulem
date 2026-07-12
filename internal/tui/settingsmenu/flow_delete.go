@@ -83,12 +83,11 @@ func (m *SettingsModel) deleteRepository() tea.Cmd {
 			return deleteErrorMsg{fmt.Errorf("failed to save configuration: %w", err)}
 		}
 
-		// Reload repositories
+		// Reload repositories. The repository package bounds each network
+		// operation internally.
 		var err error
-		prepCtx, cancel := context.WithTimeout(context.Background(), repository.CloneTimeout)
-		defer cancel()
 		m.preparedRepos, err = repository.PrepareAllRepositories(
-			prepCtx,
+			context.Background(),
 			m.currentConfig.Repositories,
 			m.logger,
 		)

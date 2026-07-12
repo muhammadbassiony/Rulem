@@ -93,9 +93,8 @@ func (m *SettingsModel) triggerRefresh() tea.Cmd {
 			selectedRepo.Path,
 		)
 
-		fetchCtx, cancel := context.WithTimeout(context.Background(), repository.FetchTimeout)
-		defer cancel()
-		err = source.FetchUpdates(fetchCtx, m.logger)
+		// The repository package bounds the fetch network operation internally.
+		err = source.FetchUpdates(context.Background(), m.logger)
 		if err != nil {
 			m.logger.Error("Failed to refresh repository", "error", err, "path", selectedRepo.Path)
 			return refreshCompleteMsg{success: false, err: err}

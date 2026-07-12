@@ -32,7 +32,8 @@ import (
 //   - Returns the absolute path to the cloned repository
 //
 // Parameters:
-//   - ctx: Context bounding network operations (clone/fetch) for GitHub repos
+//   - ctx: Context for cancellation. Network timeouts (clone/fetch) for GitHub
+//     repos are applied internally by the repository package.
 //   - repo: Repository entry with type and configuration
 //   - logger: Logger for structured logging during preparation (can be nil)
 //
@@ -111,9 +112,10 @@ func PrepareRepository(ctx context.Context, repo RepositoryEntry, logger *loggin
 // 4. Logs sync results for each repository (success, failed, skipped)
 //
 // Parameters:
-//   - ctx: Context bounding network operations (clone/fetch) across all repos.
-//     Callers typically pass a CloneTimeout-bounded context since this path may
-//     clone.
+//   - ctx: Context for cancellation across all repos. Per-operation network
+//     timeouts (clone/fetch) are applied internally by the repository package;
+//     callers pass a plain context (usually context.Background()) and may cancel
+//     it to abort early.
 //   - repos: List of repository entries to prepare
 //   - logger: Logger for structured logging (can be nil)
 //

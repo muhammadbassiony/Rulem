@@ -412,7 +412,7 @@ func TestPrepareAllRepositories_PartialFailureKeepsHealthyRepos(t *testing.T) {
 		{ID: "bad-1", Name: "Bad", Type: RepositoryTypeLocal, Path: missingDir, CreatedAt: 2},
 	}
 
-	prepared, err := PrepareAllRepositories(repos, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 	if err != nil {
 		t.Fatalf("partial failure must not error the whole preparation: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestPrepareAllRepositories_AllFailedErrors(t *testing.T) {
 		{ID: "bad-2", Name: "Bad2", Type: RepositoryTypeLocal, Path: filepath.Join(t.TempDir(), "gone2"), CreatedAt: 2},
 	}
 
-	if _, err := PrepareAllRepositories(repos, logger); err == nil {
+	if _, err := PrepareAllRepositories(context.Background(), repos, logger); err == nil {
 		t.Fatalf("expected an error when no repository could be prepared")
 	}
 }

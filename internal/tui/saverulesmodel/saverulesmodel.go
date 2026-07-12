@@ -110,7 +110,11 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	nameInput.CharLimit = 255
 	nameInput.Width = 50
 
-	// Prepare all repositories using multi-repository orchestration (T008).
+	// Prepare all repositories using multi-repository orchestration
+	// Partial failures are tolerated: unavailable repositories (e.g. a local
+	// path that no longer exists) are skipped with a warning, and the flow
+	// proceeds with whatever is usable. PrepareAllRepositories only errors
+	// when nothing could be prepared at all.
 	prepared, err := repository.PrepareAllRepositories(context.Background(), ctx.Config.Repositories, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to prepare repositories", "error", err)
@@ -136,7 +140,15 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		}
 	}
 
-	if len(prepared) == 0 {
+	available := repository.AvailableRepositories(prepared)
+	for _, prep := range prepared {
+		if !prep.IsAvailable() {
+			ctx.Logger.Warn("Repository unavailable, excluded from save destinations",
+				"repository", prep.Name(), "error", prep.SyncResult.Error)
+		}
+	}
+
+	if len(available) == 0 {
 		ctx.Logger.Error("No repositories configured")
 		return SaveRulesModel{
 			logger:           ctx.Logger,
@@ -161,7 +173,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	}
 
 	// Log sync results for user awareness
-	for _, prep := range prepared {
+	for _, prep := range available {
 		if prep.SyncResult.Status != repository.SyncStatusSuccess {
 			msg := prep.SyncResult.GetMessage()
 			if msg != "" {
@@ -174,20 +186,21 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	}
 
 	// Build repository selection list (used if multiple repos)
-	repoItems := repolist.BuildRepositoryListItems(prepared)
+	repoItems := repolist.BuildRepositoryListItems(available)
 	repoListModel := repolist.BuildRepositoryList(repoItems, layout.ContentWidth(), layout.ContentHeight())
 
 	// For single repository, auto-select and create FileManager immediately
 	var fm *filemanager.FileManager
 	var selectedRepo *repolist.RepositoryListItem
-	if len(prepared) == 1 {
+	if len(available) == 1 {
 		selectedRepo = &repolist.RepositoryListItem{
-			ID:   prepared[0].ID(),
-			Name: prepared[0].Name(),
-			Type: string(prepared[0].Type()),
-			Path: prepared[0].LocalPath,
+			ID:        available[0].ID(),
+			Name:      available[0].Name(),
+			Type:      string(available[0].Type()),
+			Path:      available[0].LocalPath,
+			Available: true,
 		}
-		fm, err = filemanager.NewFileManager(prepared[0].LocalPath, ctx.Logger)
+		fm, err = filemanager.NewFileManager(available[0].LocalPath, ctx.Logger)
 		if err != nil {
 			ctx.Logger.Error("Failed to initialize FileManager", "error", err)
 		}
@@ -202,7 +215,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		spinner:          s,
 		filePicker:       nil, // created after scan
 		nameInput:        nameInput,
-		preparedRepos:    prepared,
+		preparedRepos:    available,
 		repositoryList:   repoListModel,
 		selectedRepoItem: selectedRepo,
 		markdownFiles:    []filemanager.FileItem{},

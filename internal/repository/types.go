@@ -213,6 +213,14 @@ func (pr PreparedRepository) IsLocal() bool {
 	return pr.Entry.IsLocal()
 }
 
+// IsAvailable reports whether the repository was prepared successfully and
+// can be used for file operations. Repositories whose preparation failed
+// (e.g. a local path that no longer exists) are kept in the prepared list so
+// the settings menu can surface and repair them, but they have no LocalPath.
+func (pr PreparedRepository) IsAvailable() bool {
+	return pr.LocalPath != ""
+}
+
 // WasSynced returns true if the repository was successfully synchronized.
 func (pr PreparedRepository) WasSynced() bool {
 	return pr.SyncResult.Status == SyncStatusSuccess

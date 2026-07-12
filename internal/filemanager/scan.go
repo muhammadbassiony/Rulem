@@ -238,6 +238,17 @@ func ScanAllRepositories(prepared []repository.PreparedRepository, logger *loggi
 
 	// Process repositories in order to maintain predictable file ordering
 	for _, prep := range prepared {
+		// Repositories that failed preparation (e.g. missing local path) are
+		// listed for repair in settings but have nothing to scan.
+		if !prep.IsAvailable() {
+			if logger != nil {
+				logger.Info("Skipping unavailable repository",
+					"repository_id", prep.ID(),
+					"repository_name", prep.Name(),
+				)
+			}
+			continue
+		}
 		if logger != nil {
 			logger.Info("Scanning repository",
 				"repository_id", prep.ID(),

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"path/filepath"
 	"rulem/internal/logging"
 	"strings"
 	"testing"
@@ -133,7 +134,6 @@ func TestNewGitSource_NilBranch(t *testing.T) {
 func TestPrepareAllRepositories_EmptyList(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 	prepared, err := PrepareAllRepositories(context.Background(), []RepositoryEntry{}, logger)
-
 	if err != nil {
 		t.Errorf("expected no error for empty list, got: %v", err)
 	}
@@ -246,12 +246,12 @@ func TestPrepareAllRepositories_PreparationFailure(t *testing.T) {
 
 	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 	if err == nil {
-		t.Fatal("expected error for invalid repository")
+		t.Fatal("expected error when no repository could be prepared")
 	}
 
-	// Should still return partial results
-	if len(prepared) != 0 {
-		t.Errorf("expected 0 prepared repos for complete failure, got %d", len(prepared))
+	// The failed repository is returned as an unavailable entry for repair.
+	if len(prepared) != 1 || prepared[0].IsAvailable() {
+		t.Errorf("expected 1 unavailable entry for complete failure, got %+v", prepared)
 	}
 
 	// Error should mention the failure
@@ -283,19 +283,19 @@ func TestPrepareAllRepositories_PartialFailure(t *testing.T) {
 	}
 
 	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
-
-	// Should return error for partial failure
-	if err == nil {
-		t.Fatal("expected error for partial failure")
+	// Partial failure must not error: healthy repositories keep working and
+	// the broken one is surfaced as unavailable.
+	if err != nil {
+		t.Fatalf("partial failure must not error, got: %v", err)
 	}
 
-	// Should still prepare the valid repo
-	if len(prepared) != 1 {
-		t.Fatalf("expected 1 prepared repo (valid one), got %d", len(prepared))
+	if len(prepared) != 2 {
+		t.Fatalf("expected both repos in result, got %d", len(prepared))
 	}
 
-	if prepared[0].ID() != "valid-repo-1234567890" {
-		t.Errorf("expected valid repo to be prepared, got ID '%s'", prepared[0].ID())
+	available := AvailableRepositories(prepared)
+	if len(available) != 1 || available[0].ID() != "valid-repo-1234567890" {
+		t.Errorf("expected only the valid repo to be available, got %+v", available)
 	}
 }
 
@@ -399,5 +399,52 @@ func TestPrepareAllRepositories_DuplicateNames(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "duplicate repository name") {
 		t.Errorf("expected duplicate name error, got: %v", err)
+	}
+}
+
+func TestPrepareAllRepositories_PartialFailureKeepsHealthyRepos(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+	goodDir := t.TempDir()
+	missingDir := filepath.Join(t.TempDir(), "deleted-since")
+
+	repos := []RepositoryEntry{
+		{ID: "good-1", Name: "Good", Type: RepositoryTypeLocal, Path: goodDir, CreatedAt: 1},
+		{ID: "bad-1", Name: "Bad", Type: RepositoryTypeLocal, Path: missingDir, CreatedAt: 2},
+	}
+
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
+	if err != nil {
+		t.Fatalf("partial failure must not error the whole preparation: %v", err)
+	}
+	if len(prepared) != 2 {
+		t.Fatalf("expected both repositories in result, got %d", len(prepared))
+	}
+
+	available := AvailableRepositories(prepared)
+	if len(available) != 1 || available[0].ID() != "good-1" {
+		t.Fatalf("expected only the healthy repository to be available, got %v", available)
+	}
+
+	for _, p := range prepared {
+		if p.ID() == "bad-1" {
+			if p.IsAvailable() {
+				t.Fatalf("missing-path repository must be unavailable")
+			}
+			if p.SyncResult.Status != SyncStatusFailed || p.SyncResult.Error == nil {
+				t.Fatalf("unavailable repository must carry its failure, got %+v", p.SyncResult)
+			}
+		}
+	}
+}
+
+func TestPrepareAllRepositories_AllFailedErrors(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+	repos := []RepositoryEntry{
+		{ID: "bad-1", Name: "Bad1", Type: RepositoryTypeLocal, Path: filepath.Join(t.TempDir(), "gone1"), CreatedAt: 1},
+		{ID: "bad-2", Name: "Bad2", Type: RepositoryTypeLocal, Path: filepath.Join(t.TempDir(), "gone2"), CreatedAt: 2},
+	}
+
+	if _, err := PrepareAllRepositories(context.Background(), repos, logger); err == nil {
+		t.Fatalf("expected an error when no repository could be prepared")
 	}
 }

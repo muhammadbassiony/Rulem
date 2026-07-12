@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	filemanager "rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/tui/helpers"
@@ -19,6 +20,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 	"github.com/muesli/termenv"
 )
 
@@ -480,7 +482,7 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.path == currentSelectedPath && msg.renderID >= fp.currentRenderID {
 			fp.currentRenderID = msg.renderID
 			fp.logger.Error("Error reading file", "error", msg.err, "path", msg.path)
-			errorContent := fmt.Sprintf("Error reading file %s: %v", msg.path, msg.err)
+			errorContent := fmt.Sprintf("Error reading file %s: %v", filepath.Base(msg.path), msg.err)
 			fp.viewport.SetContent(errorContent)
 			fp.isLoading = false
 			fp.loadingPath = ""
@@ -612,7 +614,7 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fp.logger.Debug("User requested full preview", "path", p)
 				fp.isLoading = true
 				fp.loadingPath = p
-				fp.viewport.SetContent("📄 Loading full preview for " + p + "...")
+				fp.viewport.SetContent("📄 Loading full preview for " + filepath.Base(p) + "...")
 				return fp, fp.renderFileContent(p, true, fp.useGlamour)
 			}
 
@@ -639,7 +641,11 @@ func (fp *FilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Fallback to render
 				fp.isLoading = true
 				fp.loadingPath = p
-				fp.viewport.SetContent("📄 Rendering with formatting: " + fmt.Sprintf("%v", fp.useGlamour))
+				mode := "plain text"
+				if fp.useGlamour {
+					mode = "formatted markdown"
+				}
+				fp.viewport.SetContent("📄 Re-rendering as " + mode + "...")
 				return fp, fp.renderFileContent(p, false /*full-auto*/, fp.useGlamour)
 			}
 
@@ -708,6 +714,22 @@ func (fp *FilePicker) View() string {
 	// Add some margins around header using container style
 	header = styles.HeaderContainerStyle.Render(header)
 
+	left, right := fp.paneViews()
+	panes := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	// Left padding for the main panes using container style
+	panes = styles.MainContainerStyle.Render(panes)
+
+	// Help with padding and margin using container style
+	helpView := styles.HelpContainerStyle.Render(styles.HelpStyle.Render(fp.help.View(fp.keys)))
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, panes, helpView)
+}
+
+// paneViews renders the bordered list (left) and preview (right) panes. It is
+// factored out of View so the equal-height invariant can be asserted directly
+// on each bordered box: once JoinHorizontal has aligned them to the tallest
+// pane, a height difference is no longer observable from the combined string.
+func (fp *FilePicker) paneViews() (left, right string) {
 	// Focus-aware pane styles using centralized styles
 	listStyle := styles.PaneStyle
 	vpStyle := styles.PaneStyle
@@ -718,23 +740,19 @@ func (fp *FilePicker) View() string {
 		vpStyle = styles.PaneFocusedStyle
 	}
 
-	// Respect sizes computed in WindowSizeMsg (SetSize + Width)
-	// Apply explicit widths based on list/viewport sizes and keep header at the top.
-	listStyle = listStyle.Width(fp.fileList.Width()).Height(fp.fileList.Height())
-	vpStyle = vpStyle.Width(fp.viewport.Width).Height(fp.viewport.Height)
+	// Respect sizes computed in WindowSizeMsg (SetSize + Width). The list and
+	// viewport wrap their content to fp.fileList.Width()/fp.viewport.Width. A
+	// lipgloss style reserves its horizontal padding *inside* the width we set,
+	// so we must add that padding back — otherwise the pane's text area is
+	// narrower than the width the content was wrapped to, and full-width lines
+	// (e.g. a plain-text preview) get re-wrapped inside the pane, making it
+	// render taller than its counterpart. Add the padding so both panes keep an
+	// identical, fixed height and their bottom borders always line up.
+	padH := styles.PaneStyle.GetHorizontalPadding()
+	listStyle = listStyle.Width(fp.fileList.Width() + padH).Height(fp.fileList.Height())
+	vpStyle = vpStyle.Width(fp.viewport.Width + padH).Height(fp.viewport.Height)
 
-	panes := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		listStyle.Render(fp.fileList.View()),
-		vpStyle.Render(fp.viewport.View()),
-	)
-	// Left padding for the main panes using container style
-	panes = styles.MainContainerStyle.Render(panes)
-
-	// Help with padding and margin using container style
-	helpView := styles.HelpContainerStyle.Render(styles.HelpStyle.Render(fp.help.View(fp.keys)))
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, panes, helpView)
+	return listStyle.Render(fp.fileList.View()), vpStyle.Render(fp.viewport.View())
 }
 
 //  HELPERS / COMMANDS
@@ -755,7 +773,7 @@ func (fp *FilePicker) cacheKey(path string, full bool, glamourOn bool) string {
 func (fp *FilePicker) scheduleDebouncedPreview(p string) tea.Cmd {
 	fp.isLoading = true
 	fp.loadingPath = p
-	fp.viewport.SetContent("📄 Loading " + p + "...")
+	fp.viewport.SetContent("📄 Loading " + filepath.Base(p) + "...")
 	seq := atomic.AddUint64(&fp.pendingDebounceID, 1)
 	return tea.Tick(fp.debounceDuration, func(time.Time) tea.Msg {
 		return debouncedPreviewMsg{path: p, seq: seq}
@@ -811,7 +829,7 @@ func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) 
 		// Build header if truncated or indicate formatting mode
 		header := ""
 		if truncated {
-			header = fmt.Sprintf("[Preview truncated to %d KB of %d KB. Press 'f' to load full.]\n\n", n/1024, fi.Size()/1024)
+			header = fmt.Sprintf("[Preview truncated to %s of %s. Press 'f' to load full.]\n\n", humanSize(int64(n)), humanSize(fi.Size()))
 		}
 
 		var renderedContent string
@@ -832,11 +850,22 @@ func (fp *FilePicker) renderFileContent(path string, full bool, glamourOn bool) 
 			}
 			renderedContent = header + rc + header
 		} else {
-			// plain text without markdown rendering
-			renderedContent = header + string(content) + header
+			// Plain text without markdown rendering. Wrap to the viewport
+			// width — the viewport truncates long lines instead of wrapping,
+			// which would silently hide content.
+			renderedContent = header + wordwrap.String(string(content), vpWidth) + header
 		}
 
 		fp.logger.Debug("File rendered successfully", "path", path, "renderID", renderID, "content_length", len(renderedContent), "truncated", truncated, "glamour", glamourOn)
 		return FileRenderedMsg{content: renderedContent, path: path, renderID: renderID, cacheKey: fp.cacheKey(path, !truncated, glamourOn)}
 	}
+}
+
+// humanSize renders a byte count for the preview banner.
+func humanSize(n int64) string {
+	const kib = 1024
+	if n < kib {
+		return fmt.Sprintf("%d B", n)
+	}
+	return fmt.Sprintf("%.1f KB", float64(n)/float64(kib))
 }

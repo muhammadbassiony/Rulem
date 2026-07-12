@@ -48,3 +48,11 @@ tasks:
     desc: Run the MCP server (Model Context Protocol) with debug enabled
     cmds:
       - go run ./cmd/rulem --debug mcp
+
+  vhs-gen:
+    desc: Regenerate all demo GIFs (requires vhs, ttyd and ffmpeg on PATH)
+    cmds:
+      - ./demo/setup-demo-env.sh
+      - vhs demo/main-demo.tape
+      # - vhs demo/import-demo.tape
+      # - vhs demo/settings-demo.tape

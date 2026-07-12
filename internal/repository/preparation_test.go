@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"rulem/internal/logging"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ func TestPrepareRepository_LocalSource(t *testing.T) {
 		CreatedAt: 1234567890,
 	}
 
-	localPath, err := PrepareRepository(repo, logger)
+	localPath, err := PrepareRepository(context.Background(), repo, logger)
 	if err != nil {
 		t.Fatalf("PrepareRepository failed: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestPrepareRepository_InvalidLocalPath(t *testing.T) {
 		CreatedAt: 1234567890,
 	}
 
-	_, err := PrepareRepository(repo, logger)
+	_, err := PrepareRepository(context.Background(), repo, logger)
 	if err == nil {
 		t.Fatal("Expected error for invalid local path")
 	}
@@ -66,7 +67,7 @@ func TestPrepareRepository_WithNilLogger(t *testing.T) {
 	}
 
 	// Should work with nil logger (logging calls are guarded)
-	localPath, err := PrepareRepository(repo, nil)
+	localPath, err := PrepareRepository(context.Background(), repo, nil)
 	if err != nil {
 		t.Fatalf("PrepareRepository with nil logger failed: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestNewGitSource_NilBranch(t *testing.T) {
 // TestPrepareAllRepositories_EmptyList tests preparation of empty repository list
 func TestPrepareAllRepositories_EmptyList(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
-	prepared, err := PrepareAllRepositories([]RepositoryEntry{}, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), []RepositoryEntry{}, logger)
 
 	if err != nil {
 		t.Errorf("expected no error for empty list, got: %v", err)
@@ -156,7 +157,7 @@ func TestPrepareAllRepositories_SingleLocalRepo(t *testing.T) {
 		},
 	}
 
-	prepared, err := PrepareAllRepositories(repos, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 	if err != nil {
 		t.Fatalf("PrepareAllRepositories failed: %v", err)
 	}
@@ -203,7 +204,7 @@ func TestPrepareAllRepositories_MultipleLocalRepos(t *testing.T) {
 		},
 	}
 
-	prepared, err := PrepareAllRepositories(repos, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 	if err != nil {
 		t.Fatalf("PrepareAllRepositories failed: %v", err)
 	}
@@ -243,7 +244,7 @@ func TestPrepareAllRepositories_PreparationFailure(t *testing.T) {
 		},
 	}
 
-	prepared, err := PrepareAllRepositories(repos, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 	if err == nil {
 		t.Fatal("expected error for invalid repository")
 	}
@@ -281,7 +282,7 @@ func TestPrepareAllRepositories_PartialFailure(t *testing.T) {
 		},
 	}
 
-	prepared, err := PrepareAllRepositories(repos, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 
 	// Should return error for partial failure
 	if err == nil {
@@ -319,7 +320,7 @@ func TestPrepareAllRepositories_ValidationFailure(t *testing.T) {
 		},
 	}
 
-	prepared, err := PrepareAllRepositories(repos, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -350,7 +351,7 @@ func TestPrepareAllRepositories_WithNilLogger(t *testing.T) {
 	}
 
 	// Should work with nil logger (all logging calls are guarded)
-	prepared, err := PrepareAllRepositories(repos, nil)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, nil)
 	if err != nil {
 		t.Fatalf("PrepareAllRepositories with nil logger failed: %v", err)
 	}
@@ -387,7 +388,7 @@ func TestPrepareAllRepositories_DuplicateNames(t *testing.T) {
 		},
 	}
 
-	prepared, err := PrepareAllRepositories(repos, logger)
+	prepared, err := PrepareAllRepositories(context.Background(), repos, logger)
 	if err == nil {
 		t.Fatal("expected error for duplicate names")
 	}

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"rulem/internal/filemanager"
@@ -22,7 +23,7 @@ func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string, map[
 	logger, _ := logging.NewTestLogger()
 
 	// Prepare all repositories
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -504,7 +505,7 @@ This file is missing the required description field.`,
 
 	// Get file items from scanning the repository
 	cfg := createTestConfigWithPath(tempDir)
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -624,7 +625,7 @@ name: "test_rule"
 
 	// Get file items from scanning the repository
 	cfg := createTestConfigWithPath(tempDir)
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -727,7 +728,7 @@ This file has invalid YAML frontmatter.`,
 	cfg := createTestConfigWithPath(tempDir)
 
 	// Prepare all repositories
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -818,7 +819,7 @@ Write comprehensive tests.`,
 	cfg := createTestConfigWithPath(tempDir)
 
 	// Prepare all repositories
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1044,7 +1045,7 @@ Small content`
 
 	// Get files for processing
 	cfg := createTestConfigWithPath(tempDir)
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1088,7 +1089,7 @@ Test content`
 
 	// Get files for processing
 	cfg := createTestConfigWithPath(tempDir)
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1159,7 +1160,7 @@ Valid content`,
 
 	// Get files for processing - should return empty list due to invalid YAML
 	cfg := createTestConfigWithPath(tempDir)
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1307,7 +1308,7 @@ Content with suspicious description`,
 
 	// Get files for processing - should skip files with validation errors
 	cfg := createTestConfigWithPath(tempDir)
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, processor.logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, processor.logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}

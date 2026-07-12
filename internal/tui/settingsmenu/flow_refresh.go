@@ -2,6 +2,7 @@
 package settingsmenu
 
 import (
+	"context"
 	"fmt"
 	"rulem/internal/repository"
 	"rulem/internal/tui/components"
@@ -92,7 +93,7 @@ func (m *SettingsModel) triggerRefresh() tea.Cmd {
 			selectedRepo.Path,
 		)
 
-		err = source.FetchUpdates(m.logger)
+		err = source.FetchUpdates(context.Background(), m.logger)
 		if err != nil {
 			m.logger.Error("Failed to refresh repository", "error", err, "path", selectedRepo.Path)
 			return refreshCompleteMsg{success: false, err: err}

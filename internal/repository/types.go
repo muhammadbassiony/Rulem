@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -63,6 +64,8 @@ type Source interface {
 	//   - Returns the absolute path to the cloned repository
 	//
 	// Parameters:
+	//   - ctx: Context bounding any network operations. LocalSource ignores it;
+	//     GitSource uses it to abort clone/fetch on cancellation or timeout.
 	//   - logger: Structured logger for operation logging (can be nil)
 	//
 	// Returns:
@@ -73,7 +76,7 @@ type Source interface {
 	//   - LocalSource: Returns errors for missing directories, permission issues, security violations
 	//   - GitSource: Returns errors for clone failures, authentication issues, network problems
 	//   - All errors include user-friendly messages with actionable guidance
-	Prepare(logger *logging.AppLogger) (localPath string, err error)
+	Prepare(ctx context.Context, logger *logging.AppLogger) (localPath string, err error)
 }
 
 // RepositoryType represents the type of repository storage backend.

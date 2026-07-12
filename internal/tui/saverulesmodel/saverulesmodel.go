@@ -1,6 +1,7 @@
 package saverulesmodel
 
 import (
+	"context"
 	"fmt"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
@@ -109,8 +110,8 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	nameInput.CharLimit = 255
 	nameInput.Width = 50
 
-	// Prepare all repositories using multi-repository orchestration (T008)
-	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+	// Prepare all repositories using multi-repository orchestration (T008).
+	prepared, err := repository.PrepareAllRepositories(context.Background(), ctx.Config.Repositories, ctx.Logger)
 	if err != nil {
 		ctx.Logger.Error("Failed to prepare repositories", "error", err)
 		return SaveRulesModel{

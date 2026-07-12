@@ -43,7 +43,7 @@ func (m *SettingsModel) handleRepositoryActionsKeys(msg tea.KeyMsg) (*SettingsMo
 			return m.transitionToUpdateRepoName()
 		case ChangeOptionManualRefresh:
 			return m.transitionTo(SettingsStateManualRefresh), nil
-		case ChangeOption(999): // Delete option
+		case ChangeOptionDelete:
 			m.logger.LogUserAction("settings_delete_repository", "user selected delete from menu")
 			return m.transitionTo(SettingsStateConfirmDelete), nil
 		}
@@ -140,7 +140,7 @@ func (m *SettingsModel) getMenuOptions() []ChangeOptionInfo {
 	// Delete option (always available if >1 repo)
 	if len(m.currentConfig.Repositories) > 1 {
 		options = append(options, ChangeOptionInfo{
-			Option:      ChangeOption(999), // Use special value for delete
+			Option:      ChangeOptionDelete,
 			Title:       "🗑️  Delete Repository",
 			Description: "Remove this repository from configuration",
 		})

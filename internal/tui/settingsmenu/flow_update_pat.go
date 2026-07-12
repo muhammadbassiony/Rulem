@@ -306,9 +306,13 @@ func (m *SettingsModel) viewUpdatePATError() string {
 }
 
 // pluralize returns the singular or plural form of a word based on count.
+// It handles the y→ies case (the only form needed here, e.g. "repository").
 func pluralize(word string, count int) string {
 	if count == 1 {
 		return word
 	}
-	return word + "ies" // Simple pluralization for "repository" -> "repositories"
+	if strings.HasSuffix(word, "y") {
+		return word[:len(word)-1] + "ies" // "repository" -> "repositories"
+	}
+	return word + "s"
 }

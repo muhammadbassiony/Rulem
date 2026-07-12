@@ -46,7 +46,7 @@ import (
 
 // Type definitions have been moved to types.go for better organization.
 // This includes: SettingsState, ChangeOption, ChangeOptionInfo,
-// and all message types (settingsCompleteMsg, refreshInitiateMsg, etc.).
+// and all message types (settingsCompleteMsg, refreshCompleteMsg, etc.).
 
 type credentialManager interface {
 	ValidateGitHubToken(token string) error
@@ -215,9 +215,12 @@ func (m *SettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshCompleteMsg:
 		m.refreshInProgress = false
 		if msg.err != nil {
+			// Surface the failure to the user via the RefreshError state.
 			m.logger.Error("Refresh failed", "error", msg.err)
 			m.lastRefreshError = msg.err
+			return m.transitionTo(SettingsStateRefreshError), nil
 		}
+		// Success: clear any prior error and return to the main menu.
 		m.lastRefreshError = nil
 		m.state = SettingsStateMainMenu
 		m.layout = m.layout.ClearError()
@@ -479,22 +482,6 @@ func (m *SettingsModel) handleMainMenuKeys(msg tea.KeyMsg) (*SettingsModel, tea.
 		m.repoList, cmd = m.repoList.Update(msg)
 		return m, cmd
 	}
-}
-
-func (m *SettingsModel) handleConfirmationKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {
-	switch msg.String() {
-	case "y", "Y", "enter":
-		m.logger.LogUserAction("settings_confirmation_accept", "saving changes")
-		return m, m.saveChanges()
-	case "n", "N":
-		m.logger.LogUserAction("settings_confirmation_reject", "discarding changes")
-		m.resetTemporaryChanges()
-		return m.transitionTo(SettingsStateRepositoryActions), nil
-	case "esc":
-		// Go back to the appropriate input state
-		return m.transitionBack(), nil
-	}
-	return m, nil
 }
 
 func (m *SettingsModel) handleCompleteKeys(msg tea.KeyMsg) (*SettingsModel, tea.Cmd) {

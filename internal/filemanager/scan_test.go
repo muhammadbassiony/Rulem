@@ -350,19 +350,26 @@ func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
 
-	// Should find files through symlinks
-	expectedMinimum := 3 // normal.md + real/file.md + target/doc.md (+ possibly symlinked versions)
-
-	if len(files) < expectedMinimum {
-		t.Errorf("Expected at least %d files, got %d: %v", expectedMinimum, len(files), files)
+	// Symlinks are skipped by the secure scanner (never traversed or listed),
+	// so only the real markdown files reachable without crossing a symlink are
+	// found. Note that "target" is in the scanner's default skip patterns, so
+	// target/doc.md is not discovered here.
+	expected := []string{"normal.md", "real/file.md"}
+	if len(files) != len(expected) {
+		t.Errorf("Expected %d files, got %d: %v", len(expected), len(files), files)
 	}
 
-	expected := []string{"normal.md", "real/file.md"}
-
-	// Check each expected file is found (now with absolute paths based on actual CWD)
+	// Check each expected real file is found (with absolute paths based on actual CWD)
 	for _, expectedFile := range expected {
 		if !containsAbsolutePath(files, actualCWD, expectedFile) {
 			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
+
+	// The symlinks themselves must not appear in results.
+	for _, f := range files {
+		if f.Name == "link_to_doc.md" || f.Name == "link_to_real" {
+			t.Errorf("Symlink %q must not appear in scan results", f.Name)
 		}
 	}
 }
@@ -588,19 +595,26 @@ func TestScanRepository_SymlinkHandling(t *testing.T) {
 		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
-	// Should find files through symlinks
-	expectedMinimum := 3 // normal.md + real/file.md + target/doc.md (+ possibly symlinked versions)
-
-	if len(files) < expectedMinimum {
-		t.Errorf("Expected at least %d files, got %d: %v", expectedMinimum, len(files), files)
+	// Symlinks are skipped by the secure scanner (never traversed or listed),
+	// so only the real markdown files reachable without crossing a symlink are
+	// found. Note that "target" is in the scanner's default skip patterns, so
+	// target/doc.md is not discovered here.
+	expected := []string{"normal.md", "real/file.md"}
+	if len(files) != len(expected) {
+		t.Errorf("Expected %d files, got %d: %v", len(expected), len(files), files)
 	}
 
-	expected := []string{"normal.md", "real/file.md"}
-
-	// Check each expected file is found (now with absolute paths)
+	// Check each expected real file is found (with absolute paths)
 	for _, expectedFile := range expected {
 		if !containsAbsolutePath(files, storageDir, expectedFile) {
 			t.Errorf("Expected file %q not found in results", expectedFile)
+		}
+	}
+
+	// The symlinks themselves must not appear in results.
+	for _, f := range files {
+		if f.Name == "link_to_doc.md" || f.Name == "link_to_real" {
+			t.Errorf("Symlink %q must not appear in scan results", f.Name)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // AtomicCopy performs an atomic file copy operation from source to destination.
@@ -31,7 +32,7 @@ import (
 //   - Both paths should be validated before calling this function
 //   - The function does not perform path traversal validation
 //   - Temporary files are cleaned up on any failure
-//   - File permissions are set to 0644 (readable by owner and group, writable by owner)
+//   - File permissions are set to 0644 (world-readable, writable by owner)
 //
 // Usage example:
 //
@@ -49,12 +50,17 @@ func AtomicCopy(srcPath, destPath string) error {
 	}
 	defer srcFile.Close()
 
-	// Create temporary file in same directory as destination
-	tempPath := destPath + ".tmp"
-	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	// Create a uniquely named temporary file in the same directory as the
+	// destination. os.CreateTemp uses O_EXCL and a random suffix, which:
+	//   - prevents an attacker from pre-creating the temp path as a symlink to
+	//     a victim file (the open would refuse to follow/truncate it), and
+	//   - prevents two concurrent AtomicCopy calls to the same destination from
+	//     sharing a temp path and corrupting each other.
+	tempFile, err := os.CreateTemp(filepath.Dir(destPath), filepath.Base(destPath)+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
+	tempPath := tempFile.Name()
 
 	// Ensure cleanup of temp file if anything goes wrong
 	var copySuccess bool
@@ -64,6 +70,11 @@ func AtomicCopy(srcPath, destPath string) error {
 			os.Remove(tempPath) // Clean up on failure
 		}
 	}()
+
+	// os.CreateTemp defaults to 0600; match the documented 0644 behavior.
+	if err := tempFile.Chmod(0644); err != nil {
+		return fmt.Errorf("failed to set temporary file permissions: %w", err)
+	}
 
 	// Copy file contents
 	if _, err := io.Copy(tempFile, srcFile); err != nil {

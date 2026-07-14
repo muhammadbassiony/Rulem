@@ -1,9 +1,12 @@
 package fileops
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -199,6 +202,109 @@ func TestAtomicCopyAtomicity(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestAtomicCopyTempSymlinkAttack verifies that AtomicCopy does not follow a
+// pre-created "<dest>.tmp" symlink and truncate/overwrite the victim it points
+// at. Against the old implementation (which opened exactly destPath+".tmp" with
+// O_CREATE|O_WRONLY|O_TRUNC, no O_EXCL) the open followed the symlink and
+// clobbered the victim file.
+func TestAtomicCopyTempSymlinkAttack(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Symlink test not supported on Windows")
+	}
+
+	srcDir := createTempDir(t)
+	defer os.RemoveAll(srcDir)
+	destDir := createTempDir(t)
+	defer os.RemoveAll(destDir)
+	victimDir := createTempDir(t)
+	defer os.RemoveAll(victimDir)
+
+	const victimContent = "VICTIM - must not be modified"
+	victimPath := createTestFile(t, victimDir, "victim.txt", victimContent)
+
+	srcPath := createTestFile(t, srcDir, "source.txt", "new copied content")
+	destPath := filepath.Join(destDir, "dest.txt")
+
+	// Attacker pre-creates the predictable temp path as a symlink to the victim.
+	attackLink := destPath + ".tmp"
+	if err := os.Symlink(victimPath, attackLink); err != nil {
+		t.Fatalf("Failed to create attack symlink: %v", err)
+	}
+
+	if err := AtomicCopy(srcPath, destPath); err != nil {
+		t.Fatalf("AtomicCopy failed: %v", err)
+	}
+
+	// The victim file must be completely untouched.
+	if got := readFileContent(t, victimPath); got != victimContent {
+		t.Errorf("Victim file was modified via temp symlink: got %q, want %q", got, victimContent)
+	}
+
+	// The copy itself must have succeeded to the real destination.
+	if got := readFileContent(t, destPath); got != "new copied content" {
+		t.Errorf("Destination content = %q, want %q", got, "new copied content")
+	}
+}
+
+// TestAtomicCopyConcurrentSameDest verifies that many concurrent AtomicCopy
+// calls targeting the same destination file complete without error or content
+// corruption. The old implementation shared a single "<dest>.tmp" path across
+// all calls, so concurrent writers clobbered each other's temp file and racing
+// renames could fail.
+func TestAtomicCopyConcurrentSameDest(t *testing.T) {
+	srcDir := createTempDir(t)
+	defer os.RemoveAll(srcDir)
+	destDir := createTempDir(t)
+	defer os.RemoveAll(destDir)
+
+	const n = 12
+	sources := make([]string, n)
+	contents := make(map[string]bool, n)
+	for i := 0; i < n; i++ {
+		content := fmt.Sprintf("content-from-source-%02d", i)
+		sources[i] = createTestFile(t, srcDir, fmt.Sprintf("src_%02d.txt", i), content)
+		contents[content] = true
+	}
+
+	destPath := filepath.Join(destDir, "shared_dest.txt")
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(src string) {
+			defer wg.Done()
+			if err := AtomicCopy(src, destPath); err != nil {
+				errs <- err
+			}
+		}(sources[i])
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("AtomicCopy failed under concurrency: %v", err)
+	}
+
+	// Final destination must equal exactly one full source's content - never a
+	// truncated or interleaved mix from a shared temp file.
+	final := readFileContent(t, destPath)
+	if !contents[final] {
+		t.Errorf("Destination content is corrupted/interleaved: %q", final)
+	}
+
+	// No stray temp files should remain in the destination directory.
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		t.Fatalf("Failed to read destination directory: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Errorf("Found leftover temp file after concurrent copies: %s", entry.Name())
+		}
+	}
 }
 
 // Tests for EnsureDirectoryExists

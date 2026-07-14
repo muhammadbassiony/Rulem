@@ -887,32 +887,32 @@ func TestSaveRulesModel_KeyHandling_FileSelection(t *testing.T) {
 		t.Fatal("Update should return SaveRulesModel")
 	}
 
-	tests := []struct {
-		name       string
-		key        string
-		expectsCmd bool
-	}{
-		{"quit", "q", true},
-		{"escape", "esc", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
-			if tt.key == "esc" {
+	// q and esc (while not filtering) delegate to the FilePicker, which emits
+	// filepicker.CancelledMsg rather than quitting the program. The model then
+	// navigates back on that message. The parent must not sniff raw q/esc (doing
+	// so would break in-picker filtering).
+	for _, key := range []string{"q", "esc"} {
+		t.Run("cancel via "+key, func(t *testing.T) {
+			keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+			if key == "esc" {
 				keyMsg = tea.KeyMsg{Type: tea.KeyEsc}
 			}
 
-			updatedModel, cmd := model.Update(keyMsg)
-
-			if tt.expectsCmd && cmd == nil {
-				t.Errorf("Expected command for key %s", tt.key)
-			} else if !tt.expectsCmd && cmd != nil {
-				t.Errorf("Did not expect command for key %s", tt.key)
+			_, cmd := model.Update(keyMsg)
+			if cmd == nil {
+				t.Fatalf("expected a command for key %q", key)
+			}
+			if _, ok := cmd().(filepicker.CancelledMsg); !ok {
+				t.Fatalf("expected filepicker.CancelledMsg for key %q, got %T", key, cmd())
 			}
 
-			if updatedModel == nil {
-				t.Error("Updated model should not be nil")
+			// Feeding the cancel message back to the model navigates to the menu.
+			_, navCmd := model.Update(filepicker.CancelledMsg{})
+			if navCmd == nil {
+				t.Fatalf("expected navigation command after CancelledMsg")
+			}
+			if _, ok := navCmd().(helpers.NavigateToMainMenuMsg); !ok {
+				t.Fatalf("expected NavigateToMainMenuMsg, got %T", navCmd())
 			}
 		})
 	}

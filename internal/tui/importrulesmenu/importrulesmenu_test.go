@@ -489,33 +489,40 @@ func TestImportRulesModel_KeyHandling_FileSelection(t *testing.T) {
 		t.Error("Update should return ImportRulesModel")
 	}
 
-	tests := []struct {
-		name        string
-		key         string
-		expectsCmd  bool
-		cmdContains string
-	}{
-		{"quit key", KeyQuit, true, "NavigateToMainMenuMsg"},
-		{"escape key", KeyEscape, true, "NavigateToMainMenuMsg"},
-		{"other key", "j", true, ""}, // FilePicker may return commands for navigation keys
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
-			updatedModel, cmd := model.Update(keyMsg)
-
-			if updatedModel == nil {
-				t.Error("Updated model should not be nil")
+	// q and esc (while not filtering) must be delegated to the FilePicker, which
+	// emits filepicker.CancelledMsg rather than quitting the program. The model
+	// then translates that message into a navigate-back command. The parent must
+	// NOT sniff raw q/esc itself (doing so breaks in-picker filtering).
+	for _, key := range []string{KeyQuit, KeyEscape} {
+		t.Run("cancel via "+key, func(t *testing.T) {
+			keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+			_, cmd := model.Update(keyMsg)
+			if cmd == nil {
+				t.Fatalf("expected a command for key %q", key)
 			}
-			if tt.expectsCmd && cmd == nil {
-				t.Error("Expected a command but got nil")
+			if _, ok := cmd().(filepicker.CancelledMsg); !ok {
+				t.Fatalf("expected filepicker.CancelledMsg for key %q, got %T", key, cmd())
 			}
-			if !tt.expectsCmd && cmd != nil {
-				t.Error("Did not expect a command but got one")
+
+			// Feeding the cancel message back to the model navigates to the menu.
+			_, navCmd := model.Update(filepicker.CancelledMsg{})
+			if navCmd == nil {
+				t.Fatalf("expected navigation command after CancelledMsg")
+			}
+			if _, ok := navCmd().(helpers.NavigateToMainMenuMsg); !ok {
+				t.Fatalf("expected NavigateToMainMenuMsg, got %T", navCmd())
 			}
 		})
 	}
+
+	// A plain navigation key like 'j' is forwarded to the picker (not cancelled).
+	t.Run("navigation key forwarded", func(t *testing.T) {
+		keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}
+		updatedModel, _ := model.Update(keyMsg)
+		if updatedModel == nil {
+			t.Error("Updated model should not be nil")
+		}
+	})
 }
 
 func TestImportRulesModel_KeyHandling_EditorSelection(t *testing.T) {

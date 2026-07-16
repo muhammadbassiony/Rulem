@@ -10,7 +10,8 @@ todo.md
 
 devCentral/
 
-rulem
+# the binary built at the repo root; anchored so it does not also match cmd/rulem/
+/rulem
 # Added by goreleaser init:
 dist/
 

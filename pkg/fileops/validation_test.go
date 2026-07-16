@@ -351,6 +351,120 @@ func TestSanitizeFilename(t *testing.T) {
 	}
 }
 
+// Tests for SanitizeRelativePath
+
+func TestSanitizeRelativePath(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		expected    string
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "plain filename behaves like SanitizeFilename",
+			path:        "name.md",
+			expected:    "name.md",
+			expectError: false,
+		},
+		{
+			name:        "filename with spaces",
+			path:        "my file.md",
+			expected:    "my file.md",
+			expectError: false,
+		},
+		{
+			name:        "single subdirectory",
+			path:        "backend/api-rules.md",
+			expected:    filepath.Join("backend", "api-rules.md"),
+			expectError: false,
+		},
+		{
+			name:        "nested subdirectories",
+			path:        "sub/dir/name.md",
+			expected:    filepath.Join("sub", "dir", "name.md"),
+			expectError: false,
+		},
+		{
+			name:        "parent traversal rejected",
+			path:        "../evil.md",
+			expectError: true,
+			errorText:   "traversal",
+		},
+		{
+			name:        "embedded traversal rejected",
+			path:        "backend/../../evil.md",
+			expectError: true,
+			errorText:   "traversal",
+		},
+		{
+			name:        "absolute path rejected",
+			path:        "/abs.md",
+			expectError: true,
+			errorText:   "relative",
+		},
+		{
+			name:        "double slash empty segment rejected",
+			path:        "a//b.md",
+			expectError: true,
+			errorText:   "empty segment",
+		},
+		{
+			name:        "dot segment rejected",
+			path:        "a/./b.md",
+			expectError: true,
+			errorText:   ".",
+		},
+		{
+			name:        "trailing slash empty segment rejected",
+			path:        "a/b/",
+			expectError: true,
+			errorText:   "empty segment",
+		},
+		{
+			name:        "empty path rejected",
+			path:        "",
+			expectError: true,
+			errorText:   "empty",
+		},
+		{
+			name:        "whitespace only rejected",
+			path:        "   ",
+			expectError: true,
+		},
+		{
+			name:        "bare dot rejected",
+			path:        ".",
+			expectError: true,
+		},
+		{
+			name:        "bare double dot rejected",
+			path:        "..",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := SanitizeRelativePath(tt.path)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none (result=%q)", result)
+				} else if tt.errorText != "" && !strings.Contains(err.Error(), tt.errorText) {
+					t.Errorf("Expected error containing %q, got: %v", tt.errorText, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				} else if result != tt.expected {
+					t.Errorf("Expected %q, got %q", tt.expected, result)
+				}
+			}
+		})
+	}
+}
+
 // Tests for ValidateFileAccess
 
 func TestValidateFileAccess(t *testing.T) {

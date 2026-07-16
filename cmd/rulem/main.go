@@ -122,9 +122,12 @@ The server communicates via stdin/stdout using JSON-RPC as per MCP specification
 }
 
 func init() {
-	// Setting Version makes Cobra register the --version/-v flag on rootCmd.
+	// Setting Version makes Cobra handle --version on rootCmd. Registering the
+	// flag ourselves first stops Cobra adding its default one, which would also
+	// claim -v as a shorthand; leave -v free for a future --verbose.
 	rootCmd.Version = resolveVersion()
 	rootCmd.SetVersionTemplate(versionString() + "\n")
+	rootCmd.Flags().Bool("version", false, "version for rulem")
 
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&debugMode, "debug", "d", false, "Enable debug logging")

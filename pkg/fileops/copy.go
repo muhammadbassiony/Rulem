@@ -84,7 +84,7 @@ func AtomicCopy(srcPath, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open destination directory: %w", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	tempName, tempFile, err := createTempFile(root)
 	if err != nil {
@@ -95,7 +95,7 @@ func AtomicCopy(srcPath, destPath string) error {
 	defer func() {
 		tempFile.Close()
 		if !renamed {
-			root.Remove(tempName) // Clean up on failure
+			_ = root.Remove(tempName) // Clean up on failure
 		}
 	}()
 

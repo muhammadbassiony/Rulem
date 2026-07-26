@@ -528,14 +528,14 @@ func ValidateDirectoryWritable(dirPath string) error {
 	if err != nil {
 		return fmt.Errorf("cannot open directory: %w", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	// Test write permissions
 	name, probe, err := createTempFile(root)
 	if err != nil {
 		return fmt.Errorf("no write permission in directory: %w", err)
 	}
-	probe.Close()
+	_ = probe.Close()
 
 	// Clean up the probe. A failure here doesn't matter - the directory is usable.
 	_ = root.Remove(name)

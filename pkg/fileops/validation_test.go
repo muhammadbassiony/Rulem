@@ -681,7 +681,7 @@ func TestValidateDirectoryWritable(t *testing.T) {
 // pre-create.
 func TestValidateDirectoryWritableLeavesNoProbe(t *testing.T) {
 	tempDir := createTempDir(t)
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	for range 3 {
 		if err := ValidateDirectoryWritable(tempDir); err != nil {

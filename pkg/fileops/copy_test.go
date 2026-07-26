@@ -195,9 +195,9 @@ func TestAtomicCopyPermissions(t *testing.T) {
 	}
 
 	srcDir := createTempDir(t)
-	defer os.RemoveAll(srcDir)
+	defer func() { _ = os.RemoveAll(srcDir) }()
 	destDir := createTempDir(t)
-	defer os.RemoveAll(destDir)
+	defer func() { _ = os.RemoveAll(destDir) }()
 
 	for _, mode := range []os.FileMode{0600, 0640, 0644} {
 		t.Run(mode.String(), func(t *testing.T) {
@@ -234,11 +234,11 @@ func TestAtomicCopyPermissions(t *testing.T) {
 // outside it, and the copy follows the link and truncates the victim.
 func TestAtomicCopySymlinkedTempPath(t *testing.T) {
 	srcDir := createTempDir(t)
-	defer os.RemoveAll(srcDir)
+	defer func() { _ = os.RemoveAll(srcDir) }()
 	destDir := createTempDir(t)
-	defer os.RemoveAll(destDir)
+	defer func() { _ = os.RemoveAll(destDir) }()
 	victimDir := createTempDir(t)
-	defer os.RemoveAll(victimDir)
+	defer func() { _ = os.RemoveAll(victimDir) }()
 
 	victimContent := "important victim data"
 	victimPath := createTestFile(t, victimDir, "victim.txt", victimContent)
@@ -264,9 +264,9 @@ func TestAtomicCopySymlinkedTempPath(t *testing.T) {
 // destination no longer share one temporary path and corrupt each other.
 func TestAtomicCopyConcurrent(t *testing.T) {
 	srcDir := createTempDir(t)
-	defer os.RemoveAll(srcDir)
+	defer func() { _ = os.RemoveAll(srcDir) }()
 	destDir := createTempDir(t)
-	defer os.RemoveAll(destDir)
+	defer func() { _ = os.RemoveAll(destDir) }()
 
 	const copies = 8
 	contents := make([]string, copies)

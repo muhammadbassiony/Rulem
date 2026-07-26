@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // IsSymlink checks if a given path is a symbolic link.
@@ -230,8 +229,7 @@ func ValidateSymlinkSecurity(linkPath string, allowedBasePaths []string) error {
 			continue // Skip if relative path cannot be calculated
 		}
 
-		// If relative path doesn't start with "..", target is within base path
-		if !strings.HasPrefix(relPath, "..") {
+		if isContained(relPath) {
 			return nil // Valid: target is within an allowed base path
 		}
 	}

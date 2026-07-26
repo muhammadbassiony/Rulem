@@ -57,8 +57,19 @@ func TestValidatePathSecurity(t *testing.T) {
 			errorText:   "path traversal not allowed",
 		},
 		{
-			name:        "legitimate .. usage",
+			// ".." only means traversal when it is a whole path component.
+			name:        "legitimate .. inside a filename",
 			path:        "file..txt",
+			expectError: false,
+		},
+		{
+			name:        "legitimate .. inside a directory name",
+			path:        "notes/v1..v2/file.txt",
+			expectError: false,
+		},
+		{
+			name:        "trailing parent component",
+			path:        "notes/subdir/..",
 			expectError: true,
 			errorText:   "path traversal not allowed",
 		},
@@ -145,6 +156,17 @@ func TestValidateCWDPath(t *testing.T) {
 			name:        "file in current directory",
 			destPath:    "file.txt",
 			expectError: false,
+		},
+		{
+			name:        "legitimate .. inside a filename",
+			destPath:    "notes/my..notes.md",
+			expectError: false,
+		},
+		{
+			name:        "escape hidden by a cleanable prefix",
+			destPath:    "a/b/../../../escape.txt",
+			expectError: true,
+			errorText:   "path traversal not allowed in destination path",
 		},
 	}
 
@@ -248,6 +270,76 @@ func TestValidateFileInDirectory(t *testing.T) {
 		err := ValidateFileInDirectory(validFile, "")
 		if err == nil {
 			t.Error("Expected error for empty base directory")
+		}
+	})
+
+	t.Run("file name containing dots is not traversal", func(t *testing.T) {
+		dotted := createTestFile(t, tempDir, "my..notes.md", "content")
+
+		if err := ValidateFileInDirectory(dotted, tempDir); err != nil {
+			t.Errorf("Expected no error for a file named %q, got: %v", "my..notes.md", err)
+		}
+	})
+}
+
+// TestValidateFileInDirectorySymlinkEscape covers the guarantee the function
+// advertises but did not deliver: the old implementation stat'ed the path with
+// os.Stat, which follows symlinks, so the ModeSymlink branch that was meant to
+// re-check containment could never be reached.
+func TestValidateFileInDirectorySymlinkEscape(t *testing.T) {
+	baseDir := createTempDir(t)
+	defer func() { _ = os.RemoveAll(baseDir) }()
+	outsideDir := createTempDir(t)
+	defer func() { _ = os.RemoveAll(outsideDir) }()
+
+	outsideFile := createTestFile(t, outsideDir, "secret.txt", "secret content")
+	insideFile := createTestFile(t, baseDir, "inside.txt", "inside content")
+
+	t.Run("symlink pointing outside the base directory is rejected", func(t *testing.T) {
+		link := filepath.Join(baseDir, "escaping-link.txt")
+		if err := os.Symlink(outsideFile, link); err != nil {
+			t.Fatalf("Failed to create symlink: %v", err)
+		}
+		defer func() { _ = os.Remove(link) }()
+
+		if err := ValidateFileInDirectory(link, baseDir); err == nil {
+			t.Error("Expected error for a symlink resolving outside the base directory")
+		}
+	})
+
+	t.Run("symlink via a parent traversal is rejected", func(t *testing.T) {
+		link := filepath.Join(baseDir, "traversing-link.txt")
+		if err := os.Symlink(filepath.Join("..", filepath.Base(outsideDir), "secret.txt"), link); err != nil {
+			t.Fatalf("Failed to create symlink: %v", err)
+		}
+		defer func() { _ = os.Remove(link) }()
+
+		if err := ValidateFileInDirectory(link, baseDir); err == nil {
+			t.Error("Expected error for a symlink traversing out of the base directory")
+		}
+	})
+
+	t.Run("symlink staying inside the base directory is accepted", func(t *testing.T) {
+		link := filepath.Join(baseDir, "internal-link.txt")
+		if err := os.Symlink(filepath.Base(insideFile), link); err != nil {
+			t.Fatalf("Failed to create symlink: %v", err)
+		}
+		defer func() { _ = os.Remove(link) }()
+
+		if err := ValidateFileInDirectory(link, baseDir); err != nil {
+			t.Errorf("Expected no error for a symlink resolving inside the base directory, got: %v", err)
+		}
+	})
+
+	t.Run("file reached through a symlinked subdirectory that escapes is rejected", func(t *testing.T) {
+		linkDir := filepath.Join(baseDir, "escaping-dir")
+		if err := os.Symlink(outsideDir, linkDir); err != nil {
+			t.Fatalf("Failed to create directory symlink: %v", err)
+		}
+		defer func() { _ = os.Remove(linkDir) }()
+
+		if err := ValidateFileInDirectory(filepath.Join(linkDir, "secret.txt"), baseDir); err == nil {
+			t.Error("Expected error for a file reached through an escaping directory symlink")
 		}
 	})
 }

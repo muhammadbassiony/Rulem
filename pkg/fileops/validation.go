@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -39,26 +40,42 @@ func ValidatePathSecurity(path string) error {
 		return fmt.Errorf("path cannot be empty")
 	}
 
-	// Check for path traversal in raw input
-	if strings.Contains(path, "..") {
-		return fmt.Errorf("path traversal not allowed")
-	}
-
-	// Clean and re-check for traversal
-	cleanPath := filepath.Clean(path)
-	if strings.Contains(cleanPath, "..") {
+	if hasParentTraversal(path) {
 		return fmt.Errorf("path traversal not allowed")
 	}
 
 	// Additional check for absolute paths that might be dangerous
-	if filepath.IsAbs(path) {
-		// Use comprehensive reserved directory checking
-		if IsReservedDirectory(cleanPath) {
-			return fmt.Errorf("path traversal not allowed")
-		}
+	if filepath.IsAbs(path) && IsReservedDirectory(filepath.Clean(path)) {
+		return fmt.Errorf("path traversal not allowed")
 	}
 
 	return nil
+}
+
+// hasParentTraversal reports whether any component of path is a ".." element.
+//
+// Matching on the ".." substring instead would also reject legitimate names
+// such as "my..notes.md" or "v1..v2.md", which are perfectly valid rule files.
+//
+// Backslashes count as separators on every platform, not just Windows: a path
+// like `..\..\etc` is traversal wherever it ends up being resolved, and a
+// filename genuinely containing a backslash-delimited ".." component is not a
+// case worth accommodating.
+func hasParentTraversal(path string) bool {
+	normalized := strings.ReplaceAll(filepath.ToSlash(path), `\`, "/")
+	return slices.Contains(strings.Split(normalized, "/"), "..")
+}
+
+// isContained reports whether relPath - as produced by filepath.Rel - stays
+// inside the directory it was computed against.
+//
+// filepath.IsLocal is exactly the predicate the old
+// strings.HasPrefix(relPath, "..") test was approximating: it rejects absolute
+// paths, ".." escapes and (on Windows) reserved device names, without also
+// rejecting a file simply named "..notes.md". It accepts ".", which is what
+// filepath.Rel returns when the two paths are the same directory.
+func isContained(relPath string) bool {
+	return filepath.IsLocal(relPath)
 }
 
 // ValidateCWDPath validates that a destination path is safe relative to current working directory.
@@ -91,14 +108,10 @@ func ValidateCWDPath(destPath string) error {
 		return fmt.Errorf("destination path must be relative to current working directory")
 	}
 
-	// Check for path traversal
-	if strings.Contains(destPath, "..") {
-		return fmt.Errorf("path traversal not allowed in destination path")
-	}
-
-	// Clean and validate the path
-	cleanPath := filepath.Clean(destPath)
-	if strings.HasPrefix(cleanPath, "..") || strings.Contains(cleanPath, "..") {
+	// Reject ".." components outright rather than only checking where the path
+	// lexically lands: "valid/../file.txt" resolves outside the CWD if "valid"
+	// happens to be a symlink, which lexical analysis cannot see.
+	if hasParentTraversal(destPath) || !isContained(destPath) {
 		return fmt.Errorf("path traversal not allowed in destination path")
 	}
 
@@ -119,9 +132,10 @@ func ValidateCWDPath(destPath string) error {
 // The function performs:
 //   - Path resolution to absolute paths
 //   - Containment verification using relative path calculation
+//   - Re-resolution of the path through an os.Root scoped to baseDir, so
+//     symlinks that leave the directory are refused rather than followed
 //   - File existence and accessibility checks
 //   - File type validation (ensures it's a regular file)
-//   - Basic symlink security validation
 //
 // Usage example:
 //
@@ -147,40 +161,32 @@ func ValidateFileInDirectory(filePath, baseDir string) error {
 		return fmt.Errorf("cannot determine relative path: %w", err)
 	}
 
-	if strings.HasPrefix(relPath, "..") {
+	if !isContained(relPath) {
 		return fmt.Errorf("file is not within base directory")
 	}
 
-	// Check if file exists and is accessible
-	fileInfo, err := os.Stat(absFilePath)
+	// The check above compares strings, which says nothing about what the
+	// filesystem will actually resolve. Re-open the name through an os.Root
+	// scoped to the base directory: names are resolved against an open
+	// directory handle, one component at a time, so a symlink pointing out of
+	// the directory fails here instead of being silently followed.
+	root, err := os.OpenRoot(absBaseDir)
+	if err != nil {
+		return fmt.Errorf("cannot open base directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	fileInfo, err := root.Stat(relPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file does not exist: %s", filepath.Base(filePath))
 		}
-		return fmt.Errorf("cannot access file: %w", err)
+		return fmt.Errorf("cannot access file within base directory: %w", err)
 	}
 
 	// Ensure it's a regular file
 	if fileInfo.IsDir() {
 		return fmt.Errorf("path is a directory, not a file")
-	}
-
-	// Basic symlink validation - resolve and check final destination
-	if fileInfo.Mode()&os.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(absFilePath)
-		if err != nil {
-			return fmt.Errorf("cannot resolve symlink: %w", err)
-		}
-
-		// Ensure resolved path is still within base directory
-		relResolved, err := filepath.Rel(absBaseDir, resolved)
-		if err != nil {
-			return fmt.Errorf("cannot determine resolved relative path: %w", err)
-		}
-
-		if strings.HasPrefix(relResolved, "..") {
-			return fmt.Errorf("symlink resolves outside base directory")
-		}
 	}
 
 	return nil
@@ -669,8 +675,7 @@ func ValidatePathInHome(targetPath string) (string, error) {
 		return "", fmt.Errorf("invalid path: %w", err)
 	}
 
-	// If relative path starts with .. then it's outside home
-	if strings.HasPrefix(relPath, "..") {
+	if !isContained(relPath) {
 		return "", fmt.Errorf("path is outside home directory")
 	}
 

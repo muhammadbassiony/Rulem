@@ -589,9 +589,13 @@ func isUserTempDirectory(path string) bool {
 //
 // The function:
 //   - Creates the directory if it doesn't exist
-//   - Tests write permissions by creating a temporary test file
-//   - Cleans up the test file after verification
+//   - Tests write permissions by creating a randomly named probe file
+//   - Cleans up the probe file after verification
 //   - Returns error if directory creation or write test fails
+//
+// Security: the probe is created with a random name and O_EXCL through an
+// os.Root scoped to the directory, so it cannot be pre-created by another
+// process to turn the probe into a write somewhere else.
 //
 // Usage example:
 //
@@ -606,17 +610,21 @@ func ValidateDirectoryWritable(dirPath string) error {
 		return fmt.Errorf("cannot create directory: %w", err)
 	}
 
+	root, err := os.OpenRoot(expandedPath)
+	if err != nil {
+		return fmt.Errorf("cannot open directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
 	// Test write permissions
-	testFile := filepath.Join(expandedPath, ".fileops-test")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+	name, probe, err := createTempFile(root)
+	if err != nil {
 		return fmt.Errorf("no write permission in directory: %w", err)
 	}
+	_ = probe.Close()
 
-	// Clean up test file
-	if err := os.Remove(testFile); err != nil {
-		// Log but don't fail - the directory is usable
-		// Note: In a library, we can't log directly, so we just ignore cleanup failures
-	}
+	// Clean up the probe. A failure here doesn't matter - the directory is usable.
+	_ = root.Remove(name)
 
 	return nil
 }

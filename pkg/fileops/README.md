@@ -106,6 +106,11 @@ func safeFileCopy(srcPath, destPath string) error {
 }
 ```
 
+`AtomicCopy` writes through an `os.Root` scoped to the destination directory. The
+temporary file is created with a random name and `O_EXCL`, so a symlink planted in
+that directory cannot redirect the write, and concurrent copies to the same
+destination don't collide. The destination inherits the source's permission bits.
+
 ### 3. Identifier Sanitization
 
 When creating identifiers from user input:

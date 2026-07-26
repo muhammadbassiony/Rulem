@@ -1516,7 +1516,10 @@ This is outside content.`
 	if err == nil {
 		t.Error("Expected error for symlink pointing outside storage directory")
 	} else if !strings.Contains(err.Error(), "symlink security check failed") &&
-		!strings.Contains(err.Error(), "symlink target validation failed") {
+		!strings.Contains(err.Error(), "symlink target validation failed") &&
+		!strings.Contains(err.Error(), "file containment validation failed") {
+		// Containment is enforced at several layers; which one rejects the
+		// symlink first is an implementation detail, that it is rejected is not.
 		t.Errorf("Expected symlink security error, got: %v", err)
 	}
 }

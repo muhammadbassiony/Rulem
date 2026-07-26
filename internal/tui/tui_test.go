@@ -199,6 +199,36 @@ func TestGetOrInitializeModel(t *testing.T) {
 	if importCopyModel == nil {
 		t.Error("Import copy model should be created")
 	}
+
+	// An empty repository list is what remains after the user deletes every
+	// repository. Every entry must still build, initialise, and render its own
+	// empty state rather than crashing the program.
+	for _, state := range []AppState{StateSettings, StateSaveRules, StateImportCopy, StateRepoStatus} {
+		emptyModel := NewMainModel(&config.Config{Repositories: []repository.RepositoryEntry{}}, logger)
+		emptyModel.windowWidth = 80
+		emptyModel.windowHeight = 24
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Entering state %v with no repositories panicked: %v", state, r)
+				}
+			}()
+
+			sub := emptyModel.getOrInitializeModel(state)
+			if sub == nil {
+				t.Errorf("Expected a model for state %v with no repositories, got nil", state)
+				return
+			}
+			emptyModel.activeModel = sub
+			emptyModel.state = state
+			_ = sub.Init()
+
+			if view := emptyModel.View(); view == "" {
+				t.Errorf("State %v rendered an empty view with no repositories", state)
+			}
+		}()
+	}
 }
 
 func TestFreshModelGeneration(t *testing.T) {
@@ -238,6 +268,19 @@ func TestViewMethods(t *testing.T) {
 	view := model.View()
 	if view == "" {
 		t.Error("Menu view should not be empty")
+	}
+
+	// The menu must render the same way with no repositories configured, and
+	// with the nil slice a config decoded from bare `repositories:` produces.
+	for name, emptyCfg := range map[string]*config.Config{
+		"empty slice": {Repositories: []repository.RepositoryEntry{}},
+		"nil slice":   {},
+	} {
+		emptyModel := NewMainModel(emptyCfg, logger)
+		emptyModel.state = StateMenu
+		if v := emptyModel.View(); v == "" {
+			t.Errorf("Menu view should not be empty with a %s of repositories", name)
+		}
 	}
 
 	// Test error view

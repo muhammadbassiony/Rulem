@@ -9,6 +9,7 @@ import (
 	"rulem/internal/logging"
 	"rulem/internal/repository"
 	"rulem/internal/tui/helpers"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -260,6 +261,20 @@ func TestGetMenuOptions_LocalRepo(t *testing.T) {
 	if options[len(options)-1].Option != ChangeOptionBack {
 		t.Error("Last option should be ChangeOptionBack")
 	}
+
+	// Building the menu must not depend on a loaded config.
+	t.Run("nil config", func(t *testing.T) {
+		nilModel := createTestModel(t)
+		nilModel.currentConfig = nil
+
+		nilOptions := nilModel.getMenuOptions()
+		if len(nilOptions) == 0 {
+			t.Fatal("Expected menu options even with a nil config")
+		}
+		if nilOptions[len(nilOptions)-1].Option != ChangeOptionBack {
+			t.Error("Last option should be ChangeOptionBack")
+		}
+	})
 }
 
 func TestGetMenuOptions_GitHubRepo(t *testing.T) {
@@ -359,6 +374,48 @@ func TestHandleMainMenuKeys(t *testing.T) {
 			}
 		})
 	}
+
+	// With no repositories the list holds only action items, so the first entry
+	// is "Add New Repository" — the way back to a working configuration after
+	// deleting everything.
+	t.Run("empty config starts the add repository flow", func(t *testing.T) {
+		model := createTestModelWithConfig(t, &config.Config{
+			Repositories: []repository.RepositoryEntry{},
+		})
+		model.state = SettingsStateMainMenu
+		model.repoList.SetItems(BuildSettingsMainMenuItems(nil))
+		model.repoList.Select(0)
+
+		updatedModel, _ := model.handleMainMenuKeys(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if updatedModel.state != SettingsStateAddRepositoryType {
+			t.Fatalf("Expected the Add Repository flow to start, got state %v", updatedModel.state)
+		}
+	})
+
+	t.Run("empty config main menu explains the state", func(t *testing.T) {
+		model := createTestModelWithConfig(t, &config.Config{
+			Repositories: []repository.RepositoryEntry{},
+		})
+
+		items := BuildSettingsMainMenuItems(nil)
+		if len(items) != 2 {
+			t.Fatalf("Expected only the 2 action items with no repositories, got %d", len(items))
+		}
+		for _, item := range items {
+			if _, ok := item.(SettingsActionListItem); !ok {
+				t.Errorf("Expected only action items, got %T", item)
+			}
+		}
+
+		view := model.viewMainMenu()
+		if !strings.Contains(view, "no repositories configured") {
+			t.Errorf("Expected an empty-state explanation, got:\n%s", view)
+		}
+		if !strings.Contains(view, "Add New Repository") {
+			t.Errorf("Expected Add New Repository to stay reachable, got:\n%s", view)
+		}
+	})
 }
 
 func TestHandleSelectChangeKeys_Navigation(t *testing.T) {
@@ -632,6 +689,45 @@ func TestViewRendering(t *testing.T) {
 				t.Errorf("View for state %v seems too short: %d characters", tt.state, len(view))
 			}
 		})
+	}
+
+	// Two degenerate configurations must render rather than panic: an empty one
+	// (what remains after the user deletes every repository, with
+	// selectedRepositoryID pointing at nothing) and a nil one (config failed to
+	// load). Both reach FindRepositoryByID and the repository slice from views.
+	degenerate := map[string]*config.Config{
+		"no repositories configured": {Repositories: []repository.RepositoryEntry{}},
+		"nil config":                 nil,
+	}
+
+	degenerateStates := []SettingsState{
+		SettingsStateMainMenu,
+		SettingsStateRepositoryActions,
+		SettingsStateConfirmDelete,
+		SettingsStateDeleteError,
+		SettingsStateUpdateGitHubPAT,
+		SettingsStateUpdatePATConfirm,
+		SettingsStateComplete,
+	}
+
+	for cfgName, cfg := range degenerate {
+		for _, state := range degenerateStates {
+			t.Run(cfgName+"/"+state.String(), func(t *testing.T) {
+				model := createTestModelWithConfig(t, cfg)
+				model.state = state
+				model.selectedRepositoryID = ""
+
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("View() panicked in state %v with %s: %v", state, cfgName, r)
+					}
+				}()
+
+				if view := model.View(); view == "" {
+					t.Errorf("View for state %v should not be empty with %s", state, cfgName)
+				}
+			})
+		}
 	}
 }
 

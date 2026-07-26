@@ -1233,7 +1233,7 @@ func TestValidateContentSecurity(t *testing.T) {
 			name:        "content with null byte",
 			content:     "Content with\x00null byte",
 			expectError: true,
-			errorText:   "control characters",
+			errorText:   "null bytes",
 		},
 		{
 			name:        "content with control character",
@@ -1242,58 +1242,10 @@ func TestValidateContentSecurity(t *testing.T) {
 			errorText:   "control characters",
 		},
 		{
-			name:        "content with script tag",
-			content:     "Content with <script>alert('xss')</script>",
+			name:        "content with ANSI escape sequence",
+			content:     "Content with \x1b[31mred\x1b[0m",
 			expectError: true,
-			errorText:   "<script",
-		},
-		{
-			name:        "content with javascript protocol",
-			content:     "Content with javascript:alert('xss')",
-			expectError: true,
-			errorText:   "javascript:",
-		},
-		{
-			name:        "content with vbscript",
-			content:     "Content with vbscript:msgbox('xss')",
-			expectError: true,
-			errorText:   "vbscript:",
-		},
-		{
-			name:        "content with data url",
-			content:     "Content with data:text/html,<script>alert(1)</script>",
-			expectError: true,
-			errorText:   "<script",
-		},
-		{
-			name:        "content with eval",
-			content:     "Content with eval(maliciousCode)",
-			expectError: true,
-			errorText:   "eval(",
-		},
-		{
-			name:        "content with exec",
-			content:     "Content with exec(systemCommand)",
-			expectError: true,
-			errorText:   "exec(",
-		},
-		{
-			name:        "content with onload",
-			content:     "Content with onload=alert('xss')",
-			expectError: true,
-			errorText:   "onload=",
-		},
-		{
-			name:        "case insensitive script detection",
-			content:     "Content with <SCRIPT>alert('xss')</SCRIPT>",
-			expectError: true,
-			errorText:   "<script",
-		},
-		{
-			name:        "mixed case javascript",
-			content:     "Content with JavaScript:alert('xss')",
-			expectError: true,
-			errorText:   "javascript:",
+			errorText:   "control characters",
 		},
 		{
 			name:        "empty content",
@@ -1303,6 +1255,36 @@ func TestValidateContentSecurity(t *testing.T) {
 		{
 			name:        "unicode content",
 			content:     "Content with unicode 字符 and émojis 🚀",
+			expectError: false,
+		},
+
+		// Rule files about web security legitimately discuss these tokens.
+		// Blocking them rejected valid documents without preventing anything:
+		// markdown is never rendered as HTML here, and a substring blocklist
+		// is trivially evaded in any case.
+		{
+			name:        "markdown documenting a script tag",
+			content:     "# XSS rules\n\nNever interpolate user input into `<script>` blocks.",
+			expectError: false,
+		},
+		{
+			name:        "markdown documenting the javascript protocol",
+			content:     "Reject `javascript:` URLs in href attributes.",
+			expectError: false,
+		},
+		{
+			name:        "markdown documenting eval",
+			content:     "Do not use eval(userInput) - prefer a parser.",
+			expectError: false,
+		},
+		{
+			name:        "markdown documenting event handlers",
+			content:     "Inline handlers such as onload= and onerror= are forbidden.",
+			expectError: false,
+		},
+		{
+			name:        "markdown documenting a data url",
+			content:     "Treat data:text/html payloads as untrusted.",
 			expectError: false,
 		},
 	}

@@ -749,21 +749,31 @@ func ValidateStoragePath(path string) error {
 	return nil
 }
 
-// ValidateContentSecurity checks for potentially malicious content in strings.
-// This function detects common injection attacks, control characters, and other
-// suspicious patterns that could be used for security exploits.
+// ValidateContentSecurity checks that text content is safe to pass through the
+// application as text: it must not contain control characters that would let it
+// forge terminal output, break out of a structured message, or truncate a
+// string at a NUL byte.
 //
 // Parameters:
 //   - content: The string content to validate
 //
 // Returns:
-//   - error: Validation error if suspicious content is detected
+//   - error: Validation error if the content contains control characters
 //
-// The function checks for:
-//   - Control characters (except newlines, carriage returns, and tabs)
-//   - Null bytes
-//   - Script injection patterns (script tags, javascript:, eval, etc.)
-//   - Other potentially dangerous content patterns
+// The function rejects:
+//   - NUL bytes
+//   - Every other C0 control character except newline, carriage return and tab
+//     (this includes ESC, so ANSI escape sequences are rejected)
+//
+// What this function deliberately does NOT do is scan for HTML and JavaScript
+// injection markers such as "<script", "javascript:" or "eval(". Those checks
+// were removed because they were a category error: they are an HTML-context
+// defense applied to markdown, which is never rendered as HTML here. They
+// rejected legitimate documents - any rule file about web security discusses
+// exactly those tokens - while providing no real protection, since any
+// substring blocklist is trivially evaded. Escape content at the point where
+// it enters an HTML context instead; that is the only place the context is
+// known.
 //
 // Usage example:
 //
@@ -771,35 +781,12 @@ func ValidateStoragePath(path string) error {
 //	    return fmt.Errorf("suspicious content detected: %w", err)
 //	}
 func ValidateContentSecurity(content string) error {
-	// Check for control characters (except newlines and tabs)
 	for _, r := range content {
+		if r == 0 {
+			return fmt.Errorf("content contains null bytes")
+		}
 		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
 			return fmt.Errorf("content contains control characters")
-		}
-	}
-
-	// Check for null bytes
-	if strings.Contains(content, "\x00") {
-		return fmt.Errorf("content contains null bytes")
-	}
-
-	// Check for script injection patterns
-	suspiciousPatterns := []string{
-		"<script",
-		"javascript:",
-		"vbscript:",
-		"data:text/html",
-		"eval(",
-		"exec(",
-		"onload=",
-		"onerror=",
-		"onclick=",
-	}
-
-	lowerContent := strings.ToLower(content)
-	for _, pattern := range suspiciousPatterns {
-		if strings.Contains(lowerContent, pattern) {
-			return fmt.Errorf("content contains potentially malicious pattern: %s", pattern)
 		}
 	}
 

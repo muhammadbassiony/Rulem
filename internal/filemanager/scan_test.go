@@ -319,15 +319,18 @@ func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
 	tempDir := createTempDirStructure(t, structure)
 	defer os.RemoveAll(tempDir)
 
-	// Create symlink to directory
+	// Absolute symlink to a directory: not traversed
 	realDir := filepath.Join(tempDir, "real")
 	linkDir := filepath.Join(tempDir, "link_to_real")
 	createTestSymlink(t, realDir, linkDir)
 
-	// Create symlink to file
+	// Absolute symlink to a file: refused, absolute links are never followed
 	targetFile := filepath.Join(tempDir, "target", "doc.md")
 	linkFile := filepath.Join(tempDir, "link_to_doc.md")
 	createTestSymlink(t, targetFile, linkFile)
+
+	// Relative symlink to a file inside the scan area: followed
+	createTestSymlink(t, filepath.Join("real", "file.md"), filepath.Join(tempDir, "rel_link.md"))
 
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()
@@ -350,19 +353,26 @@ func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
 
-	// Should find files through symlinks
-	expectedMinimum := 3 // normal.md + real/file.md + target/doc.md (+ possibly symlinked versions)
+	assertSymlinkScanPolicy(t, files, actualCWD)
+}
 
-	if len(files) < expectedMinimum {
-		t.Errorf("Expected at least %d files, got %d: %v", expectedMinimum, len(files), files)
+// assertSymlinkScanPolicy checks the scanner's documented symlink handling
+// against a directory laid out by the two *_SymlinkHandling tests.
+func assertSymlinkScanPolicy(t *testing.T, files []FileItem, base string) {
+	t.Helper()
+
+	for _, want := range []string{"normal.md", "real/file.md", "rel_link.md"} {
+		if !containsAbsolutePath(files, base, want) {
+			t.Errorf("Expected file %q not found in results: %v", want, files)
+		}
 	}
 
-	expected := []string{"normal.md", "real/file.md"}
-
-	// Check each expected file is found (now with absolute paths based on actual CWD)
-	for _, expectedFile := range expected {
-		if !containsAbsolutePath(files, actualCWD, expectedFile) {
-			t.Errorf("Expected file %q not found in results", expectedFile)
+	// Absolute symlinks are refused outright, and symlinked directories are
+	// not traversed - both are what keeps the scan inside its root without
+	// resorting to path-string comparisons.
+	for _, unwanted := range []string{"link_to_doc.md", "link_to_real/file.md"} {
+		if containsAbsolutePath(files, base, unwanted) {
+			t.Errorf("Symlink %q should not have been followed: %v", unwanted, files)
 		}
 	}
 }
@@ -567,15 +577,18 @@ func TestScanRepository_SymlinkHandling(t *testing.T) {
 	storageDir := createTempDirStructure(t, structure)
 	defer os.RemoveAll(storageDir)
 
-	// Create symlink to directory within storage
+	// Absolute symlink to a directory within storage: not traversed
 	realDir := filepath.Join(storageDir, "real")
 	linkDir := filepath.Join(storageDir, "link_to_real")
 	createTestSymlink(t, realDir, linkDir)
 
-	// Create symlink to file within storage
+	// Absolute symlink to a file: refused, absolute links are never followed
 	targetFile := filepath.Join(storageDir, "target", "doc.md")
 	linkFile := filepath.Join(storageDir, "link_to_doc.md")
 	createTestSymlink(t, targetFile, linkFile)
+
+	// Relative symlink to a file inside storage: followed
+	createTestSymlink(t, filepath.Join("real", "file.md"), filepath.Join(storageDir, "rel_link.md"))
 
 	logger, _ := logging.NewTestLogger()
 	fm, err := NewFileManager(storageDir, logger)
@@ -588,21 +601,7 @@ func TestScanRepository_SymlinkHandling(t *testing.T) {
 		t.Fatalf("ScanRepository failed: %v", err)
 	}
 
-	// Should find files through symlinks
-	expectedMinimum := 3 // normal.md + real/file.md + target/doc.md (+ possibly symlinked versions)
-
-	if len(files) < expectedMinimum {
-		t.Errorf("Expected at least %d files, got %d: %v", expectedMinimum, len(files), files)
-	}
-
-	expected := []string{"normal.md", "real/file.md"}
-
-	// Check each expected file is found (now with absolute paths)
-	for _, expectedFile := range expected {
-		if !containsAbsolutePath(files, storageDir, expectedFile) {
-			t.Errorf("Expected file %q not found in results", expectedFile)
-		}
-	}
+	assertSymlinkScanPolicy(t, files, storageDir)
 }
 
 func TestScanRepository_UnreadableDirectories(t *testing.T) {

@@ -1,6 +1,7 @@
 package fileops
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -419,22 +420,106 @@ func TestSecureDirectoryScanner_SymlinkProtection(t *testing.T) {
 		t.Fatalf("ScanDirectory() failed: %v", err)
 	}
 
-	// Verify that only files within the scan root are found
-	// The symlink itself should be found, but it cannot access content outside the root
-	expectedFiles := []string{"safe.txt", "bad_link.txt"}
-	if len(files) < 1 || len(files) > 2 {
-		t.Errorf("Expected 1-2 files, got %d: %v", len(files), files)
+	// The symlink escapes the scan root, so it must not be reported at all.
+	// Only the genuine file inside the root may appear.
+	var names []string
+	for _, file := range files {
+		names = append(names, file.Path)
+	}
+	if !slices.Equal(names, []string{"safe.txt"}) {
+		t.Errorf("Expected exactly [safe.txt], got %v", names)
+	}
+}
+
+// TestSecureDirectoryScanner_SymlinkClassification covers what a DirEntry
+// actually reports for a symlink: IsDir() is false and Type() is ModeSymlink.
+// Classifying on IsDir() alone emitted symlinked directories as bogus files
+// and left the scanner's own symlink guard unreachable.
+func TestSecureDirectoryScanner_SymlinkClassification(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Symlink test not supported on Windows")
 	}
 
+	tempDir := createTempDir(t)
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	root := filepath.Join(tempDir, "root")
+	realDir := filepath.Join(root, "real_dir")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatalf("Failed to create directories: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "nested.txt"), []byte("nested"), 0644); err != nil {
+		t.Fatalf("Failed to create nested file: %v", err)
+	}
+
+	realFileContent := "real file content"
+	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte(realFileContent), 0644); err != nil {
+		t.Fatalf("Failed to create real file: %v", err)
+	}
+
+	// Relative link to a file inside the root: should be reported as a file,
+	// carrying the target's size rather than the link's.
+	if err := os.Symlink("real.txt", filepath.Join(root, "link_to_file.txt")); err != nil {
+		t.Fatalf("Failed to create file symlink: %v", err)
+	}
+
+	// Relative link to a directory inside the root: must not be reported as a
+	// file, and must not be traversed.
+	if err := os.Symlink("real_dir", filepath.Join(root, "link_to_dir")); err != nil {
+		t.Fatalf("Failed to create directory symlink: %v", err)
+	}
+
+	// Link that dangles.
+	if err := os.Symlink("does_not_exist.txt", filepath.Join(root, "broken_link.txt")); err != nil {
+		t.Fatalf("Failed to create broken symlink: %v", err)
+	}
+
+	scanner, err := NewDirectoryScanner(root, nil)
+	if err != nil {
+		t.Fatalf("Failed to create scanner: %v", err)
+	}
+	defer func() { _ = scanner.Close() }()
+
+	files, err := scanner.ScanDirectory()
+	if err != nil {
+		t.Fatalf("ScanDirectory() failed: %v", err)
+	}
+
+	byPath := make(map[string]FileInfo, len(files))
 	for _, file := range files {
-		found := false
-		if slices.Contains(expectedFiles, file.Path) {
-			found = true
-			break
-		}
-		if !found {
-			t.Errorf("Found unexpected file: %s", file.Path)
-		}
+		byPath[file.Path] = file
+	}
+
+	// A symlinked directory must not surface as a file entry.
+	if _, ok := byPath["link_to_dir"]; ok {
+		t.Error("Symlink to a directory was emitted as a file")
+	}
+	// ...and must not be traversed either, so its contents appear only once,
+	// under the real directory.
+	if _, ok := byPath[filepath.Join("link_to_dir", "nested.txt")]; ok {
+		t.Error("Scanner traversed a symlinked directory")
+	}
+	if _, ok := byPath[filepath.Join("real_dir", "nested.txt")]; !ok {
+		t.Errorf("Expected to find real_dir/nested.txt, got %v", slices.Sorted(maps.Keys(byPath)))
+	}
+
+	if _, ok := byPath["broken_link.txt"]; ok {
+		t.Error("Dangling symlink was reported")
+	}
+
+	link, ok := byPath["link_to_file.txt"]
+	if !ok {
+		t.Fatalf("Expected symlink to a file inside the root to be reported, got %v", slices.Sorted(maps.Keys(byPath)))
+	}
+	if link.IsDir {
+		t.Error("Symlink to a file was reported as a directory")
+	}
+	if link.Size != int64(len(realFileContent)) {
+		t.Errorf("Symlink reports the link's size %d, want the target's size %d",
+			link.Size, len(realFileContent))
+	}
+	if link.Mode&os.ModeSymlink != 0 {
+		t.Errorf("Symlink reports the link's mode %v, want the target's mode", link.Mode)
 	}
 }
 

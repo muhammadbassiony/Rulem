@@ -68,7 +68,21 @@ type FileInfo struct {
 // built-in protection against directory traversal and symlink attacks.
 //
 // The scanner operates within a security boundary defined by an os.Root,
-// preventing access to files outside the designated scan area.
+// preventing access to files outside the designated scan area. os.Root
+// resolves every name against an open handle on the scan root, so a symlink
+// leaving that root fails to resolve instead of being followed - the boundary
+// is enforced by the filesystem, not by comparing path strings.
+//
+// Symlink policy:
+//   - A relative symlink resolving to a regular file inside the root is
+//     reported as a file, carrying its target's size and mode.
+//   - A symlink to a directory is not reported and not traversed. Refusing to
+//     traverse them is what makes the scan free of symlink loops by
+//     construction.
+//   - A symlink that escapes the root, dangles, or is absolute is skipped.
+//     os.Root refuses absolute symlinks even when the target happens to sit
+//     inside the root, since an absolute link is only meaningful outside the
+//     root's frame of reference.
 type SecureDirectoryScanner struct {
 	// root defines the security boundary for scanning operations
 	root *os.Root
@@ -289,37 +303,82 @@ func (s *SecureDirectoryScanner) scanRecursive(relativePath string, depth int) e
 	for _, entry := range entries {
 		entryPath := filepath.Join(relativePath, entry.Name())
 
-		if entry.IsDir() {
-			// Built-in symlink security validation - always enabled
-			fullEntryPath := filepath.Join(s.scanRoot, entryPath)
-			if isLink, err := IsSymlink(fullEntryPath); err == nil && isLink {
-				// Validate symlink security with scan root as allowed path
-				if err := ValidateSymlinkSecurity(fullEntryPath, []string{s.scanRoot}); err != nil {
-					if s.opts.SkipUnreadableDirs {
-						continue // Skip unsafe symlinks
-					}
-					return fmt.Errorf("symlink security check failed for %s: %w", entryPath, err)
-				}
+		// A DirEntry always describes the link itself, never its target: for a
+		// symlink IsDir() reports false and Type() reports ModeSymlink. Testing
+		// IsDir() first would classify a symlinked directory as a file.
+		if entry.Type()&os.ModeSymlink != 0 {
+			if err := s.addSymlink(entry, entryPath); err != nil {
+				return err
 			}
+			continue
+		}
 
-			// Recursively scan subdirectory
+		if entry.IsDir() {
 			if err := s.scanRecursive(entryPath, depth+1); err != nil {
 				return err
 			}
-		} else {
-			// Process file entry
-			if s.shouldIncludeFile(entry.Name()) {
-				fileInfo, err := s.createFileInfo(entry, entryPath)
-				if err != nil {
-					if s.opts.SkipUnreadableDirs {
-						continue // Skip files we can't stat
-					}
-					return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
-				}
-				s.results = append(s.results, fileInfo)
-			}
+			continue
 		}
+
+		if !s.shouldIncludeFile(entry.Name()) {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			if s.opts.SkipUnreadableDirs {
+				continue // Skip files we can't stat
+			}
+			return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
+		}
+
+		fileInfo, err := s.createFileInfo(entry.Name(), entryPath, info)
+		if err != nil {
+			if s.opts.SkipUnreadableDirs {
+				continue
+			}
+			return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
+		}
+		s.results = append(s.results, fileInfo)
 	}
+
+	return nil
+}
+
+// addSymlink records a symlink that resolves to a regular file inside the scan
+// root, and ignores every other kind.
+//
+// Containment comes from the root itself: Root.Stat resolves the name against
+// the open scan-root handle, so a link pointing outside the scan area - or a
+// dangling one - fails here rather than being followed. Such a link is always
+// skipped, never turned into a scan error: an out-of-root symlink is an
+// ordinary thing to find on disk and simply isn't part of the scan area, so
+// letting one abort the whole scan would hand any writer of the directory a
+// way to break scanning entirely.
+func (s *SecureDirectoryScanner) addSymlink(entry os.DirEntry, entryPath string) error {
+	if !s.shouldIncludeFile(entry.Name()) {
+		return nil
+	}
+
+	info, err := s.root.Stat(entryPath)
+	if err != nil {
+		return nil // Escapes the scan root, is absolute, or dangles
+	}
+
+	// Links to directories are not traversed, which keeps the scan free of
+	// symlink loops by construction rather than by loop detection.
+	if info.IsDir() {
+		return nil
+	}
+
+	fileInfo, err := s.createFileInfo(entry.Name(), entryPath, info)
+	if err != nil {
+		if s.opts.SkipUnreadableDirs {
+			return nil
+		}
+		return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
+	}
+	s.results = append(s.results, fileInfo)
 
 	return nil
 }
@@ -361,15 +420,14 @@ func (s *SecureDirectoryScanner) shouldIncludeFile(fileName string) bool {
 	return true
 }
 
-// createFileInfo creates a FileInfo struct from directory entry information.
-func (s *SecureDirectoryScanner) createFileInfo(entry os.DirEntry, path string) (FileInfo, error) {
-	info, err := entry.Info()
-	if err != nil {
-		return FileInfo{}, fmt.Errorf("failed to get file info: %w", err)
-	}
-
+// createFileInfo builds a FileInfo from an already-resolved stat result.
+//
+// Callers pass the info they obtained for the entry: entry.Info() for a plain
+// file, or Root.Stat for a symlink, so a symlinked file reports its target's
+// size and mode rather than the link's.
+func (s *SecureDirectoryScanner) createFileInfo(name, path string, info os.FileInfo) (FileInfo, error) {
 	// Optional file access validation for enhanced security
-	if s.opts.ValidateFileAccess && !entry.IsDir() {
+	if s.opts.ValidateFileAccess && !info.IsDir() {
 		// Construct full path for validation (root.Open gives us a relative path)
 		// We use the scan root + relative path to get the full path
 		fullPath := filepath.Join(s.scanRoot, path)
@@ -379,9 +437,9 @@ func (s *SecureDirectoryScanner) createFileInfo(entry os.DirEntry, path string) 
 	}
 
 	return FileInfo{
-		Name:    entry.Name(),
+		Name:    name,
 		Path:    path,
-		IsDir:   entry.IsDir(),
+		IsDir:   info.IsDir(),
 		Size:    info.Size(),
 		ModTime: info.ModTime(),
 		Mode:    info.Mode(),

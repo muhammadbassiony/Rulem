@@ -11,6 +11,7 @@ import (
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/helpers/repolist"
 	"rulem/internal/tui/styles"
+	"rulem/pkg/fileops"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -86,6 +87,43 @@ type SaveRulesModel struct {
 
 	// FileManager instance (for the selected repository)
 	fileManager *filemanager.FileManager
+
+	// storageDir is the open handle behind fileManager. It is opened when the
+	// user picks a repository and carried until they leave this screen, so the
+	// save at the end acts on the directory that was accepted at the start
+	// rather than on a path re-resolved later.
+	storageDir *fileops.Dir
+}
+
+// openStorage opens repoPath as this model's storage directory and builds the
+// FileManager on top of it, releasing any handle already held.
+func (m *SaveRulesModel) openStorage(repoPath string) error {
+	m.closeStorage()
+
+	dir, err := fileops.OpenExistingDir(repoPath)
+	if err != nil {
+		return err
+	}
+
+	fm, err := filemanager.NewFileManager(dir, m.logger)
+	if err != nil {
+		_ = dir.Close()
+		return err
+	}
+
+	m.storageDir = dir
+	m.fileManager = fm
+	return nil
+}
+
+// closeStorage releases the storage directory handle, if one is open. It is
+// safe to call when nothing is open.
+func (m *SaveRulesModel) closeStorage() {
+	if m.storageDir != nil {
+		_ = m.storageDir.Close()
+		m.storageDir = nil
+	}
+	m.fileManager = nil
 }
 
 // noUsableRepositoriesError builds the error shown when there is nowhere to
@@ -208,8 +246,6 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	repoItems := repolist.BuildRepositoryListItems(available)
 	repoListModel := repolist.BuildRepositoryList(repoItems, layout.ContentWidth(), layout.ContentHeight())
 
-	// For single repository, auto-select and create FileManager immediately
-	var fm *filemanager.FileManager
 	var selectedRepo *repolist.RepositoryListItem
 	if len(available) == 1 {
 		selectedRepo = &repolist.RepositoryListItem{
@@ -219,13 +255,9 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 			Path:      available[0].LocalPath,
 			Available: true,
 		}
-		fm, err = filemanager.NewFileManager(available[0].LocalPath, ctx.Logger)
-		if err != nil {
-			ctx.Logger.Error("Failed to initialize FileManager", "error", err)
-		}
 	}
 
-	return SaveRulesModel{
+	model := SaveRulesModel{
 		logger:           ctx.Logger,
 		windowWidth:      ctx.Width,
 		windowHeight:     ctx.Height,
@@ -243,8 +275,19 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 		destinationPath:  "",
 		err:              nil,
 		isOverwriteError: false,
-		fileManager:      fm,
+		fileManager:      nil,
 	}
+
+	// For a single repository, auto-select it and open its storage directory
+	// now: a repository that has gone missing should be reported here, at the
+	// point it is chosen, not several screens later during the save.
+	if selectedRepo != nil {
+		if err := model.openStorage(selectedRepo.Path); err != nil {
+			ctx.Logger.Error("Failed to initialize FileManager", "error", err)
+		}
+	}
+
+	return model
 }
 
 // Init starts asynchronous scanning for markdown files.
@@ -400,6 +443,7 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case StateFileSelection:
 			// Intercept 'q' and 'esc' to return to main menu instead of quitting
 			if message.String() == "q" || message.String() == "esc" {
+				m.closeStorage()
 				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			}
 
@@ -436,6 +480,7 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 			case "esc":
 				// Return to main menu instead of reverting to selection
+				m.closeStorage()
 				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			default:
 				m.nameInput, cmd = m.nameInput.Update(message)
@@ -460,10 +505,9 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedRepoItem = selected
 				m.logger.Debug("Repository selected for save", "repo_id", selected.ID, "repo_name", selected.Name)
 
-				// Initialize FileManager for the selected repository
-				var err error
-				m.fileManager, err = filemanager.NewFileManager(selected.Path, m.logger)
-				if err != nil {
+				// Open the selected repository's storage directory and keep the
+				// handle for the rest of this flow.
+				if err := m.openStorage(selected.Path); err != nil {
 					m.logger.Error("Failed to initialize FileManager for selected repo", "error", err)
 					m.err = fmt.Errorf("failed to access repository '%s': %w", selected.Name, err)
 					m.state = StateError
@@ -484,6 +528,7 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			case "q":
 				// Return to main menu
+				m.closeStorage()
 				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			default:
 				// Delegate to repository list for navigation/filtering
@@ -511,6 +556,7 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			case "esc":
 				// Return to main menu
+				m.closeStorage()
 				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			}
 
@@ -533,12 +579,14 @@ func (m SaveRulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 			case "esc":
 				// Return to main menu
+				m.closeStorage()
 				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			}
 
 		case StateSuccess:
 			switch message.String() {
 			case "m":
+				m.closeStorage()
 				return m, func() tea.Msg { return helpers.NavigateToMainMenuMsg{} }
 			case "a":
 				// Reset only selection-related state; keep loaded file list to avoid re-scan
@@ -726,39 +774,26 @@ func (m *SaveRulesModel) optionalNewNamePtr() *string {
 // Uses the initialized FileManager instance.
 func (m SaveRulesModel) scanForFilesCmd() tea.Cmd {
 	m.logger.Debug("File scan started")
-	return func() tea.Msg {
-		files, err := m.fileManager.ScanCurrDirectory()
-		if err != nil {
-			return FileScanErrorMsg{Err: err}
-		}
-		return FileScanCompleteMsg{Files: files}
-	}
+	return scanCurrentDirectoryCmd()
 }
 
-// scanForFilesCmdNoManager scans for markdown files without needing a FileManager.
-// Used for multi-repo case where we scan CWD before repository selection.
-// Creates a temporary FileManager using the first prepared repo's path just for scanning.
+// scanForFilesCmdNoManager scans for markdown files before a repository has
+// been selected (the multi-repository case).
+//
+// Scanning the working directory has nothing to do with the storage
+// directory, so there is no longer a FileManager to stand up first.
 func (m SaveRulesModel) scanForFilesCmdNoManager() tea.Cmd {
 	m.logger.Debug("File scan started (no manager mode)")
+	return scanCurrentDirectoryCmd()
+}
+
+// scanCurrentDirectoryCmd walks the working directory for markdown files.
+func scanCurrentDirectoryCmd() tea.Cmd {
 	return func() tea.Msg {
-		// Create a temporary FileManager just for scanning current directory
-		// We use the first repo's path since we just need a valid FileManager instance
-		// to call ScanCurrDirectory (which doesn't use the storage path)
-		if len(m.preparedRepos) == 0 {
-			return FileScanErrorMsg{Err: fmt.Errorf("no repositories available")}
-		}
-
-		tempFm, err := filemanager.NewFileManager(m.preparedRepos[0].LocalPath, m.logger)
-		if err != nil {
-			return FileScanErrorMsg{Err: fmt.Errorf("failed to create file scanner: %w", err)}
-		}
-
-		files, err := tempFm.ScanCurrDirectory()
+		files, err := filemanager.ScanCurrDirectory()
 		if err != nil {
 			return FileScanErrorMsg{Err: err}
 		}
-
-		// Files already have absolute paths from ScanCurrDirectory
 		return FileScanCompleteMsg{Files: files}
 	}
 }

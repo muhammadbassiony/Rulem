@@ -4,10 +4,30 @@ import (
 	"os"
 	"path/filepath"
 	"rulem/internal/logging"
+	"rulem/pkg/fileops"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+// newFileManagerAt opens storageDir as a confined directory handle and wraps it
+// in a FileManager, mirroring what production callers do.
+//
+// It keeps the (value, error) shape of the constructor it replaces so that
+// tests asserting on a bad storage directory still exercise the same failure -
+// which now happens when the directory is opened rather than when the
+// FileManager is built. The handle is closed when the test ends.
+func newFileManagerAt(t *testing.T, storageDir string, logger *logging.AppLogger) (*FileManager, error) {
+	t.Helper()
+
+	dir, err := fileops.OpenExistingDir(storageDir)
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() { _ = dir.Close() })
+
+	return NewFileManager(dir, logger)
+}
 
 // File and Directory Operations
 
@@ -157,4 +177,17 @@ func createTestSymlink(t *testing.T, target, link string) {
 		}
 		t.Fatalf("failed to create symlink: %v", err)
 	}
+}
+
+// isSymlinkPath reports whether path is itself a symbolic link.
+//
+// Tests own this rather than borrowing fileops.IsSymlink: that function is one
+// of the validators the os.Root migration retires, and a test assertion about
+// a path the test just created needs nothing more than an Lstat.
+func isSymlinkPath(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	return info.Mode()&os.ModeSymlink != 0, nil
 }

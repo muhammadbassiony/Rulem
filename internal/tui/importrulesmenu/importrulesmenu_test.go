@@ -12,6 +12,7 @@ import (
 	"rulem/internal/repository"
 	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
+	"rulem/pkg/fileops"
 	"strings"
 	"testing"
 
@@ -106,8 +107,9 @@ func createTestFiles(t *testing.T, storageDir string) []filemanager.FileItem {
 		}
 
 		fileItems = append(fileItems, filemanager.FileItem{
-			Name: file.name,
-			Path: fullPath,
+			Name:    file.name,
+			RelPath: file.name,
+			Path:    fullPath,
 		})
 	}
 
@@ -1514,8 +1516,14 @@ func TestImportRulesModel_AbsolutePaths(t *testing.T) {
 	}
 	localPath := prepared[0].LocalPath
 
-	// Create FileManager directly to test scanning
-	fm, err := filemanager.NewFileManager(localPath, ctx.Logger)
+	// Open the repository and create a FileManager the way production does
+	dir, err := fileops.OpenExistingDir(localPath)
+	if err != nil {
+		t.Fatalf("Failed to open repository directory: %v", err)
+	}
+	defer func() { _ = dir.Close() }()
+
+	fm, err := filemanager.NewFileManager(dir, ctx.Logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -1610,8 +1618,9 @@ func TestImportRulesModel_BrokenSymlinkOverwrite(t *testing.T) {
 
 	// Set up the model state as if user selected file, editor, and import mode
 	model.selectedFile = filemanager.FileItem{
-		Name: "test-rule.md",
-		Path: testFile, // Absolute path (as it would be after ConvertToAbsolutePaths)
+		Name:    "test-rule.md",
+		RelPath: "test-rule.md", // how the file is addressed inside its repository
+		Path:    testFile,       // display only
 	}
 	// Find Gemini CLI editor which generates GEMINI.md
 	var geminiEditor editors.EditorRuleConfig

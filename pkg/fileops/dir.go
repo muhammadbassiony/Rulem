@@ -94,6 +94,77 @@ func OpenDir(userPath string) (*Dir, error) {
 	return &Dir{root: root}, nil
 }
 
+// OpenExistingDir is OpenDir without the creation step: the directory must
+// already exist.
+//
+// The distinction is a product one, not a safety one. Choosing a storage
+// directory is the moment an application is allowed to bring one into being -
+// that is OpenDir. Using a directory that was configured earlier is not: if a
+// configured directory has been deleted or moved, the user must be told, not
+// handed a silently recreated empty one. That is this constructor.
+//
+// It applies the same storage policy as OpenDir (expansion, no traversal, not
+// a reserved system directory) and the same confinement, and it deliberately
+// does NOT run the writability probe: a read-only directory can still be
+// listed and read from, and an attempt to write to one fails at the write.
+//
+// The caller owns the returned handle and must Close it.
+func OpenExistingDir(userPath string) (*Dir, error) {
+	expanded := ExpandPath(strings.TrimSpace(userPath))
+
+	if err := ValidateStoragePath(userPath); err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(expanded)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("directory does not exist: %s", expanded)
+		}
+		return nil, fmt.Errorf("cannot access directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", expanded)
+	}
+
+	root, err := os.OpenRoot(expanded)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open directory: %w", err)
+	}
+
+	return &Dir{root: root}, nil
+}
+
+// OpenWorkingDir returns a confined handle on the process's current working
+// directory.
+//
+// It takes no path on purpose: the only directory it can ever open is the one
+// the user's shell already chose, so there is nothing here to talk into
+// opening somewhere else.
+//
+// Unlike OpenDir it applies no storage policy. The reserved-directory rules
+// answer "where may this application keep its own data?", and the working
+// directory is not that: nothing is stored there, files the user explicitly
+// asked for are copied into the directory they explicitly ran the command
+// from. Refusing to work in an unusual directory would break that flow without
+// protecting anything. Confinement still applies in full - nothing outside the
+// working directory can be reached through the returned handle.
+//
+// The caller owns the returned handle and must Close it.
+func OpenWorkingDir() (*Dir, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine current working directory: %w", err)
+	}
+
+	root, err := os.OpenRoot(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open current working directory: %w", err)
+	}
+
+	return &Dir{root: root}, nil
+}
+
 // Path returns the directory this handle is confined to.
 //
 // FOR DISPLAY ONLY. The returned string is an ordinary path with no boundary

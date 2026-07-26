@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
+	"rulem/pkg/fileops"
 	"strings"
 	"testing"
 	"time"
@@ -93,15 +94,9 @@ func TestScanCurrDirectory_Integration(t *testing.T) {
 		t.Fatalf("Failed to get actual CWD: %v", err)
 	}
 
-	// Create FileManager for scanning
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
 
 	// Scan directory
-	files, err := fm.ScanCurrDirectory()
+	files, err := ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -167,14 +162,8 @@ func TestScanCurrDirectory_RealisticProject(t *testing.T) {
 		t.Fatalf("Failed to get actual CWD: %v", err)
 	}
 
-	// Create FileManager for scanning
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
 
-	files, err := fm.ScanCurrDirectory()
+	files, err := ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -225,15 +214,9 @@ func TestScanCurrDirectory_Performance(t *testing.T) {
 	cleanup := changeToDir(t, tempDir)
 	defer cleanup()
 
-	// Create FileManager for scanning
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
 
 	start := time.Now()
-	files, err := fm.ScanCurrDirectory()
+	files, err := ScanCurrDirectory()
 	duration := time.Since(start)
 
 	if err != nil {
@@ -280,15 +263,9 @@ func TestScanCurrDirectory_ErrorHandling(t *testing.T) {
 		t.Fatalf("Failed to get actual CWD: %v", err)
 	}
 
-	// Create FileManager for scanning
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
 
 	// Should complete successfully and skip unreadable directory
-	files, err := fm.ScanCurrDirectory()
+	files, err := ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -341,14 +318,8 @@ func TestScanCurrDirectory_SymlinkHandling(t *testing.T) {
 		t.Fatalf("Failed to get actual CWD: %v", err)
 	}
 
-	// Create FileManager for scanning
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(tempDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
 
-	files, err := fm.ScanCurrDirectory()
+	files, err := ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -392,7 +363,7 @@ func TestScanRepository_BasicDiscovery(t *testing.T) {
 	defer os.RemoveAll(storageDir)
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -439,7 +410,7 @@ func TestScanRepository_RecursiveDiscovery(t *testing.T) {
 	defer os.RemoveAll(storageDir)
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -487,7 +458,7 @@ func TestScanRepository_SkipCommonDirectories(t *testing.T) {
 	defer os.RemoveAll(storageDir)
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -532,7 +503,7 @@ func TestScanRepository_HiddenFilesAndMaxDepth(t *testing.T) {
 	defer os.RemoveAll(storageDir)
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -591,7 +562,7 @@ func TestScanRepository_SymlinkHandling(t *testing.T) {
 	createTestSymlink(t, filepath.Join("real", "file.md"), filepath.Join(storageDir, "rel_link.md"))
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -623,7 +594,7 @@ func TestScanRepository_UnreadableDirectories(t *testing.T) {
 	defer os.Chmod(unreadableDir, 0755) // Restore for cleanup
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -1007,7 +978,7 @@ func TestScanRepository_PreservesMetadata(t *testing.T) {
 
 	createDirWithFiles(t, tempDir, []string{"test.md"})
 
-	fm, err := NewFileManager(tempDir, logger)
+	fm, err := newFileManagerAt(t, tempDir, logger)
 	if err != nil {
 		t.Fatalf("failed to create FileManager: %v", err)
 	}
@@ -1056,12 +1027,12 @@ func TestScanRepository_NonExistentStorageDir(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	// This should fail during NewFileManager creation due to ValidateStoragePath
-	_, err := NewFileManager(nonExistentDir, logger)
+	_, err := newFileManagerAt(t, nonExistentDir, logger)
 	if err == nil {
 		t.Fatal("Expected NewFileManager to fail with non-existent directory")
 	}
 
-	if !strings.Contains(err.Error(), "storage directory does not exist") {
+	if !strings.Contains(err.Error(), "directory does not exist") {
 		t.Errorf("Expected error about non-existent directory, got: %v", err)
 	}
 }
@@ -1074,7 +1045,7 @@ func TestScanRepository_StorageDirIsFile(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	// This might fail during NewFileManager creation or later during directory check
-	fm, err := NewFileManager(storageFile, logger)
+	fm, err := newFileManagerAt(t, storageFile, logger)
 	if err != nil {
 		// If NewFileManager fails, that's expected and acceptable
 		if strings.Contains(err.Error(), "not a directory") ||
@@ -1113,7 +1084,7 @@ func TestScanRepository_SymlinkToSystemDirectory(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
 	// This should fail during NewFileManager creation due to ValidateStoragePath
-	_, err := NewFileManager(symlinkPath, logger)
+	_, err := newFileManagerAt(t, symlinkPath, logger)
 	if err == nil {
 		t.Fatal("Expected NewFileManager to fail with symlink to system directory")
 	}
@@ -1149,7 +1120,7 @@ func TestScanRepository_Performance(t *testing.T) {
 	defer os.RemoveAll(storageDir)
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -1189,24 +1160,72 @@ func TestScanRepository_NilFileManager(t *testing.T) {
 	}
 }
 
-func TestScanRepository_EmptyStorageDir(t *testing.T) {
-	// Test error handling with empty storage directory configuration
+// TestScanRepository_UnusableStorage covers the states that replace the old
+// "empty storageDir" case. A FileManager can no longer hold a blank path -
+// it holds a directory handle - so the two ways it can be unusable are that
+// there is no handle at all, or that the handle has been closed.
+func TestScanRepository_UnusableStorage(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
 
-	// Create FileManager with empty storage directory by directly setting the field
-	// Note: This shouldn't normally happen as NewFileManager validates, but test the method's robustness
-	fm := &FileManager{
-		logger:     logger,
-		storageDir: "", // Empty storage dir
+	tests := []struct {
+		name        string
+		build       func(t *testing.T) *FileManager
+		wantErrText string
+	}{
+		{
+			name: "nil directory handle is rejected at construction",
+			build: func(t *testing.T) *FileManager {
+				t.Helper()
+				fm, err := NewFileManager(nil, logger)
+				if err == nil {
+					t.Fatal("Expected error when constructing with a nil directory handle")
+				}
+				if !strings.Contains(err.Error(), "storage directory handle is required") {
+					t.Errorf("Expected 'storage directory handle is required' error, got: %v", err)
+				}
+				if fm != nil {
+					t.Error("Expected nil FileManager alongside the error")
+				}
+				return nil
+			},
+		},
+		{
+			name: "closed directory handle",
+			build: func(t *testing.T) *FileManager {
+				t.Helper()
+				storageDir := createTempTestDir(t, "closed-storage-*")
+				dir, err := fileops.OpenExistingDir(storageDir)
+				if err != nil {
+					t.Fatalf("OpenExistingDir failed: %v", err)
+				}
+				fm, err := NewFileManager(dir, logger)
+				if err != nil {
+					t.Fatalf("NewFileManager failed: %v", err)
+				}
+				if err := dir.Close(); err != nil {
+					t.Fatalf("Close failed: %v", err)
+				}
+				return fm
+			},
+			wantErrText: "directory handle is closed",
+		},
 	}
 
-	_, err := fm.ScanRepository()
-	if err == nil {
-		t.Fatal("Expected error with empty storage directory")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fm := tt.build(t)
+			if fm == nil {
+				return // the failure was asserted during construction
+			}
 
-	if !strings.Contains(err.Error(), "storage directory is not configured") {
-		t.Errorf("Expected 'storage directory is not configured' error, got: %v", err)
+			_, err := fm.ScanRepository()
+			if err == nil {
+				t.Fatal("Expected error from ScanRepository")
+			}
+			if !strings.Contains(err.Error(), tt.wantErrText) {
+				t.Errorf("Expected error containing %q, got: %v", tt.wantErrText, err)
+			}
+		})
 	}
 }
 
@@ -1234,7 +1253,7 @@ func TestScanRepository_ValidStorageSymlink(t *testing.T) {
 	createTestSymlink(t, realStorageDir, symlinkStorageDir)
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(symlinkStorageDir, logger)
+	fm, err := newFileManagerAt(t, symlinkStorageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed with valid symlink: %v", err)
 	}
@@ -1275,7 +1294,7 @@ func TestScanRepository_ReturnsAbsolutePaths(t *testing.T) {
 	}
 
 	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("NewFileManager failed: %v", err)
 	}
@@ -1347,16 +1366,8 @@ func TestScanCurrDirectory_ReturnsAbsolutePaths(t *testing.T) {
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
-	// Create FileManager (storage dir doesn't matter for this test)
-	storageDir := createTempTestDir(t, "storage-*")
-	logger, _ := logging.NewTestLogger()
-	fm, err := NewFileManager(storageDir, logger)
-	if err != nil {
-		t.Fatalf("NewFileManager failed: %v", err)
-	}
-
 	// Get files - should have absolute paths directly
-	files, err := fm.ScanCurrDirectory()
+	files, err := ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}

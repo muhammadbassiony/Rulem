@@ -3,7 +3,6 @@ package filemanager
 import (
 	"os"
 	"path/filepath"
-	"rulem/pkg/fileops"
 	"strings"
 	"testing"
 	"time"
@@ -30,20 +29,20 @@ func TestNewFileManager(t *testing.T) {
 		storageDir := createTempStorage(t)
 		defer os.RemoveAll(storageDir)
 
-		fm, err := NewFileManager(storageDir, logger)
+		fm, err := newFileManagerAt(t, storageDir, logger)
 		if err != nil {
 			t.Fatalf("NewFileManager failed with valid directory: %v", err)
 		}
 
-		if fm.storageDir != storageDir {
-			t.Errorf("Expected storageDir %s, got %s", storageDir, fm.storageDir)
+		if fm.GetStorageDir() != storageDir {
+			t.Errorf("Expected storageDir %s, got %s", storageDir, fm.GetStorageDir())
 		}
 	})
 
 	t.Run("non-existent storage directory", func(t *testing.T) {
 		nonExistentDir := "/definitely/does/not/exist"
 
-		_, err := NewFileManager(nonExistentDir, logger)
+		_, err := newFileManagerAt(t, nonExistentDir, logger)
 		if err == nil {
 			t.Error("Expected error for non-existent directory")
 		}
@@ -57,7 +56,7 @@ func TestNewFileManager(t *testing.T) {
 		// Test with path traversal
 		invalidDir := "../../../etc"
 
-		_, err := NewFileManager(invalidDir, logger)
+		_, err := newFileManagerAt(t, invalidDir, logger)
 		if err == nil {
 			t.Error("Expected error for invalid directory path")
 		}
@@ -71,7 +70,7 @@ func TestHappyPath(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -137,7 +136,7 @@ func TestCopyFileToStorageSubdirectories(t *testing.T) {
 		storageDir := createTempStorage(t)
 		defer os.RemoveAll(storageDir)
 
-		fm, err := NewFileManager(storageDir, logger)
+		fm, err := newFileManagerAt(t, storageDir, logger)
 		if err != nil {
 			t.Fatalf("Failed to create FileManager: %v", err)
 		}
@@ -181,7 +180,7 @@ func TestCopyFileToStorageSubdirectories(t *testing.T) {
 		storageDir := createTempStorage(t)
 		defer os.RemoveAll(storageDir)
 
-		fm, err := NewFileManager(storageDir, logger)
+		fm, err := newFileManagerAt(t, storageDir, logger)
 		if err != nil {
 			t.Fatalf("Failed to create FileManager: %v", err)
 		}
@@ -208,7 +207,7 @@ func TestCopyFileToStorageSubdirectories(t *testing.T) {
 		storageDir := createTempStorage(t)
 		defer os.RemoveAll(storageDir)
 
-		fm, err := NewFileManager(storageDir, logger)
+		fm, err := newFileManagerAt(t, storageDir, logger)
 		if err != nil {
 			t.Fatalf("Failed to create FileManager: %v", err)
 		}
@@ -232,7 +231,7 @@ func TestCopyFileToStorageSubdirectories(t *testing.T) {
 		storageDir := createTempStorage(t)
 		defer os.RemoveAll(storageDir)
 
-		fm, err := NewFileManager(storageDir, logger)
+		fm, err := newFileManagerAt(t, storageDir, logger)
 		if err != nil {
 			t.Fatalf("Failed to create FileManager: %v", err)
 		}
@@ -259,7 +258,7 @@ func TestCopyFileToStorageSubdirectories(t *testing.T) {
 		storageDir := createTempStorage(t)
 		defer os.RemoveAll(storageDir)
 
-		fm, err := NewFileManager(storageDir, logger)
+		fm, err := newFileManagerAt(t, storageDir, logger)
 		if err != nil {
 			t.Fatalf("Failed to create FileManager: %v", err)
 		}
@@ -299,7 +298,7 @@ func TestSourceValidation(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -314,7 +313,9 @@ func TestSourceValidation(t *testing.T) {
 			setupFunc: func(t *testing.T) string {
 				return "/definitely/does/not/exist.md"
 			},
-			expectError: "does not exist",
+			// Opening the source IS the check now, so the failure surfaces as
+			// the open failing rather than as a preceding stat-based verdict.
+			expectError: "cannot open source file",
 		},
 		{
 			name: "source is directory",
@@ -341,7 +342,7 @@ func TestSourceValidation(t *testing.T) {
 				}) // Restore for cleanup
 				return srcPath
 			},
-			expectError: "failed to open source file",
+			expectError: "cannot open source file",
 		},
 	}
 
@@ -358,7 +359,7 @@ func TestSourceValidation(t *testing.T) {
 			if tt.name == "source is directory" {
 				expectedErrors = []string{"source is a directory", "path is a directory, not a file"}
 			} else if tt.name == "unreadable source file" {
-				expectedErrors = []string{"failed to open source file", "file is not readable"}
+				expectedErrors = []string{"cannot open source file", "permission denied"}
 			}
 
 			foundExpected := false
@@ -382,7 +383,7 @@ func TestFilenameValidation(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -469,7 +470,7 @@ func TestOverwriteBehavior(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -550,7 +551,7 @@ func TestSecurity(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -584,15 +585,28 @@ func TestSecurity(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "symlink to restricted file",
+			// BEHAVIOUR CHANGE (fileops os.Root migration): a symlinked source
+			// is now followed.
+			//
+			// The source of a copy-into-storage is a file the user explicitly
+			// picked, outside every directory rulem holds a handle on, so
+			// there is no boundary for it to escape from. The old allow-list
+			// (target must resolve inside the storage directory or the CWD)
+			// only restricted where the user was allowed to point at, not what
+			// rulem could reach: rulem runs with the user's own privileges and
+			// reads exactly the file that was selected. The destination side is
+			// where confinement matters, and that is now structural.
+			name: "symlinked source is followed",
 			setupFunc: func(t *testing.T) (string, *string) {
-				// Create a symlink to /etc/passwd (if it exists)
-				linkPath := filepath.Join(tempDir, "malicious_link")
-				createTestSymlink(t, "/etc/passwd", linkPath)
+				outside := createTempStorage(t)
+				t.Cleanup(func() { _ = os.RemoveAll(outside) })
+				target := createTestFile(t, outside, "target.md", "# linked content")
+
+				linkPath := filepath.Join(tempDir, "source_link.md")
+				createTestSymlink(t, target, linkPath)
 				return linkPath, nil
 			},
-			expectError: true,
-			errorText:   "symlink security check failed",
+			expectError: false,
 		},
 	}
 
@@ -624,7 +638,7 @@ func TestAtomicCopy(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -679,7 +693,7 @@ func TestPerformance(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -731,14 +745,17 @@ func TestCopyFileFromStorage(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
 	// Create test content in storage
 	testContent := "# Test content from storage\nThis is test content."
-	storageFilePath := createTestFile(t, storageDir, "storage-test.md", testContent)
+	createTestFile(t, storageDir, "storage-test.md", testContent)
+	// Files in storage are addressed by their name relative to the storage
+	// root; the absolute path is only ever for display.
+	storageFilePath := "storage-test.md"
 
 	// Create a temporary working directory for CWD operations
 	originalCwd, err := os.Getwd()
@@ -834,13 +851,14 @@ func TestCopyFileFromStorageValidation(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
-	// Create test file in storage
-	validStorageFile := createTestFile(t, storageDir, "valid-file.md", "content")
+	// Create test file in storage, addressed by its storage-relative name
+	createTestFile(t, storageDir, "valid-file.md", "content")
+	validStorageFile := "valid-file.md"
 
 	// Change to temp CWD
 	originalCwd, err := os.Getwd()
@@ -867,7 +885,7 @@ func TestCopyFileFromStorageValidation(t *testing.T) {
 	}{
 		{
 			name:        "non-existent storage file",
-			storagePath: filepath.Join(storageDir, "does-not-exist.md"),
+			storagePath: "does-not-exist.md",
 			destPath:    "dest.md",
 			expectError: true,
 			errorText:   "file does not exist",
@@ -877,28 +895,38 @@ func TestCopyFileFromStorageValidation(t *testing.T) {
 			storagePath: "",
 			destPath:    "dest.md",
 			expectError: true,
-			errorText:   "path is a directory, not a file",
+			errorText:   "path cannot be empty",
 		},
 		{
-			name:        "path outside storage directory",
+			// An absolute path is no longer a way to name a file in storage:
+			// names are relative to the handle, so this is rejected as a
+			// malformed name rather than by a containment check on a string.
+			name:        "absolute path is not a storage-relative name",
 			storagePath: "/etc/passwd",
 			destPath:    "dest.md",
 			expectError: true,
-			errorText:   "file is not within base directory",
+			errorText:   "path must be relative to the directory",
+		},
+		{
+			name:        "traversal out of storage",
+			storagePath: "../escape.md",
+			destPath:    "dest.md",
+			expectError: true,
+			errorText:   "path traversal not allowed",
 		},
 		{
 			name:        "empty destination path",
 			storagePath: validStorageFile,
 			destPath:    "",
 			expectError: true,
-			errorText:   "destination path cannot be empty",
+			errorText:   "path cannot be empty",
 		},
 		{
 			name:        "absolute destination path",
 			storagePath: validStorageFile,
 			destPath:    "/tmp/absolute.md",
 			expectError: true,
-			errorText:   "must be relative to current working directory",
+			errorText:   "path must be relative to the directory",
 		},
 		{
 			name:        "path traversal in destination",
@@ -941,14 +969,15 @@ func TestCreateSymlinkFromStorage(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
 	// Create test content in storage
 	testContent := "# Symlink test content\nThis content should be accessible via symlink."
-	storageFilePath := createTestFile(t, storageDir, "symlink-source.md", testContent)
+	storageAbsPath := createTestFile(t, storageDir, "symlink-source.md", testContent)
+	storageFilePath := "symlink-source.md"
 
 	// Create a temporary working directory for CWD operations
 	originalCwd, err := os.Getwd()
@@ -989,7 +1018,7 @@ func TestCreateSymlinkFromStorage(t *testing.T) {
 		}
 
 		// Verify it's actually a symlink
-		isLink, err := fileops.IsSymlink(linkPath)
+		isLink, err := isSymlinkPath(linkPath)
 		if err != nil {
 			t.Fatalf("Failed to check if path is symlink: %v", err)
 		}
@@ -1040,7 +1069,7 @@ func TestCreateSymlinkFromStorage(t *testing.T) {
 			t.Fatalf("Failed to resolve symlink: %v", err)
 		}
 
-		expectedTarget, _ := filepath.EvalSymlinks(storageFilePath)
+		expectedTarget, _ := filepath.EvalSymlinks(storageAbsPath)
 		if resolvedTarget != expectedTarget {
 			t.Errorf("Symlink doesn't resolve to storage file. Expected %s, got %s", expectedTarget, resolvedTarget)
 		}
@@ -1070,7 +1099,7 @@ func TestCreateSymlinkFromStorage(t *testing.T) {
 		}
 
 		// Verify it's now a symlink
-		isLink, err := fileops.IsSymlink(linkPath)
+		isLink, err := isSymlinkPath(linkPath)
 		if err != nil {
 			t.Fatalf("Failed to check if path is symlink: %v", err)
 		}
@@ -1099,7 +1128,7 @@ func TestCreateSymlinkFromStorage(t *testing.T) {
 		}
 
 		// Verify storage file was modified
-		storageContent := readFileContent(t, storageFilePath)
+		storageContent := readFileContent(t, storageAbsPath)
 		if storageContent != newContent {
 			t.Errorf("Storage file not updated. Expected %q, got %q", newContent, storageContent)
 		}
@@ -1117,13 +1146,14 @@ func TestCreateSymlinkFromStorageValidation(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
 	// Create test file in storage
-	validStorageFile := createTestFile(t, storageDir, "valid-source.md", "content")
+	createTestFile(t, storageDir, "valid-source.md", "content")
+	validStorageFile := "valid-source.md"
 
 	// Change to temp CWD
 	originalCwd, err := os.Getwd()
@@ -1146,7 +1176,7 @@ func TestCreateSymlinkFromStorageValidation(t *testing.T) {
 	}{
 		{
 			name:        "non-existent storage file",
-			storagePath: filepath.Join(storageDir, "missing-file.md"),
+			storagePath: "missing-file.md",
 			destPath:    "link.md",
 			expectError: true,
 			errorText:   "file does not exist",
@@ -1156,28 +1186,37 @@ func TestCreateSymlinkFromStorageValidation(t *testing.T) {
 			storagePath: "",
 			destPath:    "link.md",
 			expectError: true,
-			errorText:   "path is a directory, not a file",
+			errorText:   "path cannot be empty",
 		},
 		{
-			name:        "path outside storage directory",
+			// Names inside storage are relative to the handle; an absolute
+			// path is a malformed name, not a containment question.
+			name:        "absolute path is not a storage-relative name",
 			storagePath: "/etc/passwd",
 			destPath:    "link.md",
 			expectError: true,
-			errorText:   "file is not within base directory",
+			errorText:   "path must be relative to the directory",
+		},
+		{
+			name:        "traversal out of storage",
+			storagePath: "../escape.md",
+			destPath:    "link.md",
+			expectError: true,
+			errorText:   "path traversal not allowed",
 		},
 		{
 			name:        "empty destination path",
 			storagePath: validStorageFile,
 			destPath:    "",
 			expectError: true,
-			errorText:   "destination path cannot be empty",
+			errorText:   "path cannot be empty",
 		},
 		{
 			name:        "absolute destination path",
 			storagePath: validStorageFile,
 			destPath:    "/tmp/absolute-link.md",
 			expectError: true,
-			errorText:   "must be relative to current working directory",
+			errorText:   "path must be relative to the directory",
 		},
 		{
 			name:        "path traversal in destination",
@@ -1219,14 +1258,15 @@ func TestCopyFileFromStorage_BrokenSymlinkDetection(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
 	// Create test content in storage
 	testContent := "# Test content for broken symlink copy test"
-	storageFilePath := createTestFile(t, storageDir, "copy-source.md", testContent)
+	createTestFile(t, storageDir, "copy-source.md", testContent)
+	storageFilePath := "copy-source.md"
 
 	// Create a temporary working directory
 	originalCwd, err := os.Getwd()
@@ -1287,7 +1327,7 @@ func TestCopyFileFromStorage_BrokenSymlinkDetection(t *testing.T) {
 		}
 
 		// Verify it's no longer a symlink
-		isLink, err := fileops.IsSymlink(resultPath)
+		isLink, err := isSymlinkPath(resultPath)
 		if err != nil {
 			t.Fatalf("Failed to check if path is symlink: %v", err)
 		}
@@ -1303,14 +1343,15 @@ func TestCreateSymlinkFromStorage_BrokenSymlinkDetection(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
 
 	// Create test content in storage
 	testContent := "# Test content for broken symlink test"
-	storageFilePath := createTestFile(t, storageDir, "test-source.md", testContent)
+	createTestFile(t, storageDir, "test-source.md", testContent)
+	storageFilePath := "test-source.md"
 
 	// Create a temporary working directory
 	originalCwd, err := os.Getwd()
@@ -1371,7 +1412,7 @@ func TestCreateSymlinkFromStorage_BrokenSymlinkDetection(t *testing.T) {
 		}
 
 		// Verify it's actually a symlink
-		isLink, err := fileops.IsSymlink(resultPath)
+		isLink, err := isSymlinkPath(resultPath)
 		if err != nil {
 			t.Fatalf("Failed to check if path is symlink: %v", err)
 		}
@@ -1388,7 +1429,7 @@ func TestFileManagerIntegration(t *testing.T) {
 	storageDir := createTempStorage(t)
 	defer os.RemoveAll(storageDir)
 
-	fm, err := NewFileManager(storageDir, logger)
+	fm, err := newFileManagerAt(t, storageDir, logger)
 	if err != nil {
 		t.Fatalf("Failed to create FileManager: %v", err)
 	}
@@ -1413,10 +1454,13 @@ func TestFileManagerIntegration(t *testing.T) {
 
 		// Step 1: Create source file and copy to storage
 		srcPath := createTestFile(t, tempSourceDir, "workflow-test.md", originalContent)
-		storagePath, err := fm.CopyFileToStorage(srcPath, nil, false)
+		storageAbsPath, err := fm.CopyFileToStorage(srcPath, nil, false)
 		if err != nil {
 			t.Fatalf("CopyFileToStorage failed: %v", err)
 		}
+		// CopyFileToStorage returns an absolute path for display; the file is
+		// addressed inside storage by its relative name.
+		storagePath := "workflow-test.md"
 
 		// Step 2: Copy from storage to CWD
 		copyPath, err := fm.CopyFileFromStorage(storagePath, "copied-from-storage.md", false)
@@ -1449,7 +1493,7 @@ func TestFileManagerIntegration(t *testing.T) {
 		}
 
 		// Verify storage file is updated
-		storageContent := readFileContent(t, storagePath)
+		storageContent := readFileContent(t, storageAbsPath)
 		if storageContent != modifiedContent {
 			t.Errorf("Storage not updated through symlink. Expected %q, got %q", modifiedContent, storageContent)
 		}
@@ -1478,7 +1522,7 @@ func TestFileManagerIntegration(t *testing.T) {
 		}
 
 		// Copy from storage to CWD
-		storagePath := filepath.Join(fm.storageDir, fileName)
+		storagePath := fileName
 		cwdPath, err := fm.CopyFileFromStorage(storagePath, "cwd-file.md", false)
 		if err != nil {
 			t.Fatalf("Copy from storage failed: %v", err)

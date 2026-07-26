@@ -46,7 +46,9 @@ import (
 //	if err != nil {
 //	    return fmt.Errorf("repository preparation failed: %w", err)
 //	}
-//	fm := filemanager.NewFileManager(localPath, logger)
+//	dir, err := fileops.OpenExistingDir(localPath)
+//	defer dir.Close()
+//	fm, err := filemanager.NewFileManager(dir, logger)
 //
 // Error handling:
 //   - Returns detailed errors with context about what failed

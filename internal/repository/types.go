@@ -40,7 +40,9 @@ import (
 //	}
 //
 //	// Use the local path with FileManager
-//	fm := filemanager.NewFileManager(localPath, logger)
+//	dir, err := fileops.OpenExistingDir(localPath)
+//	defer dir.Close()
+//	fm, err := filemanager.NewFileManager(dir, logger)
 //
 // Security considerations:
 //   - All paths are validated through pkg/fileops security functions

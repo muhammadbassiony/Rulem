@@ -150,7 +150,7 @@ func createTestModelWithFiles(t *testing.T) (SaveRulesModel, []filemanager.FileI
 	model := NewSaveRulesModel(ctx)
 
 	// Get the files from scan
-	files, err := model.fileManager.ScanCurrDirectory()
+	files, err := filemanager.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("Failed to scan directory: %v", err)
 	}
@@ -1418,18 +1418,8 @@ func TestSaveRulesModel_AbsolutePaths(t *testing.T) {
 		t.Fatalf("Failed to change to work directory: %v", err)
 	}
 
-	// Create storage dir separate from work dir
-	storageDir := createTestStorageDir(t)
-	logger := createTestLogger()
-
-	// Create FileManager directly to test scanning
-	fm, err := filemanager.NewFileManager(storageDir, logger)
-	if err != nil {
-		t.Fatalf("Failed to create FileManager: %v", err)
-	}
-
 	// Get files - should already have absolute paths
-	files, err := fm.ScanCurrDirectory()
+	files, err := filemanager.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("ScanCurrDirectory failed: %v", err)
 	}
@@ -1488,7 +1478,7 @@ func TestSaveRulesModel_BrokenSymlinkHandling(t *testing.T) {
 	model := NewSaveRulesModel(ctx)
 
 	// Get files and start workflow
-	files, err := model.fileManager.ScanCurrDirectory()
+	files, err := filemanager.ScanCurrDirectory()
 	if err != nil {
 		t.Fatalf("Failed to scan directory: %v", err)
 	}
@@ -1610,7 +1600,7 @@ func BenchmarkSaveRulesModel_Update(b *testing.B) {
 	ctx := helpers.NewUIContext(80, 24, cfg, logger)
 	model := NewSaveRulesModel(ctx)
 
-	files, _ := model.fileManager.ScanCurrDirectory()
+	files, _ := filemanager.ScanCurrDirectory()
 	scanMsg := FileScanCompleteMsg{Files: files}
 
 	b.ResetTimer()

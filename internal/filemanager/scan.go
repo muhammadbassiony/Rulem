@@ -2,7 +2,6 @@ package filemanager
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
@@ -11,186 +10,107 @@ import (
 	"strings"
 )
 
-// markdownExtensions contains supported markdown file extensions
+// markdownExtensions contains supported markdown file extensions.
+//
+// This is rulem's definition of "a rule file" and it stays in this package.
+// fileops takes a func(name string) bool and has no opinion about which files
+// are interesting.
 var markdownExtensions = []string{
 	".md", ".mdown", ".mkdn", ".mkd", ".markdown", ".mdc",
 }
 
 // isMarkdownFile checks if a filename has a markdown extension.
-// This function is used as a file filter for the directory scanner.
+// It is passed to fileops as the scan filter.
 func isMarkdownFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	return slices.Contains(markdownExtensions, ext)
 }
 
-// ScanCurrDirectory recursively scans the current working directory and all its children
-// for markdown files and returns a list of FileItem with absolute paths.
-// This function acts as an integration point between the generic fileops directory scanner
-// and the filemanager domain logic.
-//
-// Returns:
-//   - []FileItem: List of discovered markdown files with absolute paths
-//   - error: Scanning errors
-//
-// Security: Uses secure directory scanning with protection against path traversal and symlink attacks.
-// File paths are validated and converted to absolute paths during scanning.
-func (fm *FileManager) ScanCurrDirectory() ([]FileItem, error) {
-	// Get current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current working directory: %w", err)
-	}
-
-	// Create scanner with markdown-specific options
-	opts := &fileops.DirectoryScanOptions{
+// markdownScanOptions describes the walk rulem wants when looking for rule
+// files. None of these are security settings - confinement comes from the
+// directory handle the walk runs inside - they are about which of the files
+// inside the boundary are worth reporting.
+func markdownScanOptions(maxDepth int) *fileops.DirectoryScanOptions {
+	return &fileops.DirectoryScanOptions{
 		SkipUnreadableDirs: true,
-		MaxDepth:           20,
+		MaxDepth:           maxDepth,
 		IncludeHidden:      true,
 		SkipPatterns:       []string{"node_modules", ".git", "vendor", "target", "build", ".next", "dist", ".cache", "__pycache__", ".vscode", ".idea"},
 		FileFilter:         isMarkdownFile,
 	}
+}
 
-	// Create secure directory scanner
-	scanner, err := fileops.NewDirectoryScanner(cwd, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create directory scanner: %w", err)
+// toFileItems converts a scan result into rule-file items.
+//
+// dir supplies both ends of the pair every item carries: RelPath is the name
+// to address the file by, and Path is the same file rendered absolutely for
+// display and filtering.
+func toFileItems(dir *fileops.Dir, files []fileops.FileInfo) []FileItem {
+	var result []FileItem
+	for _, file := range files {
+		if file.IsDir {
+			continue
+		}
+		result = append(result, FileItem{
+			Name:    file.Name,
+			RelPath: file.Path,
+			Path:    dir.DisplayPath(file.Path),
+		})
 	}
-	defer scanner.Close()
+	return result
+}
 
-	// Perform the scan
-	files, err := scanner.ScanDirectory()
+// ScanCurrDirectory recursively scans the current working directory for
+// markdown files.
+//
+// It is a package-level function, not a FileManager method: it has nothing to
+// do with the storage directory, and pretending otherwise previously forced
+// callers to construct a FileManager they had no use for.
+//
+// Returns:
+//   - []FileItem: discovered markdown files, addressed relative to the working
+//     directory and rendered absolutely for display
+//   - error: scanning errors
+func ScanCurrDirectory() ([]FileItem, error) {
+	cwd, err := fileops.OpenWorkingDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open current working directory: %w", err)
+	}
+	defer func() { _ = cwd.Close() }()
+
+	files, err := cwd.Scan(markdownScanOptions(20))
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan directory: %w", err)
 	}
 
-	// Convert fileops.FileInfo to filemanager.FileItem
-	var result []FileItem
-	for _, file := range files {
-		if !file.IsDir { // Only include files, not directories
-			absPath := filepath.Join(cwd, file.Path)
-			result = append(result, FileItem{
-				Name: file.Name,
-				Path: absPath,
-			})
-		}
-	}
-
+	result := toFileItems(cwd, files)
 	logging.Debug("Scanned current directory for markdown files", "fileCount", len(result))
 	return result, nil
 }
 
-// ScanRepository recursively scans the repository directory and all its children
-// for markdown files and returns a list of FileItem with absolute paths.
+// ScanRepository recursively scans this FileManager's storage directory for
+// markdown files.
 //
-// This method scans the FileManager's configured storage directory for markdown files.
-// It performs comprehensive security validation including symlink security checks,
-// reserved directory protection, and path traversal prevention.
+// Everything that used to precede the walk - resolving the path, checking
+// whether it was a symlink, re-validating it against storage policy, statting
+// it - was proving facts about a string. The handle already carries them: it
+// could not have been opened otherwise.
 //
 // Returns:
-//   - []FileItem: List of discovered markdown files with absolute paths
-//   - error: Scanning errors including security violations
-//
-// Security: Uses secure directory scanning with protection against path traversal and symlink attacks.
-// Validates storage path and symlinks to prevent access to system directories.
-// File paths are validated and converted to absolute paths during scanning.
+//   - []FileItem: discovered markdown files, addressed relative to the storage
+//     root and rendered absolutely for display
+//   - error: scanning errors
 func (fm *FileManager) ScanRepository() ([]FileItem, error) {
 	if fm == nil {
 		return nil, fmt.Errorf("filemanager is nil")
 	}
 
-	storageRoot := fm.storageDir
-	if storageRoot == "" {
-		return nil, fmt.Errorf("storage directory is not configured")
-	}
-
-	// Handle symlinks with security validation
-	isSymlink, err := fileops.IsSymlink(storageRoot)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check if storage directory is a symlink: %w", err)
-	}
-
-	if isSymlink {
-		fm.logger.Debug("Storage directory is a symlink, validating security", "path", storageRoot)
-
-		// For symlinks, we need to define allowed base paths for security
-		// Allow the current working directory and user home directory as safe bases
-		allowedPaths := []string{}
-		if cwd, err := os.Getwd(); err == nil {
-			allowedPaths = append(allowedPaths, cwd)
-		}
-		if homeDir, err := os.UserHomeDir(); err == nil {
-			allowedPaths = append(allowedPaths, homeDir)
-		}
-
-		// Validate symlink security
-		if err := fileops.ValidateSymlinkSecurity(storageRoot, allowedPaths); err != nil {
-			return nil, fmt.Errorf("storage directory symlink security validation failed: %w", err)
-		}
-
-		// Resolve the symlink after validation
-		absStorageRootPath, err := fileops.ResolveSymlink(storageRoot)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve symlink for storage directory: %w", err)
-		}
-		storageRoot = absStorageRootPath
-	} else {
-		// Resolve absolute path
-		absPath, err := filepath.Abs(storageRoot)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve storage directory: %w", err)
-		}
-		storageRoot = absPath
-	}
-
-	// Use comprehensive storage path validation from fileops
-	if err := fileops.ValidateStoragePath(storageRoot); err != nil {
-		return nil, fmt.Errorf("storage directory failed security validation: %w", err)
-	}
-
-	// Ensure path exists and is a directory
-	info, err := os.Stat(storageRoot)
-	if err != nil {
-		return nil, fmt.Errorf("storage directory not accessible: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("storage path is not a directory")
-	}
-
-	// Create scanner with markdown-specific options
-	opts := &fileops.DirectoryScanOptions{
-		SkipUnreadableDirs: true,
-		MaxDepth:           50,
-		IncludeHidden:      true,
-		SkipPatterns:       []string{"node_modules", ".git", "vendor", "target", "build", ".next", "dist", ".cache", "__pycache__", ".vscode", ".idea"},
-		FileFilter:         isMarkdownFile,
-	}
-
-	// Create secure directory scanner
-	scanner, err := fileops.NewDirectoryScanner(storageRoot, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create directory scanner: %w", err)
-	}
-	defer scanner.Close()
-
-	// Perform the scan
-	files, err := scanner.ScanDirectory()
+	files, err := fm.dir.Scan(markdownScanOptions(50))
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan storage directory: %w", err)
 	}
 
-	// Convert fileops.FileInfo to filemanager.FileItem with absolute paths
-	var result []FileItem
-	for _, file := range files {
-		if !file.IsDir { // Only include files, not directories
-			// Construct absolute path immediately during scan
-			absPath := filepath.Join(storageRoot, file.Path)
-			result = append(result, FileItem{
-				Name: file.Name,
-				Path: absPath,
-			})
-		}
-	}
-
+	result := toFileItems(fm.dir, files)
 	logging.Debug("Scanned central storage for markdown files", "fileCount", len(result))
 	return result, nil
 }
@@ -198,7 +118,6 @@ func (fm *FileManager) ScanRepository() ([]FileItem, error) {
 // ScanAllRepositories scans multiple repositories and merges their file lists.
 // This function is the main entry point for multi-repository file discovery.
 // Files are tagged with their source repository metadata for display and tracking.
-// All paths are returned as absolute paths, validated during scanning.
 //
 // The function maintains repository order - files from earlier repositories appear
 // first in the result list. This provides predictable, stable ordering for UI display.
@@ -208,19 +127,20 @@ func (fm *FileManager) ScanRepository() ([]FileItem, error) {
 //   - logger: Logger for structured logging (can be nil)
 //
 // Returns:
-//   - []FileItem: Merged list of files from all repositories with absolute paths and source metadata
+//   - []FileItem: Merged list of files from all repositories with source metadata
 //   - error: Scanning errors (partial results may be returned with error)
 //
 // Usage:
 //
-//	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	prepared, err := repository.PrepareAllRepositories(ctx, cfg.Repositories, logger)
 //	files, err := filemanager.ScanAllRepositories(prepared, logger)
 //	for _, file := range files {
 //	    fmt.Printf("%s from %s (%s)\n", file.Name, file.RepositoryName, file.RepositoryType)
 //	}
 //
-// Security: Paths are pre-validated by PrepareAllRepositories, so this function can safely assume valid paths.
-// File paths are validated and converted to absolute paths during scanning.
+// A repository directory that has since been deleted or replaced by a file
+// fails to open and is reported as a scan error rather than being silently
+// recreated - that is the point of OpenExistingDir.
 func ScanAllRepositories(prepared []repository.PreparedRepository, logger *logging.AppLogger) ([]FileItem, error) {
 	if logger != nil {
 		logger.Info("Starting multi-repository scan", "repository_count", len(prepared))
@@ -258,26 +178,9 @@ func ScanAllRepositories(prepared []repository.PreparedRepository, logger *loggi
 			)
 		}
 
-		// Determine repository type for metadata
-		repoType := string(prep.Type())
-
-		// Create a temporary FileManager for this repository
-		// Paths are already validated by PrepareAllRepositories
-		fm, err := NewFileManager(prep.LocalPath, logger)
+		files, err := scanOneRepository(prep.LocalPath, logger)
 		if err != nil {
-			errorMsg := fmt.Sprintf("repository %s (%s): failed to create file manager: %v", prep.ID(), prep.Name(), err)
-			scanErrors = append(scanErrors, errorMsg)
-			if logger != nil {
-				logger.Error("Failed to create file manager", "repository_id", prep.ID(), "error", err)
-			}
-			continue
-		}
-
-		// Scan the repository - files already have absolute paths from ScanRepository
-		files, err := fm.ScanRepository()
-		if err != nil {
-			errorMsg := fmt.Sprintf("repository %s (%s): scan failed: %v", prep.ID(), prep.Name(), err)
-			scanErrors = append(scanErrors, errorMsg)
+			scanErrors = append(scanErrors, fmt.Sprintf("repository %s (%s): %v", prep.ID(), prep.Name(), err))
 			if logger != nil {
 				logger.Error("Repository scan failed", "repository_id", prep.ID(), "error", err)
 			}
@@ -285,7 +188,7 @@ func ScanAllRepositories(prepared []repository.PreparedRepository, logger *loggi
 		}
 
 		// Tag each file with repository metadata
-		// Paths are already absolute from ScanRepository
+		repoType := string(prep.Type())
 		for i := range files {
 			files[i].RepositoryID = prep.ID()
 			files[i].RepositoryName = prep.Name()
@@ -319,4 +222,22 @@ func ScanAllRepositories(prepared []repository.PreparedRepository, logger *loggi
 	}
 
 	return allFiles, nil
+}
+
+// scanOneRepository opens one repository directory, scans it, and closes the
+// handle again. It exists so the handle's lifetime is a single scope rather
+// than a deferred close inside a loop.
+func scanOneRepository(localPath string, logger *logging.AppLogger) ([]FileItem, error) {
+	dir, err := fileops.OpenExistingDir(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repository directory: %w", err)
+	}
+	defer func() { _ = dir.Close() }()
+
+	fm, err := NewFileManager(dir, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file manager: %w", err)
+	}
+
+	return fm.ScanRepository()
 }

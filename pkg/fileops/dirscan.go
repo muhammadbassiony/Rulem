@@ -79,92 +79,6 @@ type FileInfo struct {
 	Mode os.FileMode
 }
 
-// SecureDirectoryScanner walks a directory tree confined to an os.Root.
-//
-// The confinement is structural. Every name is resolved against an open handle
-// on the scan root rather than against a path string, so a symlink leaving the
-// root fails to resolve instead of being followed - there is no check to
-// forget, and no window between checking and using.
-//
-// Symlink policy:
-//   - A relative symlink resolving to a regular file inside the root is
-//     reported as a file, carrying its target's size and mode.
-//   - A symlink to a directory is not reported and not traversed. fs.WalkDir
-//     never descends a symlink, so the walk is free of symlink loops by
-//     construction rather than by loop detection.
-//   - A symlink that escapes the root, dangles, or is absolute is skipped.
-//     os.Root refuses absolute symlinks even when the target happens to sit
-//     inside the root, since an absolute link is only meaningful outside the
-//     root's frame of reference.
-type SecureDirectoryScanner struct {
-	// root is the boundary the walk runs inside.
-	root *os.Root
-
-	// opts contains the scanning configuration
-	opts *DirectoryScanOptions
-}
-
-// NewDirectoryScanner creates a scanner confined to scanPath.
-//
-// scanPath may be relative or use "~"; it is expanded and made absolute, then
-// checked against rulem's storage policy (no traversal, not a reserved system
-// directory) before the boundary is opened. opts may be nil, in which case
-// getDefaultScanOptions applies.
-//
-// The caller owns the returned scanner and must Close it.
-//
-// Usage example:
-//
-//	scanner, err := fileops.NewDirectoryScanner("/project/src", &fileops.DirectoryScanOptions{
-//	    MaxDepth:      10,
-//	    IncludeHidden: false,
-//	    FileFilter:    func(name string) bool { return strings.HasSuffix(name, ".go") },
-//	})
-//	if err != nil {
-//	    return fmt.Errorf("failed to create scanner: %w", err)
-//	}
-//	defer scanner.Close()
-func NewDirectoryScanner(scanPath string, opts *DirectoryScanOptions) (*SecureDirectoryScanner, error) {
-	if opts == nil {
-		opts = getDefaultScanOptions()
-	}
-
-	if strings.TrimSpace(scanPath) == "" {
-		return nil, fmt.Errorf("scan path cannot be empty")
-	}
-
-	// Expand tilde and resolve to absolute path for security
-	expandedPath := ExpandPath(scanPath)
-	absPath, err := filepath.Abs(expandedPath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot resolve scan path: %w", err)
-	}
-
-	if err := ValidatePathSecurity(absPath); err != nil {
-		return nil, fmt.Errorf("scan path security validation failed: %w", err)
-	}
-
-	// Always block reserved directories - no legitimate use case for scanning system directories
-	if IsReservedDirectory(absPath) {
-		return nil, fmt.Errorf("cannot scan reserved/system directory: %s", absPath)
-	}
-
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot access scan path: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("scan path is not a directory: %s", absPath)
-	}
-
-	root, err := os.OpenRoot(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot create secure scan root: %w", err)
-	}
-
-	return &SecureDirectoryScanner{root: root, opts: opts}, nil
-}
-
 // getDefaultScanOptions returns sensible default scanning options.
 func getDefaultScanOptions() *DirectoryScanOptions {
 	return &DirectoryScanOptions{
@@ -193,42 +107,6 @@ func getDefaultSkipPatterns() []string {
 		".vscode",
 		".idea",
 	}
-}
-
-// Close releases the scan root. It is safe to call more than once.
-func (s *SecureDirectoryScanner) Close() error {
-	if s.root != nil {
-		err := s.root.Close()
-		s.root = nil
-		return err
-	}
-	return nil
-}
-
-// ScanDirectory walks the configured directory and returns the files it holds,
-// each with a Path relative to the scan root.
-//
-// The result is never nil: an empty tree yields an empty slice.
-//
-// Usage example:
-//
-//	files, err := scanner.ScanDirectory()
-//	if err != nil {
-//	    return fmt.Errorf("scan failed: %w", err)
-//	}
-//	for _, file := range files {
-//	    fmt.Printf("Found: %s (%d bytes)\n", file.Path, file.Size)
-//	}
-func (s *SecureDirectoryScanner) ScanDirectory() ([]FileInfo, error) {
-	if s.root == nil {
-		return nil, fmt.Errorf("scanner has been closed")
-	}
-
-	files, err := walkFiles(s.root, s.opts)
-	if err != nil {
-		return nil, fmt.Errorf("directory scan failed: %w", err)
-	}
-	return files, nil
 }
 
 // walkFiles walks root with fs.WalkDir and collects the files it finds.

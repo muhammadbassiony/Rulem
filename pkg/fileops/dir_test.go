@@ -3,17 +3,18 @@ package fileops
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 // Tests for Dir.
 //
-// These are a re-homing of the tests belonging to the nine functions that the
-// Dir handle replaces. They assert the same behavioural properties through the
-// new API, and while Dir still delegates to those functions both suites pass
-// at once - which is what makes the translation demonstrably faithful rather
-// than merely plausible.
+// These are a re-homing of the tests belonging to the nine functions the Dir
+// handle replaced. They were written while Dir still delegated to those
+// functions, so both suites passed at once - which is what made the translation
+// demonstrably faithful rather than merely plausible. The originals are gone
+// now; this table is the record of where each property went.
 //
 // Provenance of every property asserted below:
 //
@@ -31,6 +32,23 @@ import (
 //	TestValidateSymlinkSecurity              TestDirSymlinkClassification
 //	TestValidateFileAccess                   TestDirOpenAndRead
 //	TestSecureDirectoryScanner_ScanDirectory TestDirScan
+
+// createTestSymlink creates a symlink, skipping the test on Windows where the
+// operation needs a privilege the CI account may not hold. It moved here from
+// symlink_test.go when that file's subject was deleted.
+func createTestSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation failed on Windows: %v", err)
+		}
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+}
+
+func isWindows() bool {
+	return runtime.GOOS == "windows"
+}
 
 // openTestDir opens a Dir on a fresh temporary directory and closes it on
 // cleanup. t.TempDir is removed automatically, so nothing is left behind.
@@ -992,8 +1010,14 @@ func TestDirAfterClose(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.call(); err == nil {
-				t.Errorf("%s on a closed Dir expected an error, got none", tt.name)
+			err := tt.call()
+			if err == nil {
+				t.Fatalf("%s on a closed Dir expected an error, got none", tt.name)
+			}
+			// Carried over from TestSecureDirectoryScanner_Close: the failure
+			// must name the closed handle rather than surface as a bare ENOENT.
+			if !strings.Contains(err.Error(), "closed") {
+				t.Errorf("%s on a closed Dir: error = %v, want one mentioning %q", tt.name, err, "closed")
 			}
 		})
 	}

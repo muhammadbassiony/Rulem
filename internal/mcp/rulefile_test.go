@@ -1621,3 +1621,87 @@ This should not be accessible.`
 		t.Errorf("Expected a traversal rejection, got: %v", err)
 	}
 }
+
+// TestProcessRuleFileSizeLimit is the successor to pkg/fileops'
+// TestValidateFileSizeLimit and TestValidateFileSizeLimitWithDirectory, which
+// were deleted with ValidateFileSizeLimit itself.
+//
+// The behaviour did not go away, it moved: the cap is now read off the handle
+// the processor is about to read, instead of from a second stat of a display
+// path. The "path is a directory" case has no successor here and does not need
+// one - Dir.Open refuses a directory before the size is ever consulted, which
+// TestDirOpenAndRead covers.
+func TestProcessRuleFileSizeLimit(t *testing.T) {
+	tempDir := t.TempDir()
+
+	content := `---
+description: "Size limit test"
+---
+` + strings.Repeat("x", 500)
+
+	if err := os.WriteFile(filepath.Join(tempDir, "rule.md"), []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+	fileSize := int64(len(content))
+
+	fileItem := filemanager.FileItem{
+		Name:         "rule.md",
+		RelPath:      "rule.md",
+		Path:         filepath.Join(tempDir, "rule.md"),
+		RepositoryID: "test-repo-123",
+	}
+
+	tests := []struct {
+		name      string
+		maxSize   int64
+		wantError string
+	}{
+		{
+			name:    "file well under the limit",
+			maxSize: fileSize * 10,
+		},
+		{
+			name:    "file exactly at the limit",
+			maxSize: fileSize,
+		},
+		{
+			name:      "file one byte over the limit",
+			maxSize:   fileSize - 1,
+			wantError: "exceeds limit",
+		},
+		{
+			name:      "zero limit is not a limit",
+			maxSize:   0,
+			wantError: "invalid size limit",
+		},
+		{
+			name:      "negative limit is rejected",
+			maxSize:   -1,
+			wantError: "invalid size limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, _ := logging.NewTestLogger()
+			processor := NewRuleFileProcessor(logger, map[string]string{"test-repo-123": tempDir}, tt.maxSize)
+
+			_, err := processor.processRuleFile(openRepoDir(t, tempDir), fileItem)
+
+			if tt.wantError != "" {
+				if err == nil {
+					t.Fatalf("processRuleFile(maxSize=%d) expected an error, got none", tt.maxSize)
+				}
+				if !strings.Contains(err.Error(), tt.wantError) {
+					t.Errorf("processRuleFile(maxSize=%d) error = %v, want one containing %q",
+						tt.maxSize, err, tt.wantError)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("processRuleFile(maxSize=%d) unexpected error: %v", tt.maxSize, err)
+			}
+		})
+	}
+}

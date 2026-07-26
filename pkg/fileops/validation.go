@@ -11,24 +11,29 @@ import (
 	"sync"
 )
 
-// ValidatePathSecurity performs comprehensive security validation on a file path.
-// This function checks for common path traversal attacks and dangerous path patterns.
+// ValidatePathSecurity applies rulem's policy to a path that does not exist
+// yet, and therefore cannot be opened.
 //
-// The function validates:
-//   - Path traversal attempts using ".." sequences
-//   - Empty or whitespace-only paths
-//   - Paths that resolve outside expected boundaries after cleaning
+// # This is not containment
 //
-// Parameters:
-//   - path: The file path to validate
+// Containment is [Dir]: a handle on an open directory, against which every name
+// is resolved one component at a time. Where there is something to open, open
+// it — a claim about a string is not a claim about the filesystem, and the gap
+// between the two is where this package's historical bugs lived.
 //
-// Returns:
-//   - error: Validation errors if the path is considered unsafe
+// This function exists for the one case where that is impossible: a path rulem
+// is about to *create*. Its only callers prepare the destination of a `git
+// clone` that has not happened yet, so there is no handle to hold and nothing
+// to resolve against.
 //
-// Security considerations:
-//   - This function performs static analysis and does not access the filesystem
-//   - Additional validation may be needed for specific use cases
-//   - Symlink resolution should be performed separately if needed
+// # What it checks
+//
+//   - The path is not empty or whitespace-only.
+//   - No component is "..". Note that [path/filepath.IsLocal] cannot stand in
+//     here: it rejects every absolute path, and both callers pass one.
+//   - An absolute path is not a reserved system directory ([IsReservedDirectory]).
+//     This half is pure rulem policy — an opinion about where an application
+//     should not put its data — and has no standard-library equivalent.
 //
 // Usage example:
 //
@@ -65,132 +70,6 @@ func ValidatePathSecurity(path string) error {
 func hasParentTraversal(path string) bool {
 	normalized := strings.ReplaceAll(filepath.ToSlash(path), `\`, "/")
 	return slices.Contains(strings.Split(normalized, "/"), "..")
-}
-
-// isContained reports whether relPath - as produced by filepath.Rel - stays
-// inside the directory it was computed against.
-//
-// filepath.IsLocal is exactly the predicate the old
-// strings.HasPrefix(relPath, "..") test was approximating: it rejects absolute
-// paths, ".." escapes and (on Windows) reserved device names, without also
-// rejecting a file simply named "..notes.md". It accepts ".", which is what
-// filepath.Rel returns when the two paths are the same directory.
-func isContained(relPath string) bool {
-	return filepath.IsLocal(relPath)
-}
-
-// ValidateCWDPath validates that a destination path is safe relative to current working directory.
-// This function ensures the path is relative and doesn't attempt to escape the CWD.
-//
-// Parameters:
-//   - destPath: Destination path to validate (should be relative)
-//
-// Returns:
-//   - error: Validation errors if the path is unsafe
-//
-// The function checks:
-//   - Path is not empty
-//   - Path is relative (not absolute)
-//   - Path doesn't contain traversal sequences
-//   - Cleaned path doesn't escape current directory
-//
-// Usage example:
-//
-//	if err := fileops.ValidateCWDPath("subdir/file.txt"); err != nil {
-//	    return fmt.Errorf("invalid destination path: %w", err)
-//	}
-func ValidateCWDPath(destPath string) error {
-	if destPath == "" {
-		return fmt.Errorf("destination path cannot be empty")
-	}
-
-	// Path must be relative
-	if filepath.IsAbs(destPath) {
-		return fmt.Errorf("destination path must be relative to current working directory")
-	}
-
-	// Reject ".." components outright rather than only checking where the path
-	// lexically lands: "valid/../file.txt" resolves outside the CWD if "valid"
-	// happens to be a symlink, which lexical analysis cannot see.
-	if hasParentTraversal(destPath) || !isContained(destPath) {
-		return fmt.Errorf("path traversal not allowed in destination path")
-	}
-
-	return nil
-}
-
-// ValidateFileInDirectory validates that a file path is within a specified base directory
-// and that the file exists and is accessible. This function helps prevent directory
-// traversal attacks and ensures file containment.
-//
-// Parameters:
-//   - filePath: Full path to the file to validate
-//   - baseDir: Base directory that should contain the file
-//
-// Returns:
-//   - error: Validation errors if the file is outside the directory or inaccessible
-//
-// The function performs:
-//   - Path resolution to absolute paths
-//   - Containment verification using relative path calculation
-//   - Re-resolution of the path through an os.Root scoped to baseDir, so
-//     symlinks that leave the directory are refused rather than followed
-//   - File existence and accessibility checks
-//   - File type validation (ensures it's a regular file)
-//
-// Usage example:
-//
-//	err := fileops.ValidateFileInDirectory("/storage/file.txt", "/storage")
-//	if err != nil {
-//	    return fmt.Errorf("file validation failed: %w", err)
-//	}
-func ValidateFileInDirectory(filePath, baseDir string) error {
-	// Resolve absolute paths
-	absFilePath, err := filepath.Abs(filePath)
-	if err != nil {
-		return fmt.Errorf("cannot resolve file path: %w", err)
-	}
-
-	absBaseDir, err := filepath.Abs(baseDir)
-	if err != nil {
-		return fmt.Errorf("cannot resolve base directory: %w", err)
-	}
-
-	// Check if file is within base directory
-	relPath, err := filepath.Rel(absBaseDir, absFilePath)
-	if err != nil {
-		return fmt.Errorf("cannot determine relative path: %w", err)
-	}
-
-	if !isContained(relPath) {
-		return fmt.Errorf("file is not within base directory")
-	}
-
-	// The check above compares strings, which says nothing about what the
-	// filesystem will actually resolve. Re-open the name through an os.Root
-	// scoped to the base directory: names are resolved against an open
-	// directory handle, one component at a time, so a symlink pointing out of
-	// the directory fails here instead of being silently followed.
-	root, err := os.OpenRoot(absBaseDir)
-	if err != nil {
-		return fmt.Errorf("cannot open base directory: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-
-	fileInfo, err := root.Stat(relPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("file does not exist: %s", filepath.Base(filePath))
-		}
-		return fmt.Errorf("cannot access file within base directory: %w", err)
-	}
-
-	// Ensure it's a regular file
-	if fileInfo.IsDir() {
-		return fmt.Errorf("path is a directory, not a file")
-	}
-
-	return nil
 }
 
 // SanitizeFilename sanitizes a filename by removing or replacing dangerous characters.
@@ -321,67 +200,6 @@ func SanitizeRelativePath(path string) (string, error) {
 	// sanitized individually, so the join cannot produce an escaping path.
 	// The result is addressed through a Dir anyway, which would refuse one.
 	return filepath.Join(cleaned...), nil
-}
-
-// ValidateFileAccess checks if a file exists and is accessible with specified permissions.
-// This function provides a way to verify file accessibility before performing operations.
-//
-// Parameters:
-//   - filePath: Path to the file to check
-//   - requireWrite: Whether write access is required
-//
-// Returns:
-//   - error: Access validation errors
-//
-// The function checks:
-//   - File existence
-//   - Read permissions (always required)
-//   - Write permissions (if requireWrite is true)
-//   - File is not a directory
-//
-// Usage example:
-//
-//	// Check if file is readable
-//	if err := fileops.ValidateFileAccess("/path/to/file.txt", false); err != nil {
-//	    return fmt.Errorf("cannot read file: %w", err)
-//	}
-//
-//	// Check if file is writable
-//	if err := fileops.ValidateFileAccess("/path/to/file.txt", true); err != nil {
-//	    return fmt.Errorf("cannot write to file: %w", err)
-//	}
-func ValidateFileAccess(filePath string, requireWrite bool) error {
-	// Check if file exists
-	info, err := os.Stat(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("file does not exist: %s", filePath)
-		}
-		return fmt.Errorf("cannot access file: %w", err)
-	}
-
-	// Ensure it's not a directory
-	if info.IsDir() {
-		return fmt.Errorf("path is a directory, not a file: %s", filePath)
-	}
-
-	// Test read access
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("file is not readable: %w", err)
-	}
-	_ = file.Close()
-
-	// Test write access if required
-	if requireWrite {
-		file, err := os.OpenFile(filePath, os.O_WRONLY, 0)
-		if err != nil {
-			return fmt.Errorf("file is not writable: %w", err)
-		}
-		_ = file.Close()
-	}
-
-	return nil
 }
 
 // ExpandPath expands a leading "~" to the user's home directory.
@@ -679,53 +497,6 @@ func ValidateDirectoryWritable(dirPath string) error {
 	return nil
 }
 
-// ValidatePathInHome checks if a path is within the user's home directory
-// and returns the relative path from home. This function helps ensure
-// paths don't escape the user's home directory boundary.
-//
-// Parameters:
-//   - targetPath: The path to validate against home directory containment
-//
-// Returns:
-//   - string: Relative path from home directory if valid
-//   - error: Validation errors if path is outside home or invalid
-//
-// The function:
-//   - Resolves the user's home directory
-//   - Cleans both home and target paths
-//   - Calculates relative path from home to target
-//   - Ensures the relative path doesn't escape home (no ".." prefix)
-//
-// Usage example:
-//
-//	relPath, err := fileops.ValidatePathInHome("/home/user/documents/file.txt")
-//	if err != nil {
-//	    return fmt.Errorf("path not in home: %w", err)
-//	}
-//	// relPath will be "documents/file.txt"
-func ValidatePathInHome(targetPath string) (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot determine home directory: %w", err)
-	}
-
-	// Clean both paths to handle . and .. properly
-	cleanHome := filepath.Clean(homeDir)
-	cleanTarget := filepath.Clean(targetPath)
-
-	// Check if target is within home
-	relPath, err := filepath.Rel(cleanHome, cleanTarget)
-	if err != nil {
-		return "", fmt.Errorf("invalid path: %w", err)
-	}
-
-	if !isContained(relPath) {
-		return "", fmt.Errorf("path is outside home directory")
-	}
-
-	return relPath, nil
-}
-
 // ValidateStoragePath performs comprehensive validation for storage directory paths.
 // This function combines multiple security and accessibility checks for directory paths
 // intended for application data storage.
@@ -917,51 +688,6 @@ func SanitizeIdentifier(identifier string, maxLength int) (string, error) {
 func isIdentifierRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
 		(r >= '0' && r <= '9') || r == '.'
-}
-
-// ValidateFileSizeLimit checks if a file size is within acceptable limits.
-// This function helps prevent memory exhaustion from very large files.
-//
-// Parameters:
-//   - filePath: Path to the file to check
-//   - maxSize: Maximum allowed file size in bytes
-//
-// Returns:
-//   - error: Validation error if file exceeds size limit or cannot be accessed
-//
-// The function:
-//   - Checks file existence and accessibility
-//   - Compares file size against the specified limit
-//   - Returns descriptive errors for different failure modes
-//
-// Usage example:
-//
-//	// Limit files to 10MB
-//	if err := fileops.ValidateFileSizeLimit("/path/to/file.txt", 10*1024*1024); err != nil {
-//	    return fmt.Errorf("file too large: %w", err)
-//	}
-func ValidateFileSizeLimit(filePath string, maxSize int64) error {
-	if maxSize <= 0 {
-		return fmt.Errorf("invalid size limit: %d", maxSize)
-	}
-
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("file does not exist: %s", filepath.Base(filePath))
-		}
-		return fmt.Errorf("cannot access file: %w", err)
-	}
-
-	if fileInfo.IsDir() {
-		return fmt.Errorf("path is a directory, not a file: %s", filePath)
-	}
-
-	if fileInfo.Size() > maxSize {
-		return fmt.Errorf("file size %d bytes exceeds limit %d bytes", fileInfo.Size(), maxSize)
-	}
-
-	return nil
 }
 
 // IsDirEmpty checks if a directory is empty.

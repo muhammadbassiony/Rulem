@@ -64,11 +64,17 @@ _Last reviewed: July 2026, after the production-readiness PR batch (#4–#16)._
   (S3), plus the `..` matcher (S4), the markdown HTML-injection scan (S5), the
   fixed probe name (S6) and ~455 lines of dead API. Full review in
   `reports/fileops-review.md`.
-- [ ] **pkg/fileops → `os.Root` migration** — four stacked PRs per
-  `reports/fileops-review.md` §9: introduce a `fileops.Dir` handle, swap its
-  internals to `os.Root`, migrate the call sites, then delete the nine
-  string-based validators. Target: ~770 → ~250 non-test lines, exported
-  surface 23 → ~10.
+- [x] **pkg/fileops → `os.Root` migration** — PRs #27–#30, four stacked PRs per
+  `reports/fileops-review.md` §9: introduce a `fileops.Dir` handle (#27), swap
+  its internals to `os.Root` and rebuild the scanner on `fs.WalkDir` (#28),
+  migrate the call sites (#29), delete the old API (#30). Closes **B8**
+  (overlapping validators), the last open finding of the review. Hand-written
+  path containment is gone; confinement is now held by an open directory handle
+  that travels with the capability. Exported surface 25 → 18;
+  `internal/filemanager` raw filesystem calls 30 → 2 (both pure string
+  arithmetic). §9's headline "~770 → ~250 non-test lines" did **not** hold:
+  843 → 817, because `Dir` itself costs ~250 lines and every §8.2 keeper stayed.
+  What shrank was the *kind* of code, not the amount — see PR #30's ledger.
 - [ ] `tui.go` menu sizing uses a magic `v := 14 // footer margins`; derive it
   from rendered header/footer heights like the filepicker now does.
 - [x] Windows: dropped — goreleaser windows bits removed (PR #6).

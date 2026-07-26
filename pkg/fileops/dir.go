@@ -316,8 +316,10 @@ func (d *Dir) openFile(rel string) (*os.File, fs.FileInfo, error) {
 }
 
 // ReadFile reads the whole contents of a regular file inside this directory.
-// Callers that care about size must Stat first; this package's size policy is
-// ValidateFileSizeLimit.
+//
+// Callers that need a size cap should use [Dir.Open] and take the size from the
+// returned handle's Stat: that reports on the file that was actually opened,
+// rather than on whatever a second lookup of the same name finds.
 func (d *Dir) ReadFile(rel string) ([]byte, error) {
 	f, err := d.Open(rel)
 	if err != nil {

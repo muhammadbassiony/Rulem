@@ -181,9 +181,10 @@ func createTestSymlink(t *testing.T, target, link string) {
 
 // isSymlinkPath reports whether path is itself a symbolic link.
 //
-// Tests own this rather than borrowing fileops.IsSymlink: that function is one
-// of the validators the os.Root migration retires, and a test assertion about
-// a path the test just created needs nothing more than an Lstat.
+// Tests own this rather than borrowing from fileops: the package-level
+// IsSymlink was one of the validators the os.Root migration retired, and a test
+// assertion about a path the test just created needs nothing more than an
+// Lstat.
 func isSymlinkPath(path string) (bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil {

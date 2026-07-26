@@ -3,8 +3,7 @@ package mcp
 import (
 	"bytes"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/pkg/fileops"
@@ -81,8 +80,24 @@ func (p *RuleFileProcessor) ParseRuleFiles(files []filemanager.FileItem) ([]Rule
 	var ruleFiles []RuleFile
 	var skippedCount int
 
+	// One handle per repository, opened once and reused for every file that
+	// came from it, closed when the batch is done.
+	dirs := make(map[string]*fileops.Dir)
+	defer func() {
+		for _, dir := range dirs {
+			_ = dir.Close()
+		}
+	}()
+
 	for _, file := range files {
-		ruleFile, err := p.processRuleFile(file)
+		dir, err := p.repositoryDir(dirs, file.RepositoryID)
+		if err != nil {
+			p.logger.Debug("Skipping file", "name", file.Name, "reason", err)
+			skippedCount++
+			continue
+		}
+
+		ruleFile, err := p.processRuleFile(dir, file)
 		if err != nil {
 			p.logger.Debug("Skipping file", "name", file.Name, "reason", err)
 			skippedCount++
@@ -100,30 +115,59 @@ func (p *RuleFileProcessor) ParseRuleFiles(files []filemanager.FileItem) ([]Rule
 	return ruleFiles, nil
 }
 
-// processRuleFile handles the complete processing pipeline for a single rule file
-func (p *RuleFileProcessor) processRuleFile(file filemanager.FileItem) (*RuleFile, error) {
-	// Get the repository path using the repository paths map
-	repoPath, exists := p.repositoryPaths[file.RepositoryID]
+// repositoryDir returns an open, confined handle on the repository a file came
+// from, opening it on first use and caching it in dirs for the rest of the
+// batch.
+func (p *RuleFileProcessor) repositoryDir(dirs map[string]*fileops.Dir, repositoryID string) (*fileops.Dir, error) {
+	if dir, ok := dirs[repositoryID]; ok {
+		return dir, nil
+	}
+
+	repoPath, exists := p.repositoryPaths[repositoryID]
 	if !exists {
-		return nil, fmt.Errorf("repository path not found for repository ID: %s", file.RepositoryID)
+		return nil, fmt.Errorf("repository path not found for repository ID: %s", repositoryID)
 	}
 
-	// file.Path is now always an absolute path from scanning
-	absolutePath := file.Path
-
-	// Compute relative path for validation (path relative to repository root)
-	relativePath, err := filepath.Rel(repoPath, absolutePath)
+	dir, err := fileops.OpenExistingDir(repoPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compute relative path: %w", err)
+		return nil, fmt.Errorf("cannot open repository directory: %w", err)
 	}
 
-	// Comprehensive file validation using fileops functions
-	if err := p.validateRuleFileAccess(absolutePath, relativePath, repoPath); err != nil {
+	dirs[repositoryID] = dir
+	return dir, nil
+}
+
+// processRuleFile handles the complete processing pipeline for a single rule file
+func (p *RuleFileProcessor) processRuleFile(dir *fileops.Dir, file filemanager.FileItem) (*RuleFile, error) {
+	if file.RelPath == "" {
+		return nil, fmt.Errorf("file has no repository-relative path: %s", file.Name)
+	}
+
+	// Open the file through the repository handle. This IS the validation:
+	// the name is resolved one component at a time against an open directory,
+	// so a path that would leave the repository - directly or through a
+	// symlink - fails here rather than in a check that a later open could
+	// disagree with. The handle we get back is the one that was checked.
+	f, err := dir.Open(file.RelPath)
+	if err != nil {
 		return nil, fmt.Errorf("file validation failed: %w", err)
 	}
+	defer func() { _ = f.Close() }()
 
-	// Read and parse file content
-	content, err := os.ReadFile(absolutePath)
+	// Size limit, enforced on the handle we are about to read rather than on
+	// the name we used to get it.
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("file validation failed: cannot stat file: %w", err)
+	}
+	if p.maxFileSize <= 0 {
+		return nil, fmt.Errorf("file size check failed: invalid size limit: %d", p.maxFileSize)
+	}
+	if info.Size() > p.maxFileSize {
+		return nil, fmt.Errorf("file size check failed: file size %d bytes exceeds limit %d bytes", info.Size(), p.maxFileSize)
+	}
+
+	content, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
@@ -156,51 +200,6 @@ func (p *RuleFileProcessor) processRuleFile(file filemanager.FileItem) (*RuleFil
 	}
 
 	return ruleFile, nil
-}
-
-// validateRuleFileAccess performs comprehensive file validation using fileops functions
-func (p *RuleFileProcessor) validateRuleFileAccess(absolutePath, relativePath, repoPath string) error {
-	// Basic path security validation
-	if err := fileops.ValidatePathSecurity(relativePath); err != nil {
-		return fmt.Errorf("path security check failed: %w", err)
-	}
-
-	// Validate file size limits (10MB max)
-	if err := fileops.ValidateFileSizeLimit(absolutePath, p.maxFileSize); err != nil {
-		return fmt.Errorf("file size check failed: %w", err)
-	}
-
-	// Validate file access permissions (read-only required)
-	if err := fileops.ValidateFileAccess(absolutePath, false); err != nil {
-		return fmt.Errorf("file access check failed: %w", err)
-	}
-
-	// Validate that file is within the repository directory boundary
-	if err := fileops.ValidateFileInDirectory(absolutePath, repoPath); err != nil {
-		return fmt.Errorf("file containment validation failed: %w", err)
-	}
-
-	// If it's a symlink, perform comprehensive symlink security validation
-	if isSymlink, err := fileops.IsSymlink(absolutePath); err != nil {
-		return fmt.Errorf("symlink check failed: %w", err)
-	} else if isSymlink {
-		allowedPaths := []string{repoPath}
-		if err := fileops.ValidateSymlinkSecurity(absolutePath, allowedPaths); err != nil {
-			return fmt.Errorf("symlink security check failed: %w", err)
-		}
-
-		// Additional symlink validation: ensure target exists and is accessible
-		if target, err := fileops.ResolveSymlink(absolutePath); err != nil {
-			return fmt.Errorf("symlink resolution failed: %w", err)
-		} else {
-			// Validate the resolved target is also within bounds
-			if err := fileops.ValidateFileInDirectory(target, repoPath); err != nil {
-				return fmt.Errorf("symlink target validation failed: %w", err)
-			}
-		}
-	}
-
-	return nil
 }
 
 // generateToolName creates a unique tool name from rule file metadata

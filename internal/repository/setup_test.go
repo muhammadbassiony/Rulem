@@ -3,6 +3,7 @@ package repository
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -120,6 +121,15 @@ func TestExpandPathEdgeCases(t *testing.T) {
 	}
 }
 
+// reservedStoragePath returns a path rulem's storage policy refuses on this
+// platform, so the reserved-directory case is exercised everywhere.
+func reservedStoragePath() string {
+	if runtime.GOOS == "windows" {
+		return `C:\\Windows\\rulem-rules`
+	}
+	return "/etc/rulem-rules"
+}
+
 // TestEnsureLocalStorageDirectory tests the EnsureLocalStorageDirectory function
 func TestEnsureLocalStorageDirectory(t *testing.T) {
 	tempDir := createTempTestDir(t, "local-storage-test-")
@@ -138,15 +148,22 @@ func TestEnsureLocalStorageDirectory(t *testing.T) {
 			errorMsg:  "cannot be empty",
 		},
 		{
-			name:      "valid path in temp directory",
+			// BEHAVIOUR CHANGE (fileops os.Root migration): the function now
+			// delegates to fileops.OpenDir, rulem's single storage policy, and
+			// creates the directory. It no longer applies a home-directory-only
+			// rule of its own - the setup flow that calls it has always allowed
+			// any non-reserved absolute path.
+			name:      "creates a storage directory and returns a handle",
 			input:     filepath.Join(tempDir, "secure-storage"),
-			wantError: true,
+			wantError: false,
 		},
 		{
-			name:      "path outside home directory",
-			input:     "/tmp/outside-home",
+			name:      "reserved system directory is refused",
+			input:     reservedStoragePath(),
 			wantError: true,
-			errorMsg:  "within your home directory",
+			// ValidateStoragePath reports reserved directories through
+			// ValidatePathSecurity, which phrases every rejection this way.
+			errorMsg: "not allowed",
 		},
 	}
 
@@ -157,9 +174,9 @@ func TestEnsureLocalStorageDirectory(t *testing.T) {
 				defer cleanup()
 			}
 
-			root, err := EnsureLocalStorageDirectory(tt.input)
-			if root != nil {
-				defer root.Close()
+			dir, err := EnsureLocalStorageDirectory(tt.input)
+			if dir != nil {
+				defer func() { _ = dir.Close() }()
 			}
 
 			if tt.wantError {
@@ -175,8 +192,8 @@ func TestEnsureLocalStorageDirectory(t *testing.T) {
 				if err != nil {
 					t.Errorf("EnsureLocalStorageDirectory(%q) unexpected error: %v", tt.input, err)
 				}
-				if root == nil {
-					t.Errorf("EnsureLocalStorageDirectory(%q) returned nil root without error", tt.input)
+				if dir == nil {
+					t.Errorf("EnsureLocalStorageDirectory(%q) returned nil handle without error", tt.input)
 				}
 			}
 		})

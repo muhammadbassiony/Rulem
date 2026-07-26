@@ -23,7 +23,6 @@ package setupmenu
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"rulem/internal/config"
 	"rulem/internal/logging"
@@ -560,11 +559,15 @@ func (m *SetupModel) performConfigCreation() error {
 		// Assign to Repositories array
 		cfg.Repositories = []repository.RepositoryEntry{entry}
 
-		// Ensure the storage directory exists
-		// Note: Path has already been validated by settingshelpers.ValidateAndExpandLocalPath
-		if err := os.MkdirAll(m.StorageDir, 0755); err != nil {
+		// Bring the storage directory into existence and prove rulem can write
+		// to it before the configuration that points at it is saved. This is
+		// the one place that creates a storage directory, and it hands back an
+		// open handle rather than a path.
+		dir, err := repository.EnsureLocalStorageDirectory(m.StorageDir)
+		if err != nil {
 			return fmt.Errorf("failed to create storage directory: %w", err)
 		}
+		_ = dir.Close()
 
 		// Save the config
 		if err := cfg.Save(); err != nil {

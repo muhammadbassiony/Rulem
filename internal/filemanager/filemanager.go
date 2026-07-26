@@ -1,140 +1,70 @@
-// Package filemanager provides high-level file management operations for the rulem application.
-//
-// This package serves as the main interface for file system operations, providing
-// a safe and convenient abstraction over low-level file operations. It handles:
-//
-// - Storage directory management and validation
-// - Secure file copying and movement operations
-// - File discovery and listing with filtering
-// - Path validation and security checks
-// - Integration with the logging system for audit trails
-//
-// # Architecture
-//
-// The FileManager struct is the primary entry point, providing methods for:
-//   - Copying files to/from storage with safety checks
-//   - Scanning repositories for markdown files
-//   - Managing storage directory structure
-//   - Validating file paths and permissions
-//
-// # Multi-Repository Support
-//
-// FileManager is designed to operate on a single directory at a time. For multi-repository
-// scenarios, create one FileManager per repository:
-//
-//	// Prepare all repositories
-//	pathMap, _, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
-//
-//	// Scan all repositories using ScanAllRepositories
-//	files, err := filemanager.ScanAllRepositories(pathMap, cfg.Repositories, logger)
-//
-// The ScanAllRepositories function orchestrates multiple FileManager instances and
-// automatically tags each file with its source repository metadata (ID, name, type).
-//
-// # Security Features
-//
-//   - Path traversal protection
-//   - Storage directory access validation
-//   - Safe file operations with atomic writes
-//   - Permission checking and validation
-//
-// All operations are logged for debugging and audit purposes.
 package filemanager
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"rulem/internal/logging"
 	"rulem/pkg/fileops"
 )
 
+// FileManager applies rulem's file-handling policy to one storage directory.
+//
+// It holds an open handle on that directory rather than its path. Everything
+// below therefore splits cleanly in two: the decisions (may this be
+// overwritten? what should the copy be called? what gets logged?) live here,
+// and the filesystem work happens through the handle.
 type FileManager struct {
-	logger     *logging.AppLogger
-	storageDir string
+	logger *logging.AppLogger
+
+	// dir is the storage directory, already opened and confined. Holding the
+	// handle instead of a string is what makes "inside the storage directory"
+	// a property of the operation rather than a claim about a path.
+	dir *fileops.Dir
 }
 
-// NewFileManager initializes a new FileManager with the given logger and storage directory.
-// The storage directory must exist and be accessible. No directory creation is performed.
+// NewFileManager wraps an open storage directory in rulem's file policy.
 //
-// Parameters:
-//   - storageDir: Absolute path to the storage directory
-//   - logger: Application logger instance
+// The handle is supplied by the caller, which is where the choice of whether
+// the directory may be created belongs:
 //
-// Returns:
-//   - *FileManager: Configured FileManager instance
-//   - error: Validation or access errors
+//	fileops.OpenDir         - the user is choosing this directory now; create it.
+//	fileops.OpenExistingDir - it was configured earlier; it must already exist.
 //
-// Security: Validates storage directory path to prevent path traversal and access to system directories.
-func NewFileManager(storageDir string, logger *logging.AppLogger) (*FileManager, error) {
-	// Validate the storage directory path
-	if err := fileops.ValidateStoragePath(storageDir); err != nil {
-		return nil, fmt.Errorf("Invalid storage directory: %w", err)
-	}
-
-	// Verify storage directory exists (don't create it)
-	if _, err := os.Stat(storageDir); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("storage directory does not exist: %s", storageDir)
-		}
-		return nil, fmt.Errorf("cannot access storage directory: %w", err)
+// The FileManager does not take ownership of the handle: whoever opened it
+// closes it.
+func NewFileManager(dir *fileops.Dir, logger *logging.AppLogger) (*FileManager, error) {
+	if dir == nil {
+		return nil, fmt.Errorf("storage directory handle is required")
 	}
 
 	return &FileManager{
-		logger:     logger,
-		storageDir: storageDir,
+		logger: logger,
+		dir:    dir,
 	}, nil
 }
 
-// CopyFileToStorage copies a file from the source path to the storage directory.
-// Performs atomic copy operation to ensure data integrity.
+// CopyFileToStorage copies a file into the storage directory.
 //
 // Parameters:
-//   - srcPath: Source file path (can be relative or absolute)
-//   - newFileName: Optional new filename in storage (nil to keep original name)
-//   - overwrite: Whether to replace existing files
+//   - srcPath: source file, an ordinary path outside every boundary - it is
+//     whatever file the user picked, and opening it is what validates it
+//   - newFileName: destination name relative to the storage root, optionally
+//     containing subdirectories ("backend/api-rules.md"); nil keeps the
+//     source's base name
+//   - overwrite: whether an existing destination may be replaced
 //
-// Returns:
-//   - string: Destination path of the copied file
-//   - error: Copy operation errors
+// Returns the absolute destination path, for display.
 //
-// Security:
-//   - Validates source file accessibility and type
-//   - Prevents path traversal in filename parameter
-//   - Validates symlink security
-//   - Uses atomic copy to prevent corruption
-//
-// The operation is atomic - either the file is fully copied or no changes are made.
+// Policy applied here: the destination name, and whether an existing file may
+// be replaced. The copy itself is atomic and confined to the storage
+// directory - the destination either appears complete or not at all, and a
+// name that would leave the directory cannot be written.
 func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, overwrite bool) (string, error) {
-	// Validate and resolve source path
-	absPath, err := filepath.Abs(srcPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid source path: %w", err)
-	}
-
-	// Validate source file access using fileops
-	if err := fileops.ValidateFileAccess(absPath, false); err != nil {
-		return "", fmt.Errorf("source file validation failed: %w", err)
-	}
-
-	// Security: validate symlinks using allowlist approach
-	// Only validate if the path is actually a symlink
-	if isLink, err := fileops.IsSymlink(absPath); err == nil && isLink {
-		// Create allowlist of safe source locations
-		allowedPaths := []string{fm.storageDir}
-		if cwd, err := os.Getwd(); err == nil {
-			allowedPaths = append(allowedPaths, cwd)
-		}
-
-		if err := fileops.ValidateSymlinkSecurity(absPath, allowedPaths); err != nil {
-			return "", fmt.Errorf("symlink security check failed: %w", err)
-		}
-	}
-
-	// Determine safe destination filename.
-	// The filename may contain forward-slash separated subdirectories
-	// (e.g. "backend/api-rules.md"); SanitizeRelativePath validates each segment,
-	// rejects traversal/absolute/empty segments, and preserves bare-filename behavior.
+	// POLICY - destination naming.
+	// A supplied name may contain forward-slash separated subdirectories;
+	// SanitizeRelativePath validates each segment and rejects traversal,
+	// absolute and empty segments. With no name supplied, the source file
+	// keeps its own. Both are string arithmetic - nothing is touched on disk.
 	var fileName string
 	if newFileName != nil {
 		cleanName, err := fileops.SanitizeRelativePath(*newFileName)
@@ -146,197 +76,115 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 		fileName = filepath.Base(srcPath)
 	}
 
-	// Construct destination path
-	destPath := filepath.Join(fm.storageDir, fileName)
-
-	// Check if destination exists (use Lstat to detect symlinks, even broken ones)
-	if _, err := os.Lstat(destPath); err == nil {
+	// POLICY - overwrite. Exists reports anything occupying the name,
+	// including a broken symlink, which still occupies it.
+	if fm.dir.Exists(fileName) {
 		if !overwrite {
 			return "", fmt.Errorf("destination file already exists: %s (use overwrite=true to replace)", fileName)
 		}
-		fm.logger.Debug("Overwriting existing file", "dest", destPath)
+		fm.logger.Debug("Overwriting existing file", "dest", fm.dir.DisplayPath(fileName))
 	}
 
-	// Verify we can write to storage directory
-	if err := fileops.ValidateDirectoryWritable(fm.storageDir); err != nil {
-		return "", fmt.Errorf("storage directory is not writable: %w", err)
-	}
-
-	// Create intermediate subdirectories (0755) inside storage if the filename
-	// includes a subdirectory path. filepath.Dir returns storageDir for bare names,
-	// which already exists, so this is a no-op in the common case.
-	destDir := filepath.Dir(destPath)
-	if err := fileops.EnsureDirectoryExists(destDir); err != nil {
-		return "", fmt.Errorf("cannot create destination directory: %w", err)
-	}
-
-	// Perform atomic copy
-	if err := fileops.AtomicCopy(absPath, destPath); err != nil {
+	// MECHANICS - atomic copy through the storage handle, which creates any
+	// intermediate subdirectories the name asks for.
+	if err := fm.dir.CopyFrom(srcPath, fileName); err != nil {
 		return "", fmt.Errorf("failed to copy file: %w", err)
 	}
 
+	destPath := fm.dir.DisplayPath(fileName)
 	fm.logger.Info("File copied successfully", "src", srcPath, "dest", destPath)
 	return destPath, nil
 }
 
-// CopyFileFromStorage copies a file from the storage directory to the current working directory.
-// Performs atomic copy operation to ensure data integrity.
+// CopyFileFromStorage copies a file out of the storage directory into the
+// current working directory.
 //
 // Parameters:
-//   - storagePath: Path to the file in storage directory (can be absolute or relative)
-//   - destPath: Destination path relative to current working directory
-//   - overwrite: Whether to replace existing files
+//   - storagePath: source file, relative to the storage root (FileItem.RelPath)
+//   - destPath: destination, relative to the working directory
+//   - overwrite: whether an existing destination may be replaced
 //
-// Returns:
-//   - string: Absolute destination path of the copied file
-//   - error: Copy operation errors
+// Returns the absolute destination path, for display.
 //
-// Security:
-//   - Validates that source file exists within storage directory
-//   - Prevents path traversal in both parameters
-//   - Validates destination is within current working directory tree
-//   - Uses atomic copy to prevent corruption
-//
-// The destPath must be relative to CWD and cannot escape to parent directories.
+// Both ends are directory handles, so neither the source nor the destination
+// can be argued out of its directory by a crafted name or a symlinked
+// subdirectory.
 func (fm *FileManager) CopyFileFromStorage(storagePath string, destPath string, overwrite bool) (string, error) {
 	fm.logger.Debug("Copying file from storage", "src", storagePath, "dest", destPath, "overwrite", overwrite)
 
-	// Validate destination path
-	if err := fileops.ValidateCWDPath(destPath); err != nil {
-		return "", fmt.Errorf("invalid destination path: %w", err)
-	}
-
-	// Handle both absolute and relative storage paths intelligently
-	var absStoragePath string
-	if filepath.IsAbs(storagePath) {
-		// If path is absolute, use it directly but validate it's within storage
-		absStoragePath = storagePath
-		fm.logger.Debug("Using absolute storage path", "absolute", absStoragePath)
-	} else {
-		// If path is relative, join with storage directory
-		absStoragePath = filepath.Join(fm.storageDir, storagePath)
-		fm.logger.Debug("Converted relative to absolute storage path", "relative", storagePath, "absolute", absStoragePath)
-	}
-
-	// Validate that source file exists and is within storage directory
-	if err := fileops.ValidateFileInDirectory(absStoragePath, fm.storageDir); err != nil {
-		return "", fmt.Errorf("source file validation failed: %w", err)
-	}
-
-	// Get current working directory
-	cwd, err := os.Getwd()
+	cwd, err := fileops.OpenWorkingDir()
 	if err != nil {
-		return "", fmt.Errorf("cannot get current working directory: %w", err)
+		return "", fmt.Errorf("cannot open current working directory: %w", err)
 	}
+	defer func() { _ = cwd.Close() }()
 
-	// Construct absolute destination path
-	absDestPath := filepath.Join(cwd, destPath)
-
-	// Ensure destination directory exists
-	destDir := filepath.Dir(absDestPath)
-	if err := fileops.EnsureDirectoryExists(destDir); err != nil {
-		return "", fmt.Errorf("cannot create destination directory: %w", err)
-	}
-
-	// Check if destination exists (use Lstat to detect symlinks, even broken ones)
-	if _, err := os.Lstat(absDestPath); err == nil {
+	// POLICY - overwrite.
+	if cwd.Exists(destPath) {
 		if !overwrite {
 			return "", fmt.Errorf("destination file already exists: %s (use overwrite=true to replace)", destPath)
 		}
-		fm.logger.Debug("Overwriting existing file", "dest", absDestPath)
+		fm.logger.Debug("Overwriting existing file", "dest", cwd.DisplayPath(destPath))
 	}
 
-	// Perform atomic copy
-	if err := fileops.AtomicCopy(absStoragePath, absDestPath); err != nil {
+	// MECHANICS - atomic copy from one handle to the other.
+	if err := fm.dir.CopyTo(storagePath, cwd, destPath); err != nil {
 		return "", fmt.Errorf("failed to copy file from storage: %w", err)
 	}
 
-	fm.logger.Info("File copied from storage successfully", "src", absStoragePath, "dest", absDestPath)
+	absDestPath := cwd.DisplayPath(destPath)
+	fm.logger.Info("File copied from storage successfully", "src", fm.dir.DisplayPath(storagePath), "dest", absDestPath)
 	return absDestPath, nil
 }
 
-// CreateSymlinkFromStorage creates a symbolic link in the current working directory
-// that points to a file in the storage directory using relative paths.
+// CreateSymlinkFromStorage links a file in the storage directory into the
+// current working directory instead of copying it, so that editing either side
+// edits the same file.
 //
 // Parameters:
-//   - storagePath: Path to the file in storage directory (can be absolute or relative)
-//   - destPath: Destination path for symlink relative to current working directory
-//   - overwrite: Whether to replace existing files/symlinks
+//   - storagePath: target file, relative to the storage root (FileItem.RelPath)
+//   - destPath: link location, relative to the working directory
+//   - overwrite: whether an existing destination may be replaced
 //
-// Returns:
-//   - string: Absolute path of the created symlink
-//   - error: Symlink creation errors
+// Returns the absolute path of the created link, for display.
 //
-// Security:
-//   - Validates that target file exists within storage directory
-//   - Prevents path traversal in both parameters
-//   - Validates destination is within current working directory tree
-//   - Creates relative symlinks for portability
-//
-// The symlink will be bidirectional - editing the symlinked file modifies the storage file.
-// This provides real-time synchronization but requires careful permission management.
+// The link is written with a relative target so the pair survives the tree
+// being moved.
 func (fm *FileManager) CreateSymlinkFromStorage(storagePath string, destPath string, overwrite bool) (string, error) {
-	// Validate destination path
-	if err := fileops.ValidateCWDPath(destPath); err != nil {
-		return "", fmt.Errorf("invalid destination path: %w", err)
-	}
-
-	// Handle both absolute and relative storage paths intelligently
-	var absStoragePath string
-	if filepath.IsAbs(storagePath) {
-		// If path is absolute, use it directly but validate it's within storage
-		absStoragePath = storagePath
-		fm.logger.Debug("Using absolute storage path", "absolute", absStoragePath)
-	} else {
-		// If path is relative, join with storage directory
-		absStoragePath = filepath.Join(fm.storageDir, storagePath)
-		fm.logger.Debug("Converted relative to absolute storage path", "relative", storagePath, "absolute", absStoragePath)
-	}
-
-	// Validate that source file exists and is within storage directory
-	if err := fileops.ValidateFileInDirectory(absStoragePath, fm.storageDir); err != nil {
-		return "", fmt.Errorf("source file validation failed: %w", err)
-	}
-
-	// Get current working directory
-	cwd, err := os.Getwd()
+	cwd, err := fileops.OpenWorkingDir()
 	if err != nil {
-		return "", fmt.Errorf("cannot get current working directory: %w", err)
+		return "", fmt.Errorf("cannot open current working directory: %w", err)
 	}
+	defer func() { _ = cwd.Close() }()
 
-	// Construct absolute destination path
-	absDestPath := filepath.Join(cwd, destPath)
-
-	// Ensure destination directory exists
-	destDir := filepath.Dir(absDestPath)
-	if err := fileops.EnsureDirectoryExists(destDir); err != nil {
-		return "", fmt.Errorf("cannot create destination directory: %w", err)
-	}
-
-	// Check if destination exists (use Lstat to detect symlinks, even broken ones)
-	if _, err := os.Lstat(absDestPath); err == nil {
+	// POLICY - overwrite. A symlink cannot be created over an existing name,
+	// so replacing means removing first; that is a decision, and it is made
+	// here.
+	if cwd.Exists(destPath) {
 		if !overwrite {
 			return "", fmt.Errorf("destination file already exists: %s (use overwrite=true to replace)", destPath)
 		}
-		if err := os.Remove(absDestPath); err != nil {
+		if err := cwd.Remove(destPath); err != nil {
 			return "", fmt.Errorf("cannot remove existing destination: %w", err)
 		}
-		fm.logger.Debug("Removed existing file for symlink", "dest", absDestPath)
+		fm.logger.Debug("Removed existing file for symlink", "dest", cwd.DisplayPath(destPath))
 	}
 
-	// Create the relative symlink
-	if err := fileops.CreateRelativeSymlink(absStoragePath, absDestPath); err != nil {
+	// MECHANICS - the target is proven to be a regular file inside storage and
+	// the link is created through the working directory's handle.
+	if err := fm.dir.SymlinkTo(storagePath, cwd, destPath); err != nil {
 		return "", fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	fm.logger.Info("Symlink created successfully", "target", absStoragePath, "link", absDestPath)
+	absDestPath := cwd.DisplayPath(destPath)
+	fm.logger.Info("Symlink created successfully", "target", fm.dir.DisplayPath(storagePath), "link", absDestPath)
 	return absDestPath, nil
 }
 
-// GetStorageDir returns the storage directory path.
+// GetStorageDir returns the storage directory path for display.
 //
-// Returns:
-//   - string: Absolute path to the configured storage directory
+// It is the path behind the handle, with no boundary attached to it. Do not
+// join a name onto it and open the result - address files through the
+// FileManager instead.
 func (fm *FileManager) GetStorageDir() string {
-	return fm.storageDir
+	return fm.dir.Path()
 }

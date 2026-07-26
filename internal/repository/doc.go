@@ -27,7 +27,8 @@
 //
 // Utilities (defaults.go, setup.go):
 //   - GetDefaultStorageDir: Returns default repository storage location
-//   - EnsureLocalStorageDirectory: Creates and validates directories for config setup
+//   - EnsureLocalStorageDirectory: Creates a storage directory and returns an open,
+//     confined *fileops.Dir handle on it (config setup)
 //
 // # Architecture
 //
@@ -47,7 +48,11 @@
 //
 //	// Access prepared repositories
 //	for _, prep := range prepared {
-//	    fm := filemanager.NewFileManager(prep.LocalPath, logger)
+//	    dir, err := fileops.OpenExistingDir(prep.LocalPath)
+//	    if err != nil { /* the directory has gone away */ }
+//	    defer dir.Close()
+//
+//	    fm, _ := filemanager.NewFileManager(dir, logger)
 //	    // Work with repository files
 //	}
 //
@@ -101,16 +106,22 @@
 //
 // The package provides distinct functions for different scenarios:
 //
-//   - EnsureLocalStorageDirectory (setup.go): Creates and validates directories during config setup
-//     Used by configuration management to ensure user-specified directories exist and are writable
-//     before saving configuration. Creates parent directories as needed.
+//   - EnsureLocalStorageDirectory (setup.go): Creates the directory during config
+//     setup and hands back an OPEN, CONFINED HANDLE (*fileops.Dir), not a path.
+//     That is the contract: the handle exists only because the directory passed
+//     rulem's storage policy, so nothing downstream has to re-prove it, and
+//     every name addressed through it is resolved against the open directory
+//     rather than against a string. The caller owns it and must Close it.
+//     The policy itself lives in exactly one place - fileops.OpenDir.
 //
 //   - LocalSource.Prepare (local.go): Validates existing directories at runtime
 //     Used during application startup to confirm configured paths are ready for file operations.
-//     Does not create directories - they must already exist.
+//     Does not create directories - they must already exist. Callers turn the
+//     path it returns into a handle with fileops.OpenExistingDir, which refuses
+//     to conjure a repository that has been deleted.
 //
 // This separation maintains clear responsibilities:
-//   - Config setup: "Make sure this directory exists and is usable"
+//   - Config setup: "Make this directory exist, and give me the capability to use it"
 //   - Runtime validation: "Confirm this directory is ready for file operations"
 //
 // # Usage Examples
@@ -128,7 +139,12 @@
 //	if err != nil {
 //	    return fmt.Errorf("preparation failed: %w", err)
 //	}
-//	fm := filemanager.NewFileManager(localPath, logger)
+//	dir, err := fileops.OpenExistingDir(localPath)
+//	if err != nil {
+//	    return fmt.Errorf("repository directory unusable: %w", err)
+//	}
+//	defer dir.Close()
+//	fm, err := filemanager.NewFileManager(dir, logger)
 //
 // Multiple Repositories:
 //
@@ -139,19 +155,21 @@
 //	for _, prep := range prepared {
 //	    fmt.Printf("%s: %s\n", prep.Name(), prep.GetStatusMessage())
 //	    if !prep.HasError() {
-//	        fm := filemanager.NewFileManager(prep.LocalPath, logger)
+//	        dir, _ := fileops.OpenExistingDir(prep.LocalPath)
+//	        defer dir.Close()
+//	        fm, _ := filemanager.NewFileManager(dir, logger)
 //	        // Work with repository
 //	    }
 //	}
 //
 // Directory Setup (Config):
 //
-//	root, err := repository.EnsureLocalStorageDirectory("~/Documents/rulem-rules")
+//	dir, err := repository.EnsureLocalStorageDirectory("~/Documents/rulem-rules")
 //	if err != nil {
 //	    return fmt.Errorf("setup failed: %w", err)
 //	}
-//	defer root.Close()
-//	// Directory now exists and is validated
+//	defer dir.Close()
+//	// The directory now exists, is writable, and dir is the capability to use it
 //
 // # Credential Management
 //

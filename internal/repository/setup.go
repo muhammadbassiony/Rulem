@@ -3,9 +3,10 @@
 // This file contains functions for setting up and creating local storage directories
 // during configuration setup. These functions are distinct from runtime validation:
 //
-//   - EnsureLocalStorageDirectory: Creates directories with proper permissions and validates
-//     them for use. This is called during config creation/modification to ensure the
-//     user-specified directory exists and is writable before saving the configuration.
+//   - EnsureLocalStorageDirectory: Creates the directory if needed, proves it is
+//     writable, and returns an open confined handle on it. This is called during
+//     config creation, when the user is choosing the directory and rulem is
+//     therefore allowed to bring it into being.
 //
 //   - Runtime validation (in local.go): LocalSource.Prepare validates that configured
 //     directories exist and are accessible during application startup, but does not
@@ -14,129 +15,66 @@
 // This separation ensures that:
 // - Config setup can create necessary directories for the user
 // - Runtime validation confirms directories are still valid without side effects
-// - Security boundaries are maintained (home directory confinement)
+// - There is exactly one implementation of "where may rulem write?" (fileops.OpenDir)
 package repository
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"rulem/internal/logging"
 	"rulem/pkg/fileops"
 	"strings"
-
-	"github.com/adrg/xdg"
 )
 
-// EnsureLocalStorageDirectory creates and validates a local storage directory for rulem's central repository.
-// This function is specifically designed for local repository setup scenarios (not Git repositories).
+// EnsureLocalStorageDirectory brings a local storage directory into existence
+// and returns an open, confined handle on it.
 //
-// The function performs comprehensive validation and setup:
-//   - Validates path is within user's home directory (security boundary)
-//   - Creates directory structure if it doesn't exist (mkdir -p behavior)
-//   - Verifies the path is actually a directory (not a file)
-//   - Tests write permissions by creating a temporary test file
-//   - Returns a secure os.Root confined to the validated directory
+// # The contract
 //
-// Security guarantees:
-//   - All paths must be within user's home directory (prevents system directory access)
-//   - Uses os.Root for confined filesystem operations
-//   - Validates directory permissions before use
-//   - Prevents path traversal attacks through home directory validation
+// It returns a *fileops.Dir - a capability, not a path. Nothing about the
+// directory has to be re-proved afterwards: the handle exists only because the
+// directory passed rulem's storage policy, and every name addressed through it
+// is resolved against the open directory rather than against a string. The
+// caller owns the handle and must Close it.
 //
-// Usage scenarios:
-//   - Initial config setup (CreateNewConfig)
-//   - User updates central repository path (UpdateCentralPath)
-//   - Local repository preparation (not Git cloning)
+// This is the "the user is choosing this directory now" case, so creating it is
+// part of the job. Its counterpart is fileops.OpenExistingDir, for a directory
+// that was configured earlier and must still be there.
 //
-// Parameters:
-//   - userPath: Path to the desired storage directory (can be relative to home with ~/)
+// # What it checks
 //
-// Returns:
-//   - *os.Root: Secure root confined to the validated directory
-//   - error: Validation, creation, or permission errors
+// Everything is delegated to fileops.OpenDir, which is the single answer to
+// "where may rulem write?":
+//
+//   - "~" is expanded
+//   - the path must be absolute or home-relative, with no ".." component
+//   - it must not be a reserved system directory, before or after symlink
+//     resolution
+//   - the directory is created if missing
+//   - writability is proven with a randomly named, O_EXCL probe that is
+//     removed again
+//
+// Earlier revisions of this function repeated that work here with a
+// home-directory root and a fixed ".rulem-write-test" probe name. Two answers
+// to the same question is how they drift apart; this is now the thin one.
 //
 // Example:
 //
-//	root, err := EnsureLocalStorageDirectory("~/Documents/rulem-rules")
+//	dir, err := EnsureLocalStorageDirectory("~/Documents/rulem-rules")
 //	if err != nil {
 //	    return fmt.Errorf("failed to setup storage: %w", err)
 //	}
-//	defer root.Close()
-func EnsureLocalStorageDirectory(userPath string) (*os.Root, error) {
+//	defer dir.Close()
+func EnsureLocalStorageDirectory(userPath string) (*fileops.Dir, error) {
 	if strings.TrimSpace(userPath) == "" {
 		return nil, fmt.Errorf("local storage directory path cannot be empty")
 	}
 
-	// Expand ~/ and other user path shortcuts
-	expandedPath := fileops.ExpandPath(userPath)
-
-	// SECURITY: Ensure path is within user's home directory to prevent system access
-	homeRoot, err := createSecureHomeRoot()
+	dir, err := fileops.OpenDir(userPath)
 	if err != nil {
-		return nil, fmt.Errorf("cannot establish secure home boundary: %w", err)
-	}
-	defer homeRoot.Close() // Will create a new root for the specific validated path
-
-	// Validate the expanded path is within home directory bounds
-	relPath, err := fileops.ValidatePathInHome(expandedPath)
-	if err != nil {
-		return nil, fmt.Errorf("storage path must be within your home directory for security: %w", err)
+		logging.Error("Local storage directory unusable", "path", userPath, "error", err)
+		return nil, err
 	}
 
-	// Check if target directory already exists
-	if stat, err := homeRoot.Stat(relPath); err == nil {
-		// Path exists - verify it's actually a directory
-		if !stat.IsDir() {
-			logging.Error("Storage path exists but is not a directory", "relPath", relPath)
-			return nil, fmt.Errorf("storage path exists but is not a directory: %s", relPath)
-		}
-		logging.Debug("Local storage directory already exists", "relPath", relPath)
-	} else {
-		// Directory doesn't exist - create it with proper permissions
-		if err := homeRoot.Mkdir(relPath, 0755); err != nil {
-			logging.Error("Failed to create local storage directory", "relPath", relPath, "error", err)
-			return nil, fmt.Errorf("cannot create local storage directory: %w", err)
-		}
-		logging.Info("Created local storage directory", "relPath", relPath)
-	}
-
-	// Test write permissions by creating a temporary test file
-	testFile := filepath.Join(relPath, ".rulem-write-test")
-	logging.Debug("Testing write permissions for storage directory", "testFile", testFile)
-	if f, err := homeRoot.OpenFile(testFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err != nil {
-		logging.Error("Storage directory is not writable", "testFile", testFile, "error", err)
-		return nil, fmt.Errorf("local storage directory is not writable: %w", err)
-	} else {
-		f.Write([]byte("rulem write permission test"))
-		f.Close()
-		logging.Debug("Write permission test successful for storage directory")
-	}
-	homeRoot.Remove(testFile) // Cleanup
-
-	// Create a secure root confined to the validated storage directory
-	targetRoot, err := os.OpenRoot(expandedPath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot create secure root for storage directory: %w", err)
-	}
-
-	logging.Info("Local storage directory ready", "path", expandedPath)
-
-	return targetRoot, nil
-}
-
-// createSecureHomeRoot creates a secure root confined to the user's home directory.
-// This establishes the security boundary for all storage directory operations.
-//
-// Returns:
-//   - *os.Root: Secure root confined to user's home directory
-//   - error: Home directory resolution or security setup errors
-func createSecureHomeRoot() (*os.Root, error) {
-	homeDir := xdg.Home
-	if homeDir == "" {
-		return nil, fmt.Errorf("cannot determine user home directory")
-	}
-
-	logging.Debug("Establishing secure home directory boundary", "homeDir", homeDir)
-	return os.OpenRoot(homeDir)
+	logging.Info("Local storage directory ready", "path", dir.Path())
+	return dir, nil
 }

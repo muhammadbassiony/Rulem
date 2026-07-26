@@ -11,6 +11,7 @@ import (
 	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
+	"rulem/pkg/fileops"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -770,8 +771,13 @@ func (m *ImportRulesModel) scanForFilesCmd() tea.Cmd {
 func (m *ImportRulesModel) saveFileCmd(overwrite bool) tea.Cmd {
 	m.logger.Debug("Importing file", "path", m.selectedFile.Path, "mode", m.selectedImportMode.title, "editor", m.selectedEditor.Title(), "overwrite", overwrite)
 	return func() tea.Msg {
-		// Path of the file in storage, now absolute from ScanAllRepositories
-		storagePath := m.selectedFile.Path
+		// The file's location inside its repository. Scanning produced this as
+		// a (repository, relative path) pair; the relative half is what the
+		// operation is addressed by, the absolute Path is only for display.
+		storagePath := m.selectedFile.RelPath
+		if storagePath == "" {
+			return ImportFileErrorMsg{Err: fmt.Errorf("file has no repository-relative path: %s", m.selectedFile.Name), IsOverwriteError: false}
+		}
 
 		// Use the selected editor config to generate the destination file path
 		// this will be relative to the CWD.
@@ -796,8 +802,16 @@ func (m *ImportRulesModel) saveFileCmd(overwrite bool) tea.Cmd {
 			}
 		}
 
-		// Create FileManager for the source repository
-		fm, err := filemanager.NewFileManager(sourceRepoPath, m.logger)
+		// Open the source repository and hold the handle for the duration of
+		// the import. It must already exist - an import from a repository that
+		// has been deleted is an error, not a reason to recreate it empty.
+		sourceDir, err := fileops.OpenExistingDir(sourceRepoPath)
+		if err != nil {
+			return ImportFileErrorMsg{Err: fmt.Errorf("failed to access source repository: %w", err), IsOverwriteError: false}
+		}
+		defer func() { _ = sourceDir.Close() }()
+
+		fm, err := filemanager.NewFileManager(sourceDir, m.logger)
 		if err != nil {
 			return ImportFileErrorMsg{Err: fmt.Errorf("failed to access source repository: %w", err), IsOverwriteError: false}
 		}

@@ -8,10 +8,24 @@ import (
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
+	"rulem/pkg/fileops"
 	"slices"
 	"strings"
 	"testing"
 )
+
+// openRepoDir opens a repository path the way the processor does, for the
+// tests that drive processRuleFile directly rather than through
+// ParseRuleFiles.
+func openRepoDir(t *testing.T, path string) *fileops.Dir {
+	t.Helper()
+	dir, err := fileops.OpenExistingDir(path)
+	if err != nil {
+		t.Fatalf("Failed to open repository directory %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = dir.Close() })
+	return dir
+}
 
 func createTestRuleFileProcessor(t *testing.T) (*RuleFileProcessor, string, map[string]string) {
 	t.Helper()
@@ -1412,7 +1426,8 @@ description: "Valid rule"
 This is clean content.`), 0644)
 				return filemanager.FileItem{
 					Name:         "valid-rule.md",
-					Path:         filePath, // Absolute path
+					RelPath:      "valid-rule.md",
+					Path:         filePath, // display only
 					RepositoryID: "test-repo-123",
 				}
 			},
@@ -1439,7 +1454,8 @@ description: "XSS rule"
 This documents what not to write.`), 0644)
 				return filemanager.FileItem{
 					Name:         "xss-rule.md",
-					Path:         filePath, // Absolute path
+					RelPath:      "xss-rule.md",
+					Path:         filePath, // display only
 					RepositoryID: "test-repo-123",
 				}
 			},
@@ -1453,7 +1469,8 @@ This documents what not to write.`), 0644)
 				os.WriteFile(filePath, []byte(content), 0644)
 				return filemanager.FileItem{
 					Name:         "control-chars.md",
-					Path:         filePath, // Absolute path
+					RelPath:      "control-chars.md",
+					Path:         filePath, // display only
 					RepositoryID: "test-repo-123",
 				}
 			},
@@ -1471,7 +1488,8 @@ This documents what not to write.`), 0644)
 				os.WriteFile(filePath, []byte(content), 0644)
 				return filemanager.FileItem{
 					Name:         "large-file.md",
-					Path:         filePath, // Absolute path
+					RelPath:      "large-file.md",
+					Path:         filePath, // display only
 					RepositoryID: "test-repo-123",
 				}
 			},
@@ -1484,7 +1502,7 @@ This documents what not to write.`), 0644)
 		t.Run(tt.name, func(t *testing.T) {
 			fileItem := tt.setupFunc()
 
-			_, err := processor.processRuleFile(fileItem)
+			_, err := processor.processRuleFile(openRepoDir(t, tempDir), fileItem)
 
 			if tt.expectError {
 				if err == nil {
@@ -1543,19 +1561,19 @@ This is outside content.`
 
 	fileItem := filemanager.FileItem{
 		Name:         "bad-symlink.md",
-		Path:         linkPath, // Absolute path
+		RelPath:      "bad-symlink.md",
+		Path:         linkPath, // display only
 		RepositoryID: "test-repo-123",
 	}
-	_, err = processor.processRuleFile(fileItem)
+	_, err = processor.processRuleFile(openRepoDir(t, tempDir), fileItem)
 
 	if err == nil {
 		t.Error("Expected error for symlink pointing outside storage directory")
-	} else if !strings.Contains(err.Error(), "symlink security check failed") &&
-		!strings.Contains(err.Error(), "symlink target validation failed") &&
-		!strings.Contains(err.Error(), "file containment validation failed") {
-		// Containment is enforced at several layers; which one rejects the
-		// symlink first is an implementation detail, that it is rejected is not.
-		t.Errorf("Expected symlink security error, got: %v", err)
+	} else if !strings.Contains(err.Error(), "file validation failed") {
+		// The link is no longer resolved and compared against a base path: the
+		// open itself refuses to leave the repository, so the failure arrives
+		// as the open failing.
+		t.Errorf("Expected the open to be refused, got: %v", err)
 	}
 }
 
@@ -1591,15 +1609,15 @@ This should not be accessible.`
 	// This simulates a file with an absolute path outside the repository
 	fileItem := filemanager.FileItem{
 		Name:         "outside-rule.md",
-		Path:         outsideFile, // Absolute path outside repository
+		RelPath:      "../outside-rule.md", // names its way out of the repository
+		Path:         outsideFile,          // display only
 		RepositoryID: "test-repo-123",
 	}
 
-	_, err = processor.processRuleFile(fileItem)
+	_, err = processor.processRuleFile(openRepoDir(t, tempDir), fileItem)
 	if err == nil {
 		t.Error("Expected error for file outside storage directory")
-	} else if !strings.Contains(err.Error(), "file containment validation failed") &&
-		!strings.Contains(err.Error(), "path security check failed") {
-		t.Errorf("Expected file containment or path security error, got: %v", err)
+	} else if !strings.Contains(err.Error(), "path traversal not allowed") {
+		t.Errorf("Expected a traversal rejection, got: %v", err)
 	}
 }

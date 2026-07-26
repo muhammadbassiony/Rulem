@@ -22,6 +22,7 @@ import (
 	"rulem/internal/config"
 	"rulem/internal/logging"
 	"rulem/internal/tui"
+	"rulem/internal/tui/components/filepicker"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/setupmenu"
 	"runtime"
@@ -191,6 +192,11 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("configuration is nil after loading")
 	}
 	appLogger.Info("Configuration loaded successfully", "init_time", cfg.InitTime)
+
+	// Resolve the markdown render style before Bubble Tea takes over stdin.
+	// Detection queries the terminal and reads the reply off the TTY, which
+	// would otherwise race the program's own input reader.
+	filepicker.DetectGlamourStyle()
 
 	// Initialize TUI application with panic recovery
 	model := tui.NewMainModel(cfg, appLogger)

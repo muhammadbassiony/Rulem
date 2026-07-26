@@ -10,6 +10,7 @@ import (
 	"rulem/internal/logging"
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/styles"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -206,36 +207,64 @@ func (c *lruCache) Clear() {
 	c.currentBytes = 0
 }
 
-// detectGlamourStyle attempts to detect terminal background using termenv,
-// but will respect GLAMOUR_STYLE if set to a concrete value (not "auto").
-// A timeout ensures we never hang on terminals that don't respond.
-func detectGlamourStyle(timeout time.Duration) string {
-	// Default fallback if detection doesn't finish in time
-	defaultStyle := "dark"
+// defaultGlamourStyle is used whenever the terminal background is unknown.
+const defaultGlamourStyle = "dark"
 
+var (
+	glamourStyleMu sync.RWMutex
+	glamourStyle   string // resolved once by DetectGlamourStyle
+)
+
+// DetectGlamourStyle resolves the markdown render style for the whole process
+// and caches it.
+//
+// It MUST be called before the Bubble Tea program starts, and never again.
+// Detection asks the terminal for its background colour (OSC 11 plus a CSI 6n
+// cursor position report) and reads the reply straight off the TTY. Doing that
+// while Bubble Tea owns stdin makes the two readers race for the same bytes:
+// termenv discards everything it reads until it sees an ESC, so keystrokes go
+// missing, and whatever Bubble Tea wins gets mis-parsed - an arrow key whose
+// leading ESC was eaten by termenv arrives as the literal runes "[D" and is
+// typed into whatever input has focus. The query bytes themselves also land in
+// the middle of a rendered frame and corrupt it.
+//
+// GLAMOUR_STYLE (when set to anything other than "auto") skips detection.
+func DetectGlamourStyle() {
 	style := os.Getenv("GLAMOUR_STYLE")
-	if style != "" && style != "auto" {
+	if style == "" || style == "auto" {
+		// Detect synchronously. Backgrounding this behind a timeout is what the
+		// previous version did, but an abandoned goroutine keeps reading the TTY
+		// and steals input from the program later - the very race this avoids.
+		// termenv returns immediately when stdout is not a foreground TTY or TERM
+		// is screen/tmux/dumb, and otherwise falls back to its own 5s per-byte
+		// timeout for terminals that answer neither OSC 11 nor CSI 6n.
+		style = defaultGlamourStyle
+		if !termenv.NewOutput(os.Stdout).HasDarkBackground() {
+			style = "light"
+		}
+	}
+
+	glamourStyleMu.Lock()
+	defer glamourStyleMu.Unlock()
+	glamourStyle = style
+}
+
+// currentGlamourStyle returns the style resolved by DetectGlamourStyle. It never
+// touches the terminal, so it is safe to call while the program is running; if
+// detection never ran (tests, other entry points) it falls back to the
+// GLAMOUR_STYLE override or the default style.
+func currentGlamourStyle() string {
+	glamourStyleMu.RLock()
+	style := glamourStyle
+	glamourStyleMu.RUnlock()
+
+	if style != "" {
 		return style
 	}
-
-	type result struct{ style string }
-	ch := make(chan result, 1)
-
-	go func() {
-		out := termenv.NewOutput(os.Stdout)
-		if out.HasDarkBackground() {
-			ch <- result{style: "dark"}
-			return
-		}
-		ch <- result{style: "light"}
-	}()
-
-	select {
-	case r := <-ch:
-		return r.style
-	case <-time.After(timeout):
-		return defaultStyle
+	if env := os.Getenv("GLAMOUR_STYLE"); env != "" && env != "auto" {
+		return env
 	}
+	return defaultGlamourStyle
 }
 
 // fileListDelegate builds the list delegate for the given files. The second
@@ -378,10 +407,10 @@ func (fp *FilePicker) SetSize(width, height int) {
 }
 
 func (fp *FilePicker) Init() tea.Cmd {
-	// Detect glamour style once (with timeout and env override) to avoid repeated
-	// OSC/CSI queries during rendering and ensure stable behavior across terminals.
+	// Read the style resolved before the program started. Querying the terminal
+	// here would fight Bubble Tea for stdin - see DetectGlamourStyle.
 	if fp.glamourStyle == "" {
-		fp.glamourStyle = detectGlamourStyle(50 * time.Millisecond)
+		fp.glamourStyle = currentGlamourStyle()
 		fp.logger.Debug("Glamour style selected", "style", fp.glamourStyle)
 	}
 

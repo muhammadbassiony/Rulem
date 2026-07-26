@@ -182,58 +182,6 @@ func TestCreateRelativeSymlink(t *testing.T) {
 	})
 }
 
-// Tests for CreateAbsoluteSymlink
-
-func TestCreateAbsoluteSymlink(t *testing.T) {
-	tempDir := createTempDir(t)
-	defer os.RemoveAll(tempDir)
-
-	targetFile := createTestFile(t, tempDir, "abs_target.txt", "absolute target content")
-
-	t.Run("create absolute symlink", func(t *testing.T) {
-		linkPath := filepath.Join(tempDir, "absolute_link.txt")
-
-		err := CreateAbsoluteSymlink(targetFile, linkPath)
-		if err != nil {
-			t.Fatalf("CreateAbsoluteSymlink failed: %v", err)
-		}
-
-		// Verify symlink exists
-		isLink, err := IsSymlink(linkPath)
-		if err != nil {
-			t.Fatalf("Failed to check symlink: %v", err)
-		}
-		if !isLink {
-			t.Error("Created path is not a symlink")
-		}
-
-		// Verify symlink target is absolute
-		target, err := os.Readlink(linkPath)
-		if err != nil {
-			t.Fatalf("Failed to read symlink: %v", err)
-		}
-		if !filepath.IsAbs(target) {
-			t.Errorf("Expected absolute target, got relative: %s", target)
-		}
-
-		// Verify content is accessible
-		content := readFileContent(t, linkPath)
-		if content != "absolute target content" {
-			t.Error("Content not accessible through absolute symlink")
-		}
-	})
-
-	t.Run("target does not exist", func(t *testing.T) {
-		nonExistentTarget := filepath.Join(tempDir, "nonexistent_abs.txt")
-		linkPath := filepath.Join(tempDir, "broken_abs_link.txt")
-
-		err := CreateAbsoluteSymlink(nonExistentTarget, linkPath)
-		if err == nil {
-			t.Error("Expected error for non-existent target")
-		}
-	})
-}
-
 // Tests for ResolveSymlink
 
 func TestResolveSymlink(t *testing.T) {
@@ -442,126 +390,6 @@ func TestValidateSymlinkSecurityComprehensive(t *testing.T) {
 	}
 }
 
-// Tests for RemoveSymlink
-
-func TestRemoveSymlink(t *testing.T) {
-	tempDir := createTempDir(t)
-	defer os.RemoveAll(tempDir)
-
-	targetFile := createTestFile(t, tempDir, "remove_target.txt", "target content")
-
-	t.Run("remove valid symlink", func(t *testing.T) {
-		linkPath := filepath.Join(tempDir, "remove_link.txt")
-		createTestSymlink(t, targetFile, linkPath)
-
-		// Verify symlink exists
-		if !fileExists(linkPath) {
-			t.Fatal("Symlink was not created")
-		}
-
-		err := RemoveSymlink(linkPath)
-		if err != nil {
-			t.Fatalf("RemoveSymlink failed: %v", err)
-		}
-
-		// Verify symlink is removed
-		if fileExists(linkPath) {
-			t.Error("Symlink was not removed")
-		}
-
-		// Verify target still exists
-		if !fileExists(targetFile) {
-			t.Error("Target file was removed with symlink")
-		}
-	})
-
-	t.Run("attempt to remove regular file", func(t *testing.T) {
-		regularFile := createTestFile(t, tempDir, "regular_remove.txt", "content")
-
-		err := RemoveSymlink(regularFile)
-		if err == nil {
-			t.Error("Expected error when trying to remove regular file")
-		}
-		if !strings.Contains(err.Error(), "not a symbolic link") {
-			t.Errorf("Expected 'not a symbolic link' error, got: %v", err)
-		}
-
-		// Verify regular file is not removed
-		if !fileExists(regularFile) {
-			t.Error("Regular file was incorrectly removed")
-		}
-	})
-
-	t.Run("non-existent symlink", func(t *testing.T) {
-		nonExistentLink := filepath.Join(tempDir, "nonexistent_link.txt")
-
-		err := RemoveSymlink(nonExistentLink)
-		if err == nil {
-			t.Error("Expected error for non-existent symlink")
-		}
-	})
-}
-
-// Tests for GetSymlinkTarget
-
-func TestGetSymlinkTarget(t *testing.T) {
-	tempDir := createTempDir(t)
-	defer os.RemoveAll(tempDir)
-
-	targetFile := createTestFile(t, tempDir, "target_test.txt", "target content")
-
-	t.Run("get relative symlink target", func(t *testing.T) {
-		linkPath := filepath.Join(tempDir, "rel_target_link.txt")
-		relativeTarget := "target_test.txt"
-		createTestSymlink(t, relativeTarget, linkPath)
-
-		target, err := GetSymlinkTarget(linkPath)
-		if err != nil {
-			t.Fatalf("GetSymlinkTarget failed: %v", err)
-		}
-
-		if target != relativeTarget {
-			t.Errorf("Expected target %q, got %q", relativeTarget, target)
-		}
-	})
-
-	t.Run("get absolute symlink target", func(t *testing.T) {
-		linkPath := filepath.Join(tempDir, "abs_target_link.txt")
-		absoluteTarget, _ := filepath.Abs(targetFile)
-		createTestSymlink(t, absoluteTarget, linkPath)
-
-		target, err := GetSymlinkTarget(linkPath)
-		if err != nil {
-			t.Fatalf("GetSymlinkTarget failed: %v", err)
-		}
-
-		if target != absoluteTarget {
-			t.Errorf("Expected target %q, got %q", absoluteTarget, target)
-		}
-	})
-
-	t.Run("regular file instead of symlink", func(t *testing.T) {
-		regularFile := createTestFile(t, tempDir, "regular_target.txt", "content")
-
-		_, err := GetSymlinkTarget(regularFile)
-		if err == nil {
-			t.Error("Expected error for regular file")
-		}
-		if !strings.Contains(err.Error(), "not a symbolic link") {
-			t.Errorf("Expected 'not a symbolic link' error, got: %v", err)
-		}
-	})
-
-	t.Run("non-existent symlink", func(t *testing.T) {
-		nonExistentLink := filepath.Join(tempDir, "nonexistent_target_link.txt")
-
-		_, err := GetSymlinkTarget(nonExistentLink)
-		if err == nil {
-			t.Error("Expected error for non-existent symlink")
-		}
-	})
-}
-
 // Integration tests
 
 func TestSymlinkIntegration(t *testing.T) {
@@ -585,10 +413,10 @@ func TestSymlinkIntegration(t *testing.T) {
 			t.Fatalf("Created path is not a symlink: %v", err)
 		}
 
-		// Get symlink target
-		target, err := GetSymlinkTarget(linkPath)
+		// Read the link's immediate target
+		target, err := os.Readlink(linkPath)
 		if err != nil {
-			t.Fatalf("GetSymlinkTarget failed: %v", err)
+			t.Fatalf("os.Readlink failed: %v", err)
 		}
 
 		// Resolve symlink
@@ -610,10 +438,9 @@ func TestSymlinkIntegration(t *testing.T) {
 			t.Errorf("Content mismatch through symlink: %q", content)
 		}
 
-		// Remove symlink
-		err = RemoveSymlink(linkPath)
-		if err != nil {
-			t.Fatalf("RemoveSymlink failed: %v", err)
+		// Remove the link itself, not its target
+		if err := os.Remove(linkPath); err != nil {
+			t.Fatalf("os.Remove failed: %v", err)
 		}
 
 		// Verify symlink is gone but target remains
@@ -644,9 +471,9 @@ func TestSymlinkIntegration(t *testing.T) {
 		}
 
 		// Verify target is relative
-		target, err := GetSymlinkTarget(linkPath)
+		target, err := os.Readlink(linkPath)
 		if err != nil {
-			t.Fatalf("GetSymlinkTarget failed: %v", err)
+			t.Fatalf("os.Readlink failed: %v", err)
 		}
 		if filepath.IsAbs(target) {
 			t.Error("Expected relative symlink for portability")

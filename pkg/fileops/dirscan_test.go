@@ -335,37 +335,6 @@ func TestSecureDirectoryScanner_FileInfo(t *testing.T) {
 	}
 }
 
-func TestSecureDirectoryScanner_GetScanStats(t *testing.T) {
-	tempDir := createTempDirStructure(t)
-	defer os.RemoveAll(tempDir)
-
-	scanner, err := NewDirectoryScanner(tempDir, &DirectoryScanOptions{
-		MaxDepth:      20,
-		IncludeHidden: true,
-	})
-	if err != nil {
-		t.Fatalf("Failed to create scanner: %v", err)
-	}
-	defer scanner.Close()
-
-	_, err = scanner.ScanDirectory()
-	if err != nil {
-		t.Fatalf("ScanDirectory() failed: %v", err)
-	}
-
-	stats := scanner.GetScanStats()
-
-	if stats.TotalFiles <= 0 {
-		t.Error("Expected positive number of total files")
-	}
-	if stats.TotalSize <= 0 {
-		t.Error("Expected positive total size")
-	}
-	if stats.LargestFile < 1000 {
-		t.Errorf("Expected largest file to be at least 1000 bytes, got %d", stats.LargestFile)
-	}
-}
-
 func TestSecureDirectoryScanner_SymlinkProtection(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Symlink test not supported on Windows")
@@ -526,42 +495,6 @@ func TestSecureDirectoryScanner_Close(t *testing.T) {
 	}
 }
 
-func TestScanWithFilter(t *testing.T) {
-	tempDir := createTempDirStructure(t)
-	defer os.RemoveAll(tempDir)
-
-	// Test scanning for Go files
-	goFiles, err := ScanWithFilter(tempDir, func(name string) bool {
-		return strings.HasSuffix(name, ".go")
-	}, 10)
-	if err != nil {
-		t.Fatalf("ScanWithFilter() failed: %v", err)
-	}
-
-	if len(goFiles) == 0 {
-		t.Error("Expected to find at least one .go file")
-	}
-
-	for _, file := range goFiles {
-		if !strings.HasSuffix(file.Name, ".go") {
-			t.Errorf("Found non-Go file: %s", file.Name)
-		}
-	}
-
-	// Test scanning for markdown files
-	mdFiles, err := ScanWithFilter(tempDir, func(name string) bool {
-		return strings.HasSuffix(name, ".md")
-	}, 5)
-	if err != nil {
-		t.Fatalf("ScanWithFilter() failed: %v", err)
-	}
-
-	expectedMdFiles := []string{"README.md", "guide.md", "reference.md"}
-	if len(mdFiles) < len(expectedMdFiles) {
-		t.Errorf("Expected at least %d markdown files, got %d", len(expectedMdFiles), len(mdFiles))
-	}
-}
-
 func TestDirectoryScanOptions_DefaultValues(t *testing.T) {
 	opts := getDefaultScanOptions()
 
@@ -611,23 +544,6 @@ func BenchmarkDirectoryScanning(b *testing.B) {
 		}
 
 		scanner.Close()
-	}
-}
-
-func BenchmarkScanWithFilter(b *testing.B) {
-	tempDir := createBenchTempDirStructure(b)
-	defer os.RemoveAll(tempDir)
-
-	filter := func(name string) bool {
-		return strings.HasSuffix(name, ".go") || strings.HasSuffix(name, ".md")
-	}
-
-	b.ResetTimer()
-	for range b.N {
-		_, err := ScanWithFilter(tempDir, filter, 10)
-		if err != nil {
-			b.Fatalf("ScanWithFilter() failed: %v", err)
-		}
 	}
 }
 

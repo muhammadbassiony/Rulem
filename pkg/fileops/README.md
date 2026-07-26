@@ -186,8 +186,9 @@ func createSafeSymlink(targetPath, linkPath string) error {
     // Validate the created symlink
     allowedPaths := []string{filepath.Dir(targetPath)}
     if err := fileops.ValidateSymlinkSecurity(linkPath, allowedPaths); err != nil {
-        // Clean up on validation failure
-        fileops.RemoveSymlink(linkPath)
+        // Clean up on validation failure. os.Remove deletes the link itself,
+        // never the file it points at.
+        _ = os.Remove(linkPath)
         return fmt.Errorf("symlink validation failed: %w", err)
     }
 

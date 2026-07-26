@@ -235,6 +235,92 @@ func SanitizeFilename(filename string) (string, error) {
 	return clean, nil
 }
 
+// SanitizeRelativePath validates and normalizes a user-supplied relative path that
+// may contain forward-slash separated subdirectory segments (e.g. "backend/api-rules.md").
+// It is intended for choosing a destination inside a trusted storage root while
+// preventing the path from escaping that root.
+//
+// Behavior:
+//   - A bare filename (no "/" separator) behaves exactly like SanitizeFilename, so
+//     existing callers keep their current semantics.
+//   - Otherwise the path is split on "/" and each segment is validated and sanitized
+//     like an individual filename.
+//
+// Rules:
+//   - Empty or whitespace-only paths are rejected.
+//   - A leading "/" is not an absolute filesystem path here: the result is always
+//     interpreted relative to a storage root, so "/backend/api.md" is accepted and
+//     normalized to "backend/api.md" (root of the storage directory).
+//   - Platform-absolute forms that survive that normalization (e.g. a Windows
+//     volume path like "C:/rules.md") are rejected.
+//   - Empty segments (e.g. "a//b.md" or a trailing "/") are rejected.
+//   - "." and ".." segments (path traversal) are rejected.
+//
+// Returns:
+//   - string: The cleaned relative path using the OS path separator, suitable for
+//     joining onto a storage root.
+//   - error: Validation error if the path is unsafe or invalid.
+//
+// Usage example:
+//
+//	rel, err := fileops.SanitizeRelativePath("backend/api-rules.md")
+//	if err != nil {
+//	    return err
+//	}
+//	dest := filepath.Join(storageDir, rel)
+func SanitizeRelativePath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	// A leading "/" means "root of the storage directory", not the filesystem
+	// root, so strip it rather than rejecting the path. The result is still
+	// validated segment by segment below and joined onto the storage root.
+	trimmed = strings.TrimLeft(trimmed, "/")
+	if trimmed == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	// Anything still absolute after that (e.g. a Windows volume path) cannot be
+	// contained inside the storage root.
+	if filepath.IsAbs(trimmed) {
+		return "", fmt.Errorf("path must be relative, not absolute: %q", path)
+	}
+
+	// Fast path: a bare filename with no separators must behave exactly like
+	// SanitizeFilename so existing behavior is preserved.
+	if !strings.Contains(trimmed, "/") {
+		return SanitizeFilename(trimmed)
+	}
+
+	segments := strings.Split(trimmed, "/")
+	cleaned := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		if seg == "" {
+			return "", fmt.Errorf("path contains empty segment: %q", path)
+		}
+		if seg == "." || seg == ".." {
+			return "", fmt.Errorf("path traversal not allowed: %q", path)
+		}
+		cleanSeg, err := SanitizeFilename(seg)
+		if err != nil {
+			return "", fmt.Errorf("invalid path segment %q: %w", seg, err)
+		}
+		cleaned = append(cleaned, cleanSeg)
+	}
+
+	result := filepath.Join(cleaned...)
+
+	// Defensive containment check: the joined path must not resolve outside the root.
+	if result == "" || result == "." || result == ".." ||
+		strings.HasPrefix(result, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes repository root: %q", path)
+	}
+
+	return result, nil
+}
+
 // ValidateFileAccess checks if a file exists and is accessible with specified permissions.
 // This function provides a way to verify file accessibility before performing operations.
 //

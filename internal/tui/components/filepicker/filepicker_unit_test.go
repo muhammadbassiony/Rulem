@@ -84,14 +84,69 @@ func TestLRUCache_SkipTooLarge(t *testing.T) {
 }
 
 func TestDetectGlamourStyle_EnvOverride(t *testing.T) {
-	old := os.Getenv("GLAMOUR_STYLE")
-	t.Cleanup(func() { _ = os.Setenv("GLAMOUR_STYLE", old) })
+	setGlamourStyleEnv(t, "dracula")
+	resetDetectedGlamourStyle(t)
 
-	_ = os.Setenv("GLAMOUR_STYLE", "dracula")
-	style := detectGlamourStyle(1 * time.Millisecond)
-	if style != "dracula" {
+	// The env override must win without querying the terminal.
+	DetectGlamourStyle()
+	if style := currentGlamourStyle(); style != "dracula" {
 		t.Fatalf("expected env override style 'dracula', got %q", style)
 	}
+}
+
+func TestCurrentGlamourStyle_NoDetectionRun(t *testing.T) {
+	setGlamourStyleEnv(t, "")
+	resetDetectedGlamourStyle(t)
+
+	// Without a prior DetectGlamourStyle call (tests, other entry points) the
+	// style must fall back to the default rather than query the terminal,
+	// which would steal input from the running program.
+	if style := currentGlamourStyle(); style != defaultGlamourStyle {
+		t.Fatalf("expected default style %q, got %q", defaultGlamourStyle, style)
+	}
+}
+
+func TestCurrentGlamourStyle_UsesDetectedValue(t *testing.T) {
+	setGlamourStyleEnv(t, "")
+	resetDetectedGlamourStyle(t)
+
+	glamourStyleMu.Lock()
+	glamourStyle = "light"
+	glamourStyleMu.Unlock()
+
+	if style := currentGlamourStyle(); style != "light" {
+		t.Fatalf("expected detected style 'light', got %q", style)
+	}
+}
+
+func setGlamourStyleEnv(t *testing.T, value string) {
+	t.Helper()
+	old, had := os.LookupEnv("GLAMOUR_STYLE")
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv("GLAMOUR_STYLE", old)
+			return
+		}
+		_ = os.Unsetenv("GLAMOUR_STYLE")
+	})
+	if value == "" {
+		_ = os.Unsetenv("GLAMOUR_STYLE")
+		return
+	}
+	_ = os.Setenv("GLAMOUR_STYLE", value)
+}
+
+func resetDetectedGlamourStyle(t *testing.T) {
+	t.Helper()
+	glamourStyleMu.Lock()
+	old := glamourStyle
+	glamourStyle = ""
+	glamourStyleMu.Unlock()
+	t.Cleanup(func() {
+		glamourStyleMu.Lock()
+		glamourStyle = old
+		glamourStyleMu.Unlock()
+	})
 }
 
 func TestNewFilePicker_InitialSizingAndState(t *testing.T) {

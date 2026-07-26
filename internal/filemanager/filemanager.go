@@ -131,11 +131,13 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 		}
 	}
 
-	// Determine safe destination filename
+	// Determine safe destination filename.
+	// The filename may contain forward-slash separated subdirectories
+	// (e.g. "backend/api-rules.md"); SanitizeRelativePath validates each segment,
+	// rejects traversal/absolute/empty segments, and preserves bare-filename behavior.
 	var fileName string
 	if newFileName != nil {
-		// Security: sanitize filename using fileops
-		cleanName, err := fileops.SanitizeFilename(*newFileName)
+		cleanName, err := fileops.SanitizeRelativePath(*newFileName)
 		if err != nil {
 			return "", fmt.Errorf("invalid filename: %w", err)
 		}
@@ -158,6 +160,14 @@ func (fm *FileManager) CopyFileToStorage(srcPath string, newFileName *string, ov
 	// Verify we can write to storage directory
 	if err := fileops.ValidateDirectoryWritable(fm.storageDir); err != nil {
 		return "", fmt.Errorf("storage directory is not writable: %w", err)
+	}
+
+	// Create intermediate subdirectories (0755) inside storage if the filename
+	// includes a subdirectory path. filepath.Dir returns storageDir for bare names,
+	// which already exists, so this is a no-op in the common case.
+	destDir := filepath.Dir(destPath)
+	if err := fileops.EnsureDirectoryExists(destDir); err != nil {
+		return "", fmt.Errorf("cannot create destination directory: %w", err)
 	}
 
 	// Perform atomic copy

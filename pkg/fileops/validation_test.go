@@ -604,6 +604,107 @@ func BenchmarkSanitizeFilename(b *testing.B) {
 	}
 }
 
+// Tests for ExpandPath
+
+func TestExpandPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Cannot determine home directory")
+	}
+
+	tests := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{
+			name:     "bare tilde expands to the home directory",
+			path:     "~",
+			expected: home,
+		},
+		{
+			name:     "tilde with trailing slash",
+			path:     "~/",
+			expected: home,
+		},
+		{
+			name:     "tilde prefix",
+			path:     "~/Documents/file.txt",
+			expected: filepath.Join(home, "Documents", "file.txt"),
+		},
+		{
+			// The tilde must form its own path component: a file really named
+			// "~backup" is not a home-relative path.
+			name:     "tilde that is part of a name is left alone",
+			path:     "~backup",
+			expected: "~backup",
+		},
+		{
+			name:     "tilde in the middle is left alone",
+			path:     "/tmp/~/notes.md",
+			expected: "/tmp/~/notes.md",
+		},
+		{
+			name:     "absolute path is unchanged",
+			path:     "/tmp/notes.md",
+			expected: "/tmp/notes.md",
+		},
+		{
+			name:     "relative path is unchanged",
+			path:     "notes/file.md",
+			expected: "notes/file.md",
+		},
+		{
+			name:     "empty path is unchanged",
+			path:     "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExpandPath(tt.path); got != tt.expected {
+				t.Errorf("ExpandPath(%q) = %q, want %q", tt.path, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestIsReservedDirectoryComponentBoundary checks that reserved directories
+// match on whole path components, and that a nested path under a reserved
+// directory is caught whether or not it exists on disk. On macOS "/etc" is a
+// symlink to "/private/etc", so an existing path is seen in resolved form
+// while a non-existent one can only be matched as written.
+func TestIsReservedDirectoryComponentBoundary(t *testing.T) {
+	if isWindows() {
+		t.Skip("Unix reserved directories are not meaningful on Windows")
+	}
+
+	reserved := []string{
+		"/etc",
+		"/etc/passwd",
+		"/etc/does-not-exist/deeper.md",
+		"/bin/does-not-exist",
+	}
+	for _, path := range reserved {
+		t.Run("reserved "+path, func(t *testing.T) {
+			if !IsReservedDirectory(path) {
+				t.Errorf("IsReservedDirectory(%q) = false, want true", path)
+			}
+		})
+	}
+
+	// Sibling names that merely share a prefix must not match.
+	allowed := []string{"/etcetera", "/binary-data"}
+	for _, path := range allowed {
+		t.Run("not reserved "+path, func(t *testing.T) {
+			if IsReservedDirectory(path) {
+				t.Errorf("IsReservedDirectory(%q) = true, want false", path)
+			}
+		})
+	}
+}
+
 // Tests for ValidateDirectoryWritable
 
 func TestValidateDirectoryWritable(t *testing.T) {
@@ -1214,6 +1315,53 @@ func TestSanitizeIdentifier(t *testing.T) {
 			expected:    "scriptalertxssscript",
 			expectError: false,
 		},
+
+		// Runs longer than two separators. Chained ReplaceAll could only ever
+		// halve a run, so these used to come out with separators left over.
+		{
+			name:        "long run of spaces",
+			input:       "a     b",
+			maxLength:   100,
+			expected:    "a_b",
+			expectError: false,
+		},
+		{
+			name:        "odd-length run of hyphens",
+			input:       "a---b",
+			maxLength:   100,
+			expected:    "a_b",
+			expectError: false,
+		},
+		{
+			name:        "mixed run of separators",
+			input:       "a -_- b",
+			maxLength:   100,
+			expected:    "a_b",
+			expectError: false,
+		},
+		{
+			name:        "long run of underscores",
+			input:       "a_____b",
+			maxLength:   100,
+			expected:    "a_b",
+			expectError: false,
+		},
+		// Leading separators are dropped before the limit is applied, so they
+		// no longer eat into the caller's length budget.
+		{
+			name:        "leading separators do not consume the length budget",
+			input:       "__abcdef",
+			maxLength:   4,
+			expected:    "abcd",
+			expectError: false,
+		},
+		{
+			name:        "truncation does not leave a trailing separator",
+			input:       "abc def",
+			maxLength:   4,
+			expected:    "abc",
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1361,5 +1509,13 @@ func TestValidateFileSizeLimitWithDirectory(t *testing.T) {
 		t.Error("ValidateFileSizeLimit should fail when given a directory")
 	} else if !strings.Contains(err.Error(), "directory, not a file") {
 		t.Errorf("ValidateFileSizeLimit error = %v, want error containing 'directory, not a file'", err)
+	}
+}
+
+func BenchmarkIsReservedDirectory(b *testing.B) {
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, "Documents", "rules")
+	for b.Loop() {
+		IsReservedDirectory(path)
 	}
 }

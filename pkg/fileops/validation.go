@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // ValidatePathSecurity performs comprehensive security validation on a file path.
@@ -296,26 +297,37 @@ func ValidateFileAccess(filePath string, requireWrite bool) error {
 	return nil
 }
 
-// ExpandPath expands a path that starts with "~/" to the user's home directory.
-// This is a utility function for handling user home directory shortcuts.
+// ExpandPath expands a leading "~" to the user's home directory.
 //
 // Parameters:
-//   - path: The path to expand, which may start with "~/"
+//   - path: The path to expand, which may be "~" or start with "~/"
 //
 // Returns:
-//   - string: The expanded path, or the original path if it doesn't start with "~/"
+//   - string: The expanded path, or the original path if there is nothing to
+//     expand or the home directory cannot be determined
+//
+// A bare "~" expands to the home directory itself. Only a leading tilde that
+// forms its own path component is expanded, so a file legitimately named
+// "~backup" is left alone.
 //
 // Usage example:
 //
 //	expanded := fileops.ExpandPath("~/Documents/file.txt")
 //	// Returns something like "/home/user/Documents/file.txt"
 func ExpandPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[2:])
-		}
+	if path != "~" && !strings.HasPrefix(path, "~/") &&
+		!strings.HasPrefix(path, "~"+string(os.PathSeparator)) {
+		return path
 	}
-	return path
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }
 
 // IsReservedDirectory checks if the path is a system or reserved directory
@@ -348,9 +360,8 @@ func IsReservedDirectory(path string) bool {
 	absPath = filepath.Clean(absPath)
 
 	// Resolve any symlinks in the path for comparison
-	resolvedPath, err := filepath.EvalSymlinks(absPath)
-	if err == nil {
-		absPath = resolvedPath // Use resolved path if available
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = filepath.Clean(resolved)
 	}
 
 	// Always treat root as reserved
@@ -358,41 +369,64 @@ func IsReservedDirectory(path string) bool {
 		return true
 	}
 
-	absPath = filepath.Clean(absPath)
-	reservedDirs := getReservedDirectories()
-
-	for _, reserved := range reservedDirs {
-		// Canonicalize the reserved directory
-		reservedAbs, err := filepath.Abs(reserved)
-		if err != nil {
-			continue
-		}
-		resolvedReserved, err := filepath.EvalSymlinks(reservedAbs)
-		if err == nil {
-			reservedAbs = filepath.Clean(resolvedReserved)
-		} else {
-			reservedAbs = filepath.Clean(reservedAbs)
-		}
-
-		// Exact match
-		if strings.EqualFold(absPath, reservedAbs) {
+	for _, reserved := range canonicalReservedDirectories() {
+		if strings.EqualFold(absPath, reserved) {
 			return true
 		}
-
-		// Child directory match - but with exceptions
-		reservedPrefix := strings.ToLower(reserved) + string(os.PathSeparator)
-		pathLower := strings.ToLower(absPath)
-
-		if strings.HasPrefix(pathLower, reservedPrefix) {
-			// Exception: Allow user temp directories
-			if isUserTempDirectory(absPath) {
-				continue
-			}
+		if hasPathPrefix(absPath, reserved) && !isUserTempDirectory(absPath) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// canonicalReservedDirectories returns the reserved directory list resolved to
+// absolute, symlink-free paths.
+//
+// Canonicalizing costs a filepath.EvalSymlinks per entry and the set never
+// changes during a run, so it is computed once instead of on every call.
+// IsReservedDirectory sits underneath ValidateStoragePath and
+// ValidatePathSecurity, which run on every path the user types.
+// Both the literal and the symlink-resolved form of each entry are kept. A
+// path that exists is matched in its resolved form ("/private/etc/passwd"),
+// while one that does not exist cannot be resolved at all and is only ever
+// seen as written ("/etc/nope/deeper") - so neither form alone covers both.
+var canonicalReservedDirectories = sync.OnceValue(func() []string {
+	raw := getReservedDirectories()
+	canonical := make([]string, 0, len(raw)*2)
+	for _, dir := range raw {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		abs = filepath.Clean(abs)
+		canonical = append(canonical, abs)
+
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			if resolved = filepath.Clean(resolved); resolved != abs {
+				canonical = append(canonical, resolved)
+			}
+		}
+	}
+	return canonical
+})
+
+// hasPathPrefix reports whether path lies beneath prefix, comparing whole path
+// components so that "/etchosts" does not match the prefix "/etc".
+//
+// Both arguments must already be canonical. The old code compared the incoming
+// canonical path against the *unresolved* reserved entry, which on macOS meant
+// "/private/etc/passwd" was never matched by the "/etc" entry - it only got
+// caught because "/private/etc" happened to be listed separately.
+func hasPathPrefix(path, prefix string) bool {
+	if len(path) <= len(prefix) {
+		return false
+	}
+	if !strings.EqualFold(path[:len(prefix)], prefix) {
+		return false
+	}
+	return os.IsPathSeparator(path[len(prefix)])
 }
 
 // getReservedDirectories returns platform-specific reserved directories
@@ -737,37 +771,56 @@ func SanitizeIdentifier(identifier string, maxLength int) (string, error) {
 		return "", fmt.Errorf("identifier cannot be empty")
 	}
 
-	var cleanName strings.Builder
+	// Build the result in a single pass, collapsing each run of separators as
+	// it is encountered. The previous implementation chained ReplaceAll("  ",
+	// " "), (" ", "_"), ("--", "_") and ("__", "_"), which cannot collapse a
+	// run longer than two - "a     b" came out as "a__b" - and gave different
+	// answers depending on which replacement happened to run first.
+	var b strings.Builder
+	b.Grow(len(identifier))
+	var pending rune // the run of separators seen since the last kept character
+	var pendingLen int
 
 	for _, r := range identifier {
-		// Allow alphanumeric, spaces, hyphens, underscores, and periods
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == ' ' || r == '-' || r == '_' || r == '.' {
-			cleanName.WriteRune(r)
+		switch {
+		case isIdentifierRune(r):
+			if pendingLen > 0 && b.Len() > 0 {
+				// A lone '-' or '_' is meaningful and kept as written; a space,
+				// or any run of two or more, normalizes to a single '_'.
+				if pendingLen == 1 && pending != ' ' {
+					b.WriteRune(pending)
+				} else {
+					b.WriteByte('_')
+				}
+			}
+			pendingLen = 0
+			b.WriteRune(r)
+		case r == ' ' || r == '-' || r == '_':
+			pending = r
+			pendingLen++
 		}
 	}
 
-	result := strings.TrimSpace(cleanName.String())
-
-	// Replace multiple consecutive spaces/separators with single underscore
-	result = strings.ReplaceAll(result, "  ", " ")
-	result = strings.ReplaceAll(result, " ", "_")
-	result = strings.ReplaceAll(result, "--", "_")
-	result = strings.ReplaceAll(result, "__", "_")
-
-	// Limit length if specified
+	// Trim separators, then truncate, then trim again: truncating first can
+	// cut mid-run and leave a trailing '_' behind. Every retained rune is
+	// ASCII, so a byte-length limit cannot split a multi-byte character.
+	result := strings.Trim(b.String(), "_-.")
 	if maxLength > 0 && len(result) > maxLength {
-		result = result[:maxLength]
+		result = strings.TrimRight(result[:maxLength], "_-.")
 	}
-
-	// Trim leading/trailing separators
-	result = strings.Trim(result, "_-.")
 
 	if result == "" {
 		return "", fmt.Errorf("identifier becomes empty after sanitization")
 	}
 
 	return result, nil
+}
+
+// isIdentifierRune reports whether r is kept verbatim by SanitizeIdentifier.
+// Periods are content, not separators: "rules.v2" keeps its dot.
+func isIdentifierRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '.'
 }
 
 // ValidateFileSizeLimit checks if a file size is within acceptable limits.

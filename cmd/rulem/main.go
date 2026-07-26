@@ -25,6 +25,7 @@ import (
 	"rulem/internal/tui/helpers"
 	"rulem/internal/tui/setupmenu"
 	"runtime"
+	"runtime/debug"
 	"syscall"
 
 	mcp "rulem/internal/mcp"
@@ -33,12 +34,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version info (set by GoReleaser)
+// Version info (set by GoReleaser via -ldflags at release time)
 var (
 	version = "dev"
 	commit  = "none"
 	date    = "unknown"
 )
+
+// versionString renders the full version line shared by `rulem version` and
+// `rulem --version`.
+func versionString() string {
+	return fmt.Sprintf("rulem %s (%s) built on %s", resolveVersion(), commit, date)
+}
+
+// resolveVersion returns the release tag. GoReleaser stamps it into `version`,
+// but for builds that skip those ldflags (`go install`, `go build`) fall back to
+// the module version the toolchain recorded, which is the git tag it resolved.
+func resolveVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return version
+}
 
 var (
 	debugMode bool
@@ -70,6 +90,7 @@ Key features:
 
   # Show version information
   rulem version
+  rulem --version
 
 Note: Debug logs are saved to ./rulem.log in the current directory`,
 	RunE: runTUI,
@@ -82,7 +103,7 @@ var versionCmd = &cobra.Command{
 	Long:  "Print detailed version information including build commit and date",
 	Run: func(cmd *cobra.Command, args []string) {
 		initLogger() // Initialize logger for debug output if needed
-		fmt.Printf("rulem %s (%s) built on %s\n", version, commit, date)
+		fmt.Println(versionString())
 	},
 }
 
@@ -101,6 +122,13 @@ The server communicates via stdin/stdout using JSON-RPC as per MCP specification
 }
 
 func init() {
+	// Setting Version makes Cobra handle --version on rootCmd. Registering the
+	// flag ourselves first stops Cobra adding its default one, which would also
+	// claim -v as a shorthand; leave -v free for a future --verbose.
+	rootCmd.Version = resolveVersion()
+	rootCmd.SetVersionTemplate(versionString() + "\n")
+	rootCmd.Flags().Bool("version", false, "version for rulem")
+
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&debugMode, "debug", "d", false, "Enable debug logging")
 

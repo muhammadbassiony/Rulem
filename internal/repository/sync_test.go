@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,7 +122,7 @@ func TestRepositorySyncResult_GetMessage(t *testing.T) {
 // TestSyncAllRepositories_EmptyList tests syncing an empty repository list
 func TestSyncAllRepositories_EmptyList(t *testing.T) {
 	logger, _ := logging.NewTestLogger()
-	results := SyncAllRepositories([]RepositoryEntry{}, logger)
+	results := SyncAllRepositories(context.Background(), []RepositoryEntry{}, logger)
 
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
@@ -142,7 +143,7 @@ func TestSyncAllRepositories_LocalRepositorySkipped(t *testing.T) {
 		},
 	}
 
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -204,7 +205,7 @@ func TestSyncAllRepositories_DirtyRepositorySkipped(t *testing.T) {
 	}
 
 	logger, _ := logging.NewTestLogger()
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -236,7 +237,7 @@ func TestSyncAllRepositories_NonExistentRepositoryFailed(t *testing.T) {
 		},
 	}
 
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -304,7 +305,7 @@ func TestSyncAllRepositories_MixedResults(t *testing.T) {
 	})
 
 	logger, _ := logging.NewTestLogger()
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
@@ -349,7 +350,7 @@ func TestSyncAllRepositories_DurationTracking(t *testing.T) {
 		},
 	}
 
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -433,7 +434,7 @@ func TestSyncAllRepositories_IntegrationWithCleanRepo(t *testing.T) {
 	}
 
 	logger, _ := logging.NewTestLogger()
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -484,7 +485,7 @@ func TestSyncAllRepositories_PreservesRepositoryOrder(t *testing.T) {
 		},
 	}
 
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
@@ -512,7 +513,7 @@ func TestSyncAllRepositories_WithNilLogger(t *testing.T) {
 	}
 
 	// Should not panic with nil logger
-	results := SyncAllRepositories(repos, nil)
+	results := SyncAllRepositories(context.Background(), repos, nil)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -587,7 +588,7 @@ func TestSyncAllRepositories_WithOptionalBranch(t *testing.T) {
 	}
 
 	logger, _ := logging.NewTestLogger()
-	results := SyncAllRepositories(repos, logger)
+	results := SyncAllRepositories(context.Background(), repos, logger)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))

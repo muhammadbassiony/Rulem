@@ -2,6 +2,7 @@
 package settingsmenu
 
 import (
+	"context"
 	"fmt"
 	"rulem/internal/repository"
 	"rulem/internal/tui/components"
@@ -85,6 +86,7 @@ func (m *SettingsModel) deleteRepository() tea.Cmd {
 		// Reload repositories
 		var err error
 		m.preparedRepos, err = repository.PrepareAllRepositories(
+			context.Background(),
 			m.currentConfig.Repositories,
 			m.logger,
 		)

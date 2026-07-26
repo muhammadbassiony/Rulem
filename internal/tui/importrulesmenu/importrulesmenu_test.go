@@ -1,6 +1,7 @@
 package importrulesmenu
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -123,7 +124,7 @@ func createTestModelWithFiles(t *testing.T) (*ImportRulesModel, []filemanager.Fi
 	model := NewImportRulesModel(ctx)
 
 	// Prepare repository and get local path
-	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), ctx.Config.Repositories, ctx.Logger)
 	if err != nil || len(prepared) == 0 {
 		t.Fatalf("Failed to prepare repository: %v", err)
 	}
@@ -1454,7 +1455,7 @@ func TestImportRulesModel_AbsolutePaths(t *testing.T) {
 	ctx.Config.Repositories[0].Path = storageDir
 
 	// Prepare repository and get local path
-	prepared, err := repository.PrepareAllRepositories(ctx.Config.Repositories, ctx.Logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), ctx.Config.Repositories, ctx.Logger)
 	if err != nil || len(prepared) == 0 {
 		t.Fatalf("Failed to prepare repository: %v", err)
 	}

@@ -1401,3 +1401,31 @@ func TestScanCurrDirectory_ReturnsAbsolutePaths(t *testing.T) {
 		}
 	})
 }
+
+func TestScanAllRepositories_SkipsUnavailable(t *testing.T) {
+	logger, _ := logging.NewTestLogger()
+
+	goodDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(goodDir, "rule.md"), []byte("# rule"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	prepared := []repository.PreparedRepository{
+		{
+			Entry:     repository.RepositoryEntry{ID: "ok", Name: "OK", Type: repository.RepositoryTypeLocal, Path: goodDir},
+			LocalPath: goodDir,
+		},
+		{
+			// Unavailable: preparation failed, no LocalPath.
+			Entry: repository.RepositoryEntry{ID: "gone", Name: "Gone", Type: repository.RepositoryTypeLocal, Path: "/does/not/exist"},
+		},
+	}
+
+	files, err := ScanAllRepositories(prepared, logger)
+	if err != nil {
+		t.Fatalf("unavailable repositories must be skipped, not errored: %v", err)
+	}
+	if len(files) != 1 || files[0].RepositoryID != "ok" {
+		t.Fatalf("expected only files from the available repository, got %+v", files)
+	}
+}

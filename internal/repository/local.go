@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,6 +61,8 @@ func NewLocalSource(path string) LocalSource {
 // EnsureLocalStorageDirectory instead.
 //
 // Parameters:
+//   - ctx: Accepted for Source interface compatibility and ignored; LocalSource
+//     performs no network operations.
 //   - logger: Logger for structured logging (can be nil for silent operation)
 //
 // Returns:
@@ -69,12 +72,12 @@ func NewLocalSource(path string) LocalSource {
 // Usage:
 //
 //	ls := repository.NewLocalSource("~/my-rules")
-//	localPath, err := ls.Prepare(logger)
+//	localPath, err := ls.Prepare(ctx, logger)
 //	if err != nil {
 //	    return fmt.Errorf("failed to prepare local repository: %w", err)
 //	}
 //	// localPath is now ready for use with FileManager
-func (ls LocalSource) Prepare(logger *logging.AppLogger) (string, error) {
+func (ls LocalSource) Prepare(_ context.Context, logger *logging.AppLogger) (string, error) {
 	if logger != nil {
 		logger.Info("Preparing local repository source", "path", ls.Path)
 	}

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -63,6 +64,8 @@ type Source interface {
 	//   - Returns the absolute path to the cloned repository
 	//
 	// Parameters:
+	//   - ctx: Context bounding any network operations. LocalSource ignores it;
+	//     GitSource uses it to abort clone/fetch on cancellation or timeout.
 	//   - logger: Structured logger for operation logging (can be nil)
 	//
 	// Returns:
@@ -73,7 +76,7 @@ type Source interface {
 	//   - LocalSource: Returns errors for missing directories, permission issues, security violations
 	//   - GitSource: Returns errors for clone failures, authentication issues, network problems
 	//   - All errors include user-friendly messages with actionable guidance
-	Prepare(logger *logging.AppLogger) (localPath string, err error)
+	Prepare(ctx context.Context, logger *logging.AppLogger) (localPath string, err error)
 }
 
 // RepositoryType represents the type of repository storage backend.
@@ -208,6 +211,14 @@ func (pr PreparedRepository) IsRemote() bool {
 // IsLocal returns true if this is a local repository.
 func (pr PreparedRepository) IsLocal() bool {
 	return pr.Entry.IsLocal()
+}
+
+// IsAvailable reports whether the repository was prepared successfully and
+// can be used for file operations. Repositories whose preparation failed
+// (e.g. a local path that no longer exists) are kept in the prepared list so
+// the settings menu can surface and repair them, but they have no LocalPath.
+func (pr PreparedRepository) IsAvailable() bool {
+	return pr.LocalPath != ""
 }
 
 // WasSynced returns true if the repository was successfully synchronized.

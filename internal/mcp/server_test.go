@@ -966,8 +966,23 @@ func TestServer_MultiRepositoryInitialization(t *testing.T) {
 					},
 				}
 			},
-			expectError:   true,
-			errorContains: "failed to prepare",
+			expectError: false,
+			validateFunc: func(t *testing.T, s *Server) {
+				// The invalid repository is kept as unavailable; the valid
+				// ones keep serving MCP tools.
+				if len(s.preparedRepositories) != 3 {
+					t.Errorf("Expected 3 prepared repositories, got %d", len(s.preparedRepositories))
+				}
+				available := repository.AvailableRepositories(s.preparedRepositories)
+				if len(available) != 2 {
+					t.Errorf("Expected 2 available repositories, got %d", len(available))
+				}
+				for _, prep := range available {
+					if prep.ID() == "repo2-123457" {
+						t.Errorf("Invalid repository must not be available")
+					}
+				}
+			},
 		},
 	}
 
@@ -1067,7 +1082,7 @@ Content from repo 3`
 	logger, _ := logging.NewTestLogger()
 
 	// Prepare repositories directly
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1147,7 +1162,7 @@ name: "coding_standards"
 	logger, _ := logging.NewTestLogger()
 
 	// Prepare repositories and scan files
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}
@@ -1237,7 +1252,7 @@ Just plain content`
 	logger, _ := logging.NewTestLogger()
 
 	// Prepare and scan repositories
-	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+	prepared, err := repository.PrepareAllRepositories(context.Background(), cfg.Repositories, logger)
 	if err != nil {
 		t.Fatalf("Failed to prepare repositories: %v", err)
 	}

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -31,6 +32,7 @@ import (
 //   - Returns the absolute path to the cloned repository
 //
 // Parameters:
+//   - ctx: Context for cancellation
 //   - repo: Repository entry with type and configuration
 //   - logger: Logger for structured logging during preparation (can be nil)
 //
@@ -40,7 +42,7 @@ import (
 //
 // Usage:
 //
-//	localPath, err := repository.PrepareRepository(repo, logger)
+//	localPath, err := repository.PrepareRepository(ctx, repo, logger)
 //	if err != nil {
 //	    return fmt.Errorf("repository preparation failed: %w", err)
 //	}
@@ -51,7 +53,7 @@ import (
 //   - Local repos: Directory not found, permission denied, security violations
 //   - GitHub repos: Clone failures, authentication errors, network issues
 //   - All errors are suitable for display to end users
-func PrepareRepository(repo RepositoryEntry, logger *logging.AppLogger) (string, error) {
+func PrepareRepository(ctx context.Context, repo RepositoryEntry, logger *logging.AppLogger) (string, error) {
 	if logger != nil {
 		if repo.IsRemote() {
 			logger.Info("Preparing Git repository source",
@@ -81,7 +83,7 @@ func PrepareRepository(repo RepositoryEntry, logger *logging.AppLogger) (string,
 	}
 
 	// Prepare the source and get the local path
-	localPath, err := source.Prepare(logger)
+	localPath, err := source.Prepare(ctx, logger)
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare repository %s (%s): %w",
 			repo.ID, repo.Name, err)
@@ -109,23 +111,28 @@ func PrepareRepository(repo RepositoryEntry, logger *logging.AppLogger) (string,
 // 4. Logs sync results for each repository (success, failed, skipped)
 //
 // Parameters:
+//   - ctx: Context for cancellation across all repos
 //   - repos: List of repository entries to prepare
 //   - logger: Logger for structured logging (can be nil)
 //
 // Returns:
-//   - []PreparedRepository: Slice of prepared repositories with paths and sync status
-//   - error: Aggregated preparation errors, nil if all successful
+//   - []PreparedRepository: One entry per input repository. Entries that failed
+//     preparation are included as unavailable (LocalPath == "", sync status
+//     failed) so callers can surface and repair them — check IsAvailable(),
+//     or filter with AvailableRepositories().
+//   - error: Non-nil only when validation fails or when no repository at all
+//     could be prepared. Partial failures do NOT produce an error.
 //
 // Usage:
 //
-//	prepared, err := repository.PrepareAllRepositories(cfg.Repositories, logger)
+//	prepared, err := repository.PrepareAllRepositories(ctx, cfg.Repositories, logger)
 //	if err != nil {
 //	    return fmt.Errorf("repository preparation failed: %w", err)
 //	}
 //	for _, prep := range prepared {
 //	    fmt.Printf("Repository %s ready at: %s\n", prep.ID(), prep.LocalPath)
 //	}
-func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) ([]PreparedRepository, error) {
+func PrepareAllRepositories(ctx context.Context, repos []RepositoryEntry, logger *logging.AppLogger) ([]PreparedRepository, error) {
 	if logger != nil {
 		logger.Info("Starting multi-repository preparation", "repository_count", len(repos))
 	}
@@ -148,7 +155,7 @@ func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) 
 			)
 		}
 
-		localPath, err := PrepareRepository(repo, logger)
+		localPath, err := PrepareRepository(ctx, repo, logger)
 		if err != nil {
 			errorMsg := fmt.Sprintf("repository %s (%s): %v", repo.ID, repo.Name, err)
 			preparationErrors = append(preparationErrors, errorMsg)
@@ -159,7 +166,19 @@ func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) 
 					"error", err,
 				)
 			}
-			// Continue with other repositories instead of failing fast
+			// Keep the repository in the result as unavailable (LocalPath "")
+			// so UIs can surface it for repair/deletion instead of the whole
+			// application degrading to an error state.
+			prepared = append(prepared, PreparedRepository{
+				Entry:     repo,
+				LocalPath: "",
+				SyncResult: RepositorySyncResult{
+					RepositoryID:   repo.ID,
+					RepositoryName: repo.Name,
+					Status:         SyncStatusFailed,
+					Error:          err,
+				},
+			})
 			continue
 		}
 
@@ -186,27 +205,30 @@ func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) 
 		}
 	}
 
-	// If any preparation errors occurred, return them as an aggregated error
-	if len(preparationErrors) > 0 {
-		return prepared, fmt.Errorf("failed to prepare %d repositories:\n  - %s",
+	// Only fail outright when nothing is usable at all: partial failures are
+	// surfaced per-repository (unavailable entries) so the healthy
+	// repositories keep working.
+	available := AvailableRepositories(prepared)
+	if len(repos) > 0 && len(available) == 0 {
+		return prepared, fmt.Errorf("failed to prepare all %d repositories:\n  - %s",
 			len(preparationErrors),
 			strings.Join(preparationErrors, "\n  - "),
 		)
 	}
 
-	// Step 3: Sync all GitHub repositories and update sync results
-	if len(prepared) > 0 {
+	// Step 3: Sync all successfully prepared GitHub repositories
+	if len(available) > 0 {
 		if logger != nil {
 			logger.Info("Starting repository synchronization")
 		}
 
 		// Get the original repository entries for syncing
-		repoEntries := make([]RepositoryEntry, len(prepared))
-		for i, p := range prepared {
+		repoEntries := make([]RepositoryEntry, len(available))
+		for i, p := range available {
 			repoEntries[i] = p.Entry
 		}
 
-		syncResults := SyncAllRepositories(repoEntries, logger)
+		syncResults := SyncAllRepositories(ctx, repoEntries, logger)
 
 		// Update prepared repositories with sync results
 		syncResultMap := make(map[string]RepositorySyncResult)
@@ -248,9 +270,24 @@ func PrepareAllRepositories(repos []RepositoryEntry, logger *logging.AppLogger) 
 	if logger != nil {
 		logger.Info("Multi-repository preparation completed",
 			"total_repositories", len(repos),
-			"prepared_successfully", len(prepared),
+			"prepared_successfully", len(available),
+			"unavailable", len(prepared)-len(available),
 		)
 	}
 
 	return prepared, nil
+}
+
+// AvailableRepositories filters a prepared repository list down to the
+// entries that were prepared successfully and can serve file operations.
+// Unavailable entries (failed preparation, e.g. a deleted local directory)
+// remain in the original slice for display/repair purposes.
+func AvailableRepositories(prepared []PreparedRepository) []PreparedRepository {
+	available := make([]PreparedRepository, 0, len(prepared))
+	for _, p := range prepared {
+		if p.IsAvailable() {
+			available = append(available, p)
+		}
+	}
+	return available
 }

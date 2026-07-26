@@ -38,6 +38,11 @@ type RepositoryListItem struct {
 
 	// Path is the local filesystem path to the repository
 	Path string
+
+	// Available reports whether the repository was prepared successfully.
+	// Unavailable repositories (e.g. a deleted local directory) are shown so
+	// the user can repair or remove them.
+	Available bool
 }
 
 // Title returns the repository name for display in the list.
@@ -52,6 +57,9 @@ func (i RepositoryListItem) Description() string {
 	icon := "📁" // local
 	if i.Type == "github" {
 		icon = "🔗" // github
+	}
+	if !i.Available {
+		return fmt.Sprintf("%s %s • ⚠️ unavailable • %s", icon, i.Type, i.Path)
 	}
 	return fmt.Sprintf("%s %s • %s", icon, i.Type, i.Path)
 }
@@ -73,11 +81,18 @@ func (i RepositoryListItem) FilterValue() string {
 func BuildRepositoryListItems(prepared []repository.PreparedRepository) []list.Item {
 	items := make([]list.Item, len(prepared))
 	for i, prep := range prepared {
+		path := prep.LocalPath
+		if path == "" {
+			// Unavailable repositories have no prepared path; show the
+			// configured one so the user can recognize the entry.
+			path = prep.Entry.Path
+		}
 		items[i] = RepositoryListItem{
-			ID:   prep.ID(),
-			Name: prep.Name(),
-			Type: string(prep.Type()),
-			Path: prep.LocalPath,
+			ID:        prep.ID(),
+			Name:      prep.Name(),
+			Type:      string(prep.Type()),
+			Path:      path,
+			Available: prep.IsAvailable(),
 		}
 	}
 	return items

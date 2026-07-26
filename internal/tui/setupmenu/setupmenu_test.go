@@ -2,6 +2,7 @@ package setupmenu
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"rulem/internal/repository"
 	"rulem/internal/tui/helpers"
 
+	"github.com/adrg/xdg"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -502,6 +504,18 @@ func TestGitHubPathInput(t *testing.T) {
 	})
 
 	t.Run("empty input accepts placeholder and proceeds", func(t *testing.T) {
+		// The empty-input placeholder derives from xdg.DataHome, and
+		// ValidateStoragePath requires the placeholder's parent directory
+		// (<DataHome>/rulem) to exist. Point XDG_DATA_HOME at a temp dir so
+		// the test doesn't depend on the machine's real storage dir.
+		dataHome := t.TempDir()
+		t.Cleanup(xdg.Reload) // runs after t.Setenv restores the env
+		t.Setenv("XDG_DATA_HOME", dataHome)
+		xdg.Reload()
+		if err := os.MkdirAll(filepath.Join(dataHome, "rulem"), 0o755); err != nil {
+			t.Fatalf("mkdir data home: %v", err)
+		}
+
 		model := createModelInState(t, SetupStateGitHubPath)
 		model.GitHubURL = "https://github.com/user/repo.git"
 		// Leave textInput empty to test placeholder acceptance

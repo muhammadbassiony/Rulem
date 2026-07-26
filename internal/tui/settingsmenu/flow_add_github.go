@@ -2,6 +2,7 @@
 package settingsmenu
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -344,6 +345,7 @@ func (m *SettingsModel) createGitHubRepository() tea.Cmd {
 
 		// Reload repositories (this will trigger clone if needed)
 		m.preparedRepos, err = repository.PrepareAllRepositories(
+			context.Background(),
 			m.currentConfig.Repositories,
 			m.logger,
 		)
@@ -548,6 +550,7 @@ func (m *SettingsModel) createGitHubRepositoryWithPAT(pat string) tea.Cmd {
 
 		// Reload repositories (this will trigger clone if needed)
 		m.preparedRepos, err = repository.PrepareAllRepositories(
+			context.Background(),
 			m.currentConfig.Repositories,
 			m.logger,
 		)

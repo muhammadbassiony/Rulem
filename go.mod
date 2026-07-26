@@ -1,6 +1,6 @@
 module rulem
 
-go 1.26.0
+go 1.26.5
 
 require (
 	github.com/adrg/frontmatter v0.2.0

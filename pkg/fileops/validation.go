@@ -174,7 +174,7 @@ func ValidateFileInDirectory(filePath, baseDir string) error {
 	if err != nil {
 		return fmt.Errorf("cannot open base directory: %w", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	fileInfo, err := root.Stat(relPath)
 	if err != nil {

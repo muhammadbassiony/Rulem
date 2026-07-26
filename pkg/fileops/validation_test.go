@@ -288,9 +288,9 @@ func TestValidateFileInDirectory(t *testing.T) {
 // re-check containment could never be reached.
 func TestValidateFileInDirectorySymlinkEscape(t *testing.T) {
 	baseDir := createTempDir(t)
-	defer os.RemoveAll(baseDir)
+	defer func() { _ = os.RemoveAll(baseDir) }()
 	outsideDir := createTempDir(t)
-	defer os.RemoveAll(outsideDir)
+	defer func() { _ = os.RemoveAll(outsideDir) }()
 
 	outsideFile := createTestFile(t, outsideDir, "secret.txt", "secret content")
 	insideFile := createTestFile(t, baseDir, "inside.txt", "inside content")
@@ -300,7 +300,7 @@ func TestValidateFileInDirectorySymlinkEscape(t *testing.T) {
 		if err := os.Symlink(outsideFile, link); err != nil {
 			t.Fatalf("Failed to create symlink: %v", err)
 		}
-		defer os.Remove(link)
+		defer func() { _ = os.Remove(link) }()
 
 		if err := ValidateFileInDirectory(link, baseDir); err == nil {
 			t.Error("Expected error for a symlink resolving outside the base directory")
@@ -312,7 +312,7 @@ func TestValidateFileInDirectorySymlinkEscape(t *testing.T) {
 		if err := os.Symlink(filepath.Join("..", filepath.Base(outsideDir), "secret.txt"), link); err != nil {
 			t.Fatalf("Failed to create symlink: %v", err)
 		}
-		defer os.Remove(link)
+		defer func() { _ = os.Remove(link) }()
 
 		if err := ValidateFileInDirectory(link, baseDir); err == nil {
 			t.Error("Expected error for a symlink traversing out of the base directory")
@@ -324,7 +324,7 @@ func TestValidateFileInDirectorySymlinkEscape(t *testing.T) {
 		if err := os.Symlink(filepath.Base(insideFile), link); err != nil {
 			t.Fatalf("Failed to create symlink: %v", err)
 		}
-		defer os.Remove(link)
+		defer func() { _ = os.Remove(link) }()
 
 		if err := ValidateFileInDirectory(link, baseDir); err != nil {
 			t.Errorf("Expected no error for a symlink resolving inside the base directory, got: %v", err)
@@ -336,7 +336,7 @@ func TestValidateFileInDirectorySymlinkEscape(t *testing.T) {
 		if err := os.Symlink(outsideDir, linkDir); err != nil {
 			t.Fatalf("Failed to create directory symlink: %v", err)
 		}
-		defer os.Remove(linkDir)
+		defer func() { _ = os.Remove(linkDir) }()
 
 		if err := ValidateFileInDirectory(filepath.Join(linkDir, "secret.txt"), baseDir); err == nil {
 			t.Error("Expected error for a file reached through an escaping directory symlink")

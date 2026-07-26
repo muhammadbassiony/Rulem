@@ -10,6 +10,41 @@ import (
 	"testing"
 )
 
+// Tests for the directory walk.
+//
+// These were written against SecureDirectoryScanner, which is gone: the walk is
+// now reached through Dir.Scan, and the boundary is opened by OpenExistingDir
+// rather than by a scanner constructor. Every property below is the one the
+// scanner test asserted; only the two lines that obtain the handle changed.
+//
+//	Original test                                 Now
+//	--------------------------------------------  ------------------------------
+//	TestNewDirectoryScanner                       TestOpenExistingDir (opendir_test.go)
+//	TestSecureDirectoryScanner_ScanDirectory      TestDirScanOptions
+//	TestSecureDirectoryScanner_FileInfo           TestDirScanFileInfo
+//	TestSecureDirectoryScanner_SymlinkProtection  TestDirScanSymlinkProtection
+//	TestSecureDirectoryScanner_SymlinkClassification TestDirScanSymlinkClassification
+//	TestSecureDirectoryScanner_LoopDetection      TestDirScanSymlinkLoop
+//	TestSecureDirectoryScanner_Close              TestDirAfterClose (dir_test.go)
+//	TestNewDirectoryScanner_SecurityValidation    TestScanRootSecurityValidation
+//	TestDirectoryScanOptions_SecurityFeatures     TestDirScanSecurityFeatures
+//	TestValidateSymlinks_Integration              TestDirScanSymlinkWithinRoot
+//	TestSecurityValidationErrors                  TestDirScanUnreadableFile
+
+// openScanDir opens a Dir on an existing directory for the walk tests and
+// closes it on cleanup.
+func openScanDir(t *testing.T, path string) *Dir {
+	t.Helper()
+
+	dir, err := OpenExistingDir(path)
+	if err != nil {
+		t.Fatalf("OpenExistingDir(%q) failed: %v", path, err)
+	}
+	t.Cleanup(func() { _ = dir.Close() })
+
+	return dir
+}
+
 // createTempDirStructure creates a temporary directory with a predefined structure for testing
 func createTempDirStructure(t *testing.T) string {
 	tempDir := createTempDir(t)
@@ -63,93 +98,11 @@ func createTempDirStructure(t *testing.T) string {
 	return tempDir
 }
 
-func TestNewDirectoryScanner(t *testing.T) {
+func TestDirScanOptions(t *testing.T) {
 	tempDir := createTempDirStructure(t)
 	defer os.RemoveAll(tempDir)
 
-	tests := []struct {
-		name      string
-		scanPath  string
-		opts      *DirectoryScanOptions
-		wantError bool
-		errorText string
-	}{
-		{
-			name:      "valid directory with default options",
-			scanPath:  tempDir,
-			opts:      nil,
-			wantError: false,
-		},
-		{
-			name:     "valid directory with custom options",
-			scanPath: tempDir,
-			opts: &DirectoryScanOptions{
-				MaxDepth:      5,
-				IncludeHidden: false,
-			},
-			wantError: false,
-		},
-		{
-			name:      "empty path",
-			scanPath:  "",
-			opts:      nil,
-			wantError: true,
-			errorText: "cannot be empty",
-		},
-		{
-			name:      "non-existent directory",
-			scanPath:  filepath.Join(tempDir, "nonexistent"),
-			opts:      nil,
-			wantError: true,
-			errorText: "cannot access scan path",
-		},
-		{
-			name:      "file instead of directory",
-			scanPath:  filepath.Join(tempDir, "README.md"),
-			opts:      nil,
-			wantError: true,
-			errorText: "not a directory",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			scanner, err := NewDirectoryScanner(tt.scanPath, tt.opts)
-
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("NewDirectoryScanner() expected error but got none")
-					if scanner != nil {
-						scanner.Close()
-					}
-					return
-				}
-				if tt.errorText != "" && !strings.Contains(err.Error(), tt.errorText) {
-					t.Errorf("NewDirectoryScanner() error = %v, want error containing %q",
-						err, tt.errorText)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("NewDirectoryScanner() unexpected error: %v", err)
-					return
-				}
-				if scanner == nil {
-					t.Error("NewDirectoryScanner() returned nil scanner without error")
-					return
-				}
-
-				// Test that scanner can be closed
-				if err := scanner.Close(); err != nil {
-					t.Errorf("Failed to close scanner: %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestSecureDirectoryScanner_ScanDirectory(t *testing.T) {
-	tempDir := createTempDirStructure(t)
-	defer os.RemoveAll(tempDir)
+	dir := openScanDir(t, tempDir)
 
 	tests := []struct {
 		name            string
@@ -239,15 +192,9 @@ func TestSecureDirectoryScanner_ScanDirectory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scanner, err := NewDirectoryScanner(tempDir, tt.opts)
+			files, err := dir.Scan(tt.opts)
 			if err != nil {
-				t.Fatalf("Failed to create scanner: %v", err)
-			}
-			defer scanner.Close()
-
-			files, err := scanner.ScanDirectory()
-			if err != nil {
-				t.Fatalf("ScanDirectory() failed: %v", err)
+				t.Fatalf("Scan() failed: %v", err)
 			}
 
 			// Check expected files are present
@@ -281,22 +228,18 @@ func TestSecureDirectoryScanner_ScanDirectory(t *testing.T) {
 	}
 }
 
-func TestSecureDirectoryScanner_FileInfo(t *testing.T) {
+func TestDirScanFileInfo(t *testing.T) {
 	tempDir := createTempDirStructure(t)
 	defer os.RemoveAll(tempDir)
 
-	scanner, err := NewDirectoryScanner(tempDir, &DirectoryScanOptions{
+	dir := openScanDir(t, tempDir)
+
+	files, err := dir.Scan(&DirectoryScanOptions{
 		MaxDepth:      2,
 		IncludeHidden: true,
 	})
 	if err != nil {
-		t.Fatalf("Failed to create scanner: %v", err)
-	}
-	defer scanner.Close()
-
-	files, err := scanner.ScanDirectory()
-	if err != nil {
-		t.Fatalf("ScanDirectory() failed: %v", err)
+		t.Fatalf("Scan() failed: %v", err)
 	}
 
 	// Find specific files to test
@@ -336,7 +279,7 @@ func TestSecureDirectoryScanner_FileInfo(t *testing.T) {
 	}
 }
 
-func TestSecureDirectoryScanner_SymlinkProtection(t *testing.T) {
+func TestDirScanSymlinkProtection(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Symlink test not supported on Windows")
 	}
@@ -378,15 +321,9 @@ func TestSecureDirectoryScanner_SymlinkProtection(t *testing.T) {
 	}
 
 	// Scan only the safe directory
-	scanner, err := NewDirectoryScanner(safeDir, nil)
+	files, err := openScanDir(t, safeDir).Scan(nil)
 	if err != nil {
-		t.Fatalf("Failed to create scanner: %v", err)
-	}
-	defer scanner.Close()
-
-	files, err := scanner.ScanDirectory()
-	if err != nil {
-		t.Fatalf("ScanDirectory() failed: %v", err)
+		t.Fatalf("Scan() failed: %v", err)
 	}
 
 	// The symlink escapes the scan root, so it must not be reported at all.
@@ -400,11 +337,11 @@ func TestSecureDirectoryScanner_SymlinkProtection(t *testing.T) {
 	}
 }
 
-// TestSecureDirectoryScanner_SymlinkClassification covers what a DirEntry
-// actually reports for a symlink: IsDir() is false and Type() is ModeSymlink.
-// Classifying on IsDir() alone emitted symlinked directories as bogus files
-// and left the scanner's own symlink guard unreachable.
-func TestSecureDirectoryScanner_SymlinkClassification(t *testing.T) {
+// TestDirScanSymlinkClassification covers what a DirEntry actually reports for
+// a symlink: IsDir() is false and Type() is ModeSymlink. Classifying on IsDir()
+// alone emitted symlinked directories as bogus files and left the scanner's own
+// symlink guard unreachable.
+func TestDirScanSymlinkClassification(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Symlink test not supported on Windows")
 	}
@@ -443,15 +380,9 @@ func TestSecureDirectoryScanner_SymlinkClassification(t *testing.T) {
 		t.Fatalf("Failed to create broken symlink: %v", err)
 	}
 
-	scanner, err := NewDirectoryScanner(root, nil)
+	files, err := openScanDir(t, root).Scan(nil)
 	if err != nil {
-		t.Fatalf("Failed to create scanner: %v", err)
-	}
-	defer func() { _ = scanner.Close() }()
-
-	files, err := scanner.ScanDirectory()
-	if err != nil {
-		t.Fatalf("ScanDirectory() failed: %v", err)
+		t.Fatalf("Scan() failed: %v", err)
 	}
 
 	byPath := make(map[string]FileInfo, len(files))
@@ -466,7 +397,7 @@ func TestSecureDirectoryScanner_SymlinkClassification(t *testing.T) {
 	// ...and must not be traversed either, so its contents appear only once,
 	// under the real directory.
 	if _, ok := byPath[filepath.Join("link_to_dir", "nested.txt")]; ok {
-		t.Error("Scanner traversed a symlinked directory")
+		t.Error("Scan traversed a symlinked directory")
 	}
 	if _, ok := byPath[filepath.Join("real_dir", "nested.txt")]; !ok {
 		t.Errorf("Expected to find real_dir/nested.txt, got %v", slices.Sorted(maps.Keys(byPath)))
@@ -492,7 +423,7 @@ func TestSecureDirectoryScanner_SymlinkClassification(t *testing.T) {
 	}
 }
 
-func TestSecureDirectoryScanner_LoopDetection(t *testing.T) {
+func TestDirScanSymlinkLoop(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Symlink test not supported on Windows")
 	}
@@ -522,18 +453,12 @@ func TestSecureDirectoryScanner_LoopDetection(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	scanner, err := NewDirectoryScanner(tempDir, &DirectoryScanOptions{
-		MaxDepth: 50, // High depth to test loop detection, not depth limiting
-	})
+	// This should complete without infinite recursion. MaxDepth is high on
+	// purpose: fs.WalkDir never descends a symlink, so the loop is structurally
+	// unreachable rather than merely bounded.
+	files, err := openScanDir(t, tempDir).Scan(&DirectoryScanOptions{MaxDepth: 50})
 	if err != nil {
-		t.Fatalf("Failed to create scanner: %v", err)
-	}
-	defer scanner.Close()
-
-	// This should complete without infinite recursion
-	files, err := scanner.ScanDirectory()
-	if err != nil {
-		t.Fatalf("ScanDirectory() failed: %v", err)
+		t.Fatalf("Scan() failed: %v", err)
 	}
 
 	// Should find at least the test file
@@ -546,37 +471,6 @@ func TestSecureDirectoryScanner_LoopDetection(t *testing.T) {
 	}
 	if !found {
 		t.Error("Expected to find test.txt in results")
-	}
-}
-
-func TestSecureDirectoryScanner_Close(t *testing.T) {
-	tempDir := createTempDirStructure(t)
-	defer os.RemoveAll(tempDir)
-
-	scanner, err := NewDirectoryScanner(tempDir, nil)
-	if err != nil {
-		t.Fatalf("Failed to create scanner: %v", err)
-	}
-
-	// Close scanner
-	err = scanner.Close()
-	if err != nil {
-		t.Errorf("Close() failed: %v", err)
-	}
-
-	// Trying to scan after close should fail
-	_, err = scanner.ScanDirectory()
-	if err == nil {
-		t.Error("Expected error when scanning after close")
-	}
-	if !strings.Contains(err.Error(), "closed") {
-		t.Errorf("Expected 'closed' error, got: %v", err)
-	}
-
-	// Multiple closes should be safe
-	err = scanner.Close()
-	if err != nil {
-		t.Errorf("Second Close() failed: %v", err)
 	}
 }
 
@@ -618,17 +512,17 @@ func BenchmarkDirectoryScanning(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		scanner, err := NewDirectoryScanner(tempDir, nil)
+		dir, err := OpenExistingDir(tempDir)
 		if err != nil {
-			b.Fatalf("Failed to create scanner: %v", err)
+			b.Fatalf("OpenExistingDir failed: %v", err)
 		}
 
-		_, err = scanner.ScanDirectory()
+		_, err = dir.Scan(nil)
 		if err != nil {
-			b.Fatalf("ScanDirectory() failed: %v", err)
+			b.Fatalf("Scan() failed: %v", err)
 		}
 
-		scanner.Close()
+		_ = dir.Close()
 	}
 }
 
@@ -688,36 +582,28 @@ func createBenchTempDirStructure(b *testing.B) string {
 	return tempDir
 }
 
-// Tests for new security validation features
+// Tests for security validation features
 
-func TestDirectoryScanOptions_SecurityFeatures(t *testing.T) {
+func TestDirScanSecurityFeatures(t *testing.T) {
 	tempDir := createTempDirStructure(t)
 	defer os.RemoveAll(tempDir)
 
 	t.Run("built-in reserved directory blocking", func(t *testing.T) {
-		// Test scanning actual system directory (should always fail due to built-in security)
+		// Scanning a system directory must be refused, and the refusal now
+		// happens where the boundary is opened rather than in a scanner
+		// constructor - one policy, one place.
 		systemDir := "/etc"
 		if runtime.GOOS == "windows" {
 			systemDir = "C:\\Windows\\System32"
 		}
 
-		// Should always fail with built-in security (reserved directories always blocked)
-		_, err := NewDirectoryScanner(systemDir, nil)
+		_, err := OpenExistingDir(systemDir)
 		if err == nil {
-			t.Error("Expected error when scanning reserved directory - security should be built-in")
+			t.Error("Expected error when opening a reserved directory - security should be built-in")
 		}
 		// The error could be from path security validation or reserved directory check
 		if !strings.Contains(err.Error(), "reserved") && !strings.Contains(err.Error(), "path traversal") {
 			t.Errorf("Expected reserved directory or path security error, got: %v", err)
-		}
-
-		// Even with custom options, reserved directories should be blocked
-		opts := &DirectoryScanOptions{
-			MaxDepth: 1,
-		}
-		_, err = NewDirectoryScanner(systemDir, opts)
-		if err == nil {
-			t.Error("Expected error when scanning reserved directory even with custom options")
 		}
 	})
 
@@ -727,15 +613,9 @@ func TestDirectoryScanOptions_SecurityFeatures(t *testing.T) {
 			MaxDepth:           2,
 		}
 
-		scanner, err := NewDirectoryScanner(tempDir, opts)
+		files, err := openScanDir(t, tempDir).Scan(opts)
 		if err != nil {
-			t.Fatalf("Failed to create scanner: %v", err)
-		}
-		defer scanner.Close()
-
-		files, err := scanner.ScanDirectory()
-		if err != nil {
-			t.Fatalf("ScanDirectory with ValidateFileAccess failed: %v", err)
+			t.Fatalf("Scan with ValidateFileAccess failed: %v", err)
 		}
 
 		// Should find files (access validation should pass for readable files)
@@ -745,7 +625,7 @@ func TestDirectoryScanOptions_SecurityFeatures(t *testing.T) {
 	})
 }
 
-func TestNewDirectoryScanner_SecurityValidation(t *testing.T) {
+func TestScanRootSecurityValidation(t *testing.T) {
 	t.Run("home directory path validation", func(t *testing.T) {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -753,21 +633,19 @@ func TestNewDirectoryScanner_SecurityValidation(t *testing.T) {
 		}
 
 		// Test with tilde expansion
-		tildePathOpts := &DirectoryScanOptions{}
-		scanner, err := NewDirectoryScanner("~/", tildePathOpts)
+		dir, err := OpenExistingDir("~/")
 		if err != nil {
-			t.Errorf("Failed to create scanner for ~/: %v", err)
+			t.Errorf("Failed to open ~/ : %v", err)
 		} else {
-			scanner.Close()
+			_ = dir.Close()
 		}
 
 		// Test explicit home directory path
-		explicitHomeOpts := &DirectoryScanOptions{}
-		scanner, err = NewDirectoryScanner(homeDir, explicitHomeOpts)
+		dir, err = OpenExistingDir(homeDir)
 		if err != nil {
-			t.Errorf("Failed to create scanner for home directory: %v", err)
+			t.Errorf("Failed to open home directory: %v", err)
 		} else {
-			scanner.Close()
+			_ = dir.Close()
 		}
 	})
 
@@ -780,15 +658,14 @@ func TestNewDirectoryScanner_SecurityValidation(t *testing.T) {
 		}
 
 		for _, maliciousPath := range maliciousPaths {
-			_, err := NewDirectoryScanner(maliciousPath, nil)
-			if err == nil {
+			if _, err := OpenExistingDir(maliciousPath); err == nil {
 				t.Errorf("Expected security validation to reject path: %s", maliciousPath)
 			}
 		}
 	})
 }
 
-func TestValidateSymlinks_Integration(t *testing.T) {
+func TestDirScanSymlinkWithinRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Symlink test not supported on Windows")
 	}
@@ -823,20 +700,10 @@ func TestValidateSymlinks_Integration(t *testing.T) {
 	}
 
 	t.Run("built-in symlink validation", func(t *testing.T) {
-		opts := &DirectoryScanOptions{
-			MaxDepth: 3,
-		}
-
-		scanner, err := NewDirectoryScanner(tempDir, opts) // Scan entire temp dir to include both directories
+		// Scan the whole temp dir so both directories are inside the boundary.
+		files, err := openScanDir(t, tempDir).Scan(&DirectoryScanOptions{MaxDepth: 3})
 		if err != nil {
-			t.Fatalf("Failed to create scanner: %v", err)
-		}
-		defer scanner.Close()
-
-		// Should successfully scan with built-in symlink validation (symlinks within scan area are safe)
-		files, err := scanner.ScanDirectory()
-		if err != nil {
-			t.Fatalf("ScanDirectory with built-in symlink validation failed: %v", err)
+			t.Fatalf("Scan with built-in symlink validation failed: %v", err)
 		}
 
 		// Should find files (including the symlinked file)
@@ -854,10 +721,9 @@ func TestValidateSymlinks_Integration(t *testing.T) {
 			t.Error("Expected to find either symlink or target file")
 		}
 	})
-
 }
 
-func TestSecurityValidationErrors(t *testing.T) {
+func TestDirScanUnreadableFile(t *testing.T) {
 	tempDir := createTempDir(t)
 	defer os.RemoveAll(tempDir)
 
@@ -886,16 +752,10 @@ func TestSecurityValidationErrors(t *testing.T) {
 			MaxDepth:           1,
 		}
 
-		scanner, err := NewDirectoryScanner(tempDir, opts)
-		if err != nil {
-			t.Fatalf("Failed to create scanner: %v", err)
-		}
-		defer scanner.Close()
-
 		// Should complete (skipping unreadable files)
-		files, err := scanner.ScanDirectory()
+		files, err := openScanDir(t, tempDir).Scan(opts)
 		if err != nil {
-			t.Fatalf("ScanDirectory failed: %v", err)
+			t.Fatalf("Scan failed: %v", err)
 		}
 
 		// Should not find the unreadable file

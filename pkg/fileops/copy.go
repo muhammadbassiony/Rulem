@@ -1,6 +1,3 @@
-// Package fileops provides secure, atomic file operations for Go applications.
-// This package implements file operations with security-first design principles,
-// including atomic operations, path validation, and comprehensive error handling.
 package fileops
 
 import (

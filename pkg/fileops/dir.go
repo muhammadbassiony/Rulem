@@ -13,35 +13,28 @@ import (
 //
 // # Why a handle
 //
-// The rest of this package validates paths as *text*: a caller passes a string,
-// a validator proves something about it, and a separate syscall then acts on
-// that same string. Everything that goes wrong in between - a symlink swapped
-// in, a component that resolves elsewhere, a check that was never reachable -
-// lives in that gap. A Dir closes the gap by holding the boundary open:
-// os.OpenRoot is called once, when the path is first accepted, and every later
-// operation is named *relative to that open handle* instead of being re-derived
-// from a string.
+// Validating a path as *text* - a caller passes a string, a validator proves
+// something about it, and a separate syscall then acts on that same string -
+// leaves a gap. Everything that goes wrong lives in that gap: a symlink
+// swapped in between the two, a component that resolves somewhere else, a
+// check that turns out to be unreachable. A Dir closes the gap by holding the
+// boundary open. os.OpenRoot is called once, when the path is first accepted,
+// and every later operation is named *relative to that open handle*.
 //
 // # Confinement is held, not re-proved
+//
+// os.Root resolves each component against an open directory, so a name that
+// would leave the tree fails at the syscall rather than being caught by a
+// preceding check. There is no separate check to keep in sync, and no window
+// between checking and using. What remains in this file is not containment: it
+// is the small set of *lexical* rules about which relative names a Dir accepts
+// at all (non-empty, relative, no ".." component), which exist so that callers
+// get a clear error instead of a confusing ENOENT.
 //
 // The rule for callers is simple: get a Dir once, carry it, and address
 // everything inside it by a relative path. Never take Path() and rebuild an
 // absolute path to hand to os.Open - that is the shape this type exists to
 // remove.
-//
-// # Status: this is a facade, deliberately
-//
-// Every method below currently DELEGATES to the existing package functions
-// (ValidateFileInDirectory, IsSymlink, AtomicCopy, NewDirectoryScanner, ...).
-// The *os.Root is opened and held - it is what makes a Dir a capability rather
-// than a string - but it does not yet perform the operations. That swap is a
-// separate, isolated change.
-//
-// The delegation is the point: while Dir runs on the old implementation, tests
-// written against Dir exercise the old behaviour through the new API, so they
-// can be shown to be a faithful translation *before* anything underneath
-// changes. After the swap, any test that fails is an unambiguous behaviour
-// change rather than a translation mistake.
 //
 // # Scope
 //
@@ -54,7 +47,7 @@ import (
 // reads and writes through one are as safe as the underlying filesystem calls.
 type Dir struct {
 	// root is the open boundary. It is the reason a Dir is a capability and
-	// not a path, and it backs Path() and the handle's lifetime.
+	// not a path, and it performs every operation below.
 	root *os.Root
 }
 
@@ -133,50 +126,56 @@ func (d *Dir) Close() error {
 	return err
 }
 
-// resolve turns a caller-supplied relative name into the absolute path the
-// delegated validators expect, rejecting anything that is not a plain relative
-// name inside this directory.
+// check applies the lexical rules for a name addressed inside this directory:
+// the handle must be open, and the name must be a non-empty relative path with
+// no ".." component.
 //
-// The rejection is delegated to ValidateCWDPath, which is the existing
-// "relative, non-empty, no traversal, stays inside" predicate. Lexical
-// analysis alone is not containment - a component could still be a symlink
-// pointing elsewhere - so every method that resolves also delegates to a
-// filesystem-level check before acting.
-func (d *Dir) resolve(rel string) (string, error) {
+// None of this is containment - os.Root provides that, and would refuse an
+// escape whatever this function returned. It exists so that an obviously wrong
+// name produces "path traversal not allowed" rather than a bare ENOENT from
+// several layers down, and so that "" and absolute paths are named as the
+// mistakes they are.
+func (d *Dir) check(rel string) error {
 	if d.root == nil {
-		return "", fmt.Errorf("directory handle is closed")
+		return fmt.Errorf("directory handle is closed")
 	}
-	if err := ValidateCWDPath(rel); err != nil {
-		return "", err
+	if rel == "" {
+		return fmt.Errorf("path cannot be empty")
 	}
-	return filepath.Join(d.root.Name(), rel), nil
-}
-
-// contained resolves rel and additionally proves, against the filesystem, that
-// it names an existing regular file inside this directory.
-func (d *Dir) contained(rel string) (string, error) {
-	abs, err := d.resolve(rel)
-	if err != nil {
-		return "", err
+	if filepath.IsAbs(rel) {
+		return fmt.Errorf("path must be relative to the directory: %q", rel)
 	}
-	if err := ValidateFileInDirectory(abs, d.root.Name()); err != nil {
-		return "", err
+	// Reject ".." components outright rather than only checking where the path
+	// lexically lands: "valid/../file.txt" is a name whose meaning depends on
+	// what "valid" turns out to be, and there is no reason to accept it.
+	if hasParentTraversal(rel) || !filepath.IsLocal(rel) {
+		return fmt.Errorf("path traversal not allowed: %q", rel)
 	}
-	return abs, nil
+	return nil
 }
 
 // Stat reports metadata for a regular file inside this directory.
 //
-// Directories are rejected with "path is a directory, not a file" - that is
-// the guarantee the containment validator carries, and enumerating a directory
-// is what Scan is for. Symlinks are followed, but only within the boundary: a
-// link leaving this directory fails here rather than being resolved outside it.
+// Directories are rejected with "path is a directory, not a file" - enumerating
+// one is what Scan is for. Symlinks are followed, but only within the boundary:
+// a link leaving this directory fails to resolve rather than being followed
+// out of it.
 func (d *Dir) Stat(rel string) (fs.FileInfo, error) {
-	abs, err := d.contained(rel)
-	if err != nil {
+	if err := d.check(rel); err != nil {
 		return nil, err
 	}
-	return os.Stat(abs)
+
+	info, err := d.root.Stat(rel)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("file does not exist: %s", filepath.Base(rel))
+		}
+		return nil, fmt.Errorf("cannot access file within directory: %w", err)
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("path is a directory, not a file")
+	}
+	return info, nil
 }
 
 // Exists reports whether rel names anything at all inside this directory,
@@ -185,21 +184,23 @@ func (d *Dir) Stat(rel string) (fs.FileInfo, error) {
 // It answers "is something already here?" - the question asked before writing
 // - so it must not follow symlinks; a dangling link still occupies the name.
 func (d *Dir) Exists(rel string) bool {
-	abs, err := d.resolve(rel)
-	if err != nil {
+	if err := d.check(rel); err != nil {
 		return false
 	}
-	_, err = os.Lstat(abs)
+	_, err := d.root.Lstat(rel)
 	return err == nil
 }
 
 // IsSymlink reports whether rel is itself a symbolic link, without following it.
 func (d *Dir) IsSymlink(rel string) (bool, error) {
-	abs, err := d.resolve(rel)
-	if err != nil {
+	if err := d.check(rel); err != nil {
 		return false, err
 	}
-	return IsSymlink(abs)
+	info, err := d.root.Lstat(rel)
+	if err != nil {
+		return false, fmt.Errorf("failed to stat path: %w", err)
+	}
+	return info.Mode()&fs.ModeSymlink != 0, nil
 }
 
 // Open opens a regular file inside this directory for reading.
@@ -208,11 +209,39 @@ func (d *Dir) IsSymlink(rel string) (bool, error) {
 // to resolve inside the boundary, and the handle you get back is the one that
 // was checked. There is no separate "can I read this later?" question to ask.
 func (d *Dir) Open(rel string) (*os.File, error) {
-	abs, err := d.contained(rel)
-	if err != nil {
-		return nil, err
+	file, _, err := d.openFile(rel)
+	return file, err
+}
+
+// openFile opens rel and returns it alongside the metadata of the handle that
+// was actually opened, so callers never have to stat the name a second time.
+func (d *Dir) openFile(rel string) (*os.File, fs.FileInfo, error) {
+	if err := d.check(rel); err != nil {
+		return nil, nil, err
 	}
-	return os.Open(abs)
+
+	file, err := d.root.Open(rel)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, fmt.Errorf("file does not exist: %s", filepath.Base(rel))
+		}
+		return nil, nil, fmt.Errorf("cannot open file within directory: %w", err)
+	}
+
+	// Opening a directory succeeds on Unix, so the type check has to happen on
+	// the open handle - which is also the only way to be sure it describes the
+	// file that was opened.
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("cannot stat file within directory: %w", err)
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("path is a directory, not a file")
+	}
+
+	return file, info, nil
 }
 
 // ReadFile reads the whole contents of a regular file inside this directory.
@@ -230,11 +259,41 @@ func (d *Dir) ReadFile(rel string) ([]byte, error) {
 // Remove deletes rel from this directory. It does not remove directories
 // recursively.
 func (d *Dir) Remove(rel string) error {
-	abs, err := d.resolve(rel)
-	if err != nil {
+	if err := d.check(rel); err != nil {
 		return err
 	}
-	return os.Remove(abs)
+	return d.root.Remove(rel)
+}
+
+// destination prepares rel for writing: it creates any missing parent
+// directories through the boundary and returns a root scoped to the parent
+// directory together with the final name.
+//
+// The returned root is always a fresh handle, even when rel names a file
+// directly in this directory, so the caller can close it unconditionally
+// without closing the Dir.
+func (d *Dir) destination(rel string) (*os.Root, string, error) {
+	if err := d.check(rel); err != nil {
+		return nil, "", err
+	}
+
+	parent, name := filepath.Split(filepath.Clean(rel))
+	parent = filepath.Clean(parent) // "" becomes "."
+	if name == "" {
+		return nil, "", fmt.Errorf("path has no file name: %q", rel)
+	}
+
+	if parent != "." {
+		if err := d.root.MkdirAll(parent, 0755); err != nil {
+			return nil, "", fmt.Errorf("cannot create destination directory: %w", err)
+		}
+	}
+
+	root, err := d.root.OpenRoot(parent)
+	if err != nil {
+		return nil, "", fmt.Errorf("cannot open destination directory: %w", err)
+	}
+	return root, name, nil
 }
 
 // CopyFrom atomically copies an external file into this directory at rel,
@@ -242,105 +301,117 @@ func (d *Dir) Remove(rel string) error {
 //
 // srcPath is a raw path because the source genuinely is outside every
 // boundary: it is whatever file the user picked. It is the one place a bare
-// string still enters, and it is checked with ValidateFileAccess before use.
-// The destination side carries the boundary.
+// string still enters, and opening it is what validates it. The destination
+// side carries the boundary.
 //
 // The copy is atomic: rel either appears complete or is not touched at all.
 // Existing files are overwritten - deciding whether that is allowed is the
 // caller's policy, not this package's.
 func (d *Dir) CopyFrom(srcPath, rel string) error {
-	if err := ValidateFileAccess(srcPath, false); err != nil {
-		return fmt.Errorf("source file validation failed: %w", err)
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("cannot open source file: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("cannot stat source file: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("source is a directory, not a file: %s", srcPath)
 	}
 
-	dest, err := d.resolve(rel)
+	dest, name, err := d.destination(rel)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = dest.Close() }()
 
-	if err := EnsureDirectoryExists(filepath.Dir(dest)); err != nil {
-		return fmt.Errorf("cannot create destination directory: %w", err)
-	}
-
-	return AtomicCopy(srcPath, dest)
+	return atomicCopyInto(dest, name, src, info.Mode().Perm())
 }
 
 // CopyTo atomically copies a regular file from this directory into another
 // Dir, creating intermediate directories as needed.
 //
 // Both ends are handles, so neither the source nor the destination can be
-// talked out of its boundary by a crafted relative path.
+// talked out of its boundary by a crafted relative path - or by a symlinked
+// subdirectory, since no path string is ever re-resolved in between.
 func (d *Dir) CopyTo(rel string, dst *Dir, dstRel string) error {
 	if dst == nil {
 		return fmt.Errorf("destination directory is nil")
 	}
 
-	src, err := d.contained(rel)
+	src, info, err := d.openFile(rel)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = src.Close() }()
 
-	dest, err := dst.resolve(dstRel)
+	dest, name, err := dst.destination(dstRel)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = dest.Close() }()
 
-	if err := EnsureDirectoryExists(filepath.Dir(dest)); err != nil {
-		return fmt.Errorf("cannot create destination directory: %w", err)
-	}
-
-	return AtomicCopy(src, dest)
+	return atomicCopyInto(dest, name, src, info.Mode().Perm())
 }
 
 // SymlinkTo creates a symbolic link at dstRel inside dst pointing at rel
 // inside this directory.
 //
 // The link is written with a relative target so the pair keeps working if the
-// tree is moved. The link target is proven to be a regular file inside this
-// directory first; the destination name is proven to be inside dst.
+// tree is moved. The target is proven to be a regular file inside this
+// directory first, and the link itself is created through dst's boundary.
+//
+// The link *text* is ordinary path arithmetic between the two directories -
+// a symlink target is just a string the kernel interprets later, so this is
+// one of the sanctioned uses of Path().
 func (d *Dir) SymlinkTo(rel string, dst *Dir, dstRel string) error {
 	if dst == nil {
 		return fmt.Errorf("destination directory is nil")
 	}
 
-	target, err := d.contained(rel)
-	if err != nil {
+	if _, err := d.Stat(rel); err != nil {
+		return err
+	}
+	if err := dst.check(dstRel); err != nil {
 		return err
 	}
 
-	link, err := dst.resolve(dstRel)
-	if err != nil {
-		return err
+	linkDir := filepath.Dir(dstRel)
+	if linkDir != "." {
+		if err := dst.root.MkdirAll(linkDir, 0755); err != nil {
+			return fmt.Errorf("failed to create symlink directory: %w", err)
+		}
 	}
 
-	return CreateRelativeSymlink(target, link)
+	target, err := filepath.Rel(filepath.Join(dst.Path(), linkDir), filepath.Join(d.Path(), rel))
+	if err != nil {
+		return fmt.Errorf("cannot calculate relative path: %w", err)
+	}
+
+	if err := dst.root.Symlink(target, dstRel); err != nil {
+		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+	return nil
 }
 
 // Scan walks this directory and returns the files it contains, each with a
-// Path relative to the directory root.
+// Path relative to the directory root. The result is never nil.
 //
 // opts may be nil, in which case sensible defaults are used. The filter is
 // supplied by the caller as a func(name string) bool: this package has no
 // notion of which files are interesting.
 //
-// Symlink policy is the scanner's: a relative link to a regular file inside
-// the boundary is reported with its target's size and mode; links to
-// directories are neither reported nor followed, which is what keeps the walk
-// free of loops; links that escape, dangle or are absolute are skipped rather
-// than turned into errors.
-//
-// MaxDepth and SkipUnreadableDirs are ergonomics, not safety mechanisms - the
-// boundary is what provides safety - and they are not load-bearing here.
+// Symlink policy is the walk's: a relative link to a regular file inside the
+// boundary is reported with its target's size and mode; links to directories
+// are neither reported nor followed, which is what keeps the walk free of
+// loops; links that escape, dangle or are absolute are skipped rather than
+// turned into errors.
 func (d *Dir) Scan(opts *DirectoryScanOptions) ([]FileInfo, error) {
 	if d.root == nil {
 		return nil, fmt.Errorf("directory handle is closed")
 	}
-
-	scanner, err := NewDirectoryScanner(d.root.Name(), opts)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = scanner.Close() }()
-
-	return scanner.ScanDirectory()
+	return walkFiles(d.root, opts)
 }

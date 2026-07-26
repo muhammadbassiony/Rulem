@@ -2,6 +2,7 @@ package fileops
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,36 +10,50 @@ import (
 	"time"
 )
 
-// DirectoryScanOptions configures the behavior of directory scanning operations.
-// These options provide fine-grained control over what gets scanned and how.
+// DirectoryScanOptions configures a directory walk.
+//
+// None of these options is a security mechanism. Confinement comes from the
+// os.Root the walk runs inside: names are resolved against an open directory
+// handle, so nothing outside it can be reached whatever the options say. What
+// is left here is ergonomics - which of the files inside the boundary the
+// caller wants to hear about.
 type DirectoryScanOptions struct {
-	// SkipUnreadableDirs determines whether to skip directories that cannot be read
-	// or to return an error. Setting to true makes scanning more resilient.
+	// SkipUnreadableDirs decides what an unreadable directory or file means:
+	// skip it and carry on (true), or abort the whole walk (false).
+	//
+	// This is a resilience choice, not a safety one. A scan of a user's storage
+	// directory should survive one permission-denied subdirectory.
 	SkipUnreadableDirs bool
 
-	// MaxDepth limits the maximum recursion depth for directory traversal.
-	// This prevents infinite loops and stack overflow from deep directory structures.
+	// MaxDepth limits how many directory levels are descended. The scan root
+	// itself is level 1, so MaxDepth: 1 reports only the files sitting directly
+	// in it.
+	//
+	// This is a cost bound, not a loop guard: the walk never descends a
+	// symlinked directory, so a symlink loop cannot be entered in the first
+	// place.
 	MaxDepth int
 
-	// IncludeHidden determines whether to include files and directories that start with '.'
-	// Setting to false will skip hidden files and directories.
+	// IncludeHidden determines whether entries whose name starts with '.' are
+	// reported, and whether hidden directories are descended.
 	IncludeHidden bool
 
-	// SkipPatterns contains directory names that should be skipped during scanning.
-	// These are exact matches against directory names (not full paths).
+	// SkipPatterns lists directory names that are not descended. These are
+	// exact matches against the directory's own name, not against a full path.
 	SkipPatterns []string
 
-	// FileFilter is an optional function that determines whether a file should be included.
-	// If nil, all files are included. If provided, only files for which this returns true are included.
+	// FileFilter decides which files are reported. If nil, every file is.
+	// This package has no opinion about which files are interesting; the
+	// caller supplies one.
 	FileFilter func(filename string) bool
 
-	// DirFilter is an optional function that determines whether a directory should be scanned.
-	// If nil, standard skip patterns are used. If provided, this takes precedence.
+	// DirFilter decides which directories are descended. If non-nil it takes
+	// precedence over IncludeHidden and SkipPatterns.
 	DirFilter func(dirname string) bool
 
-	// ValidateFileAccess enables file access validation for each discovered file.
-	// Uses ValidateFileAccess from validation.go to ensure files are readable.
-	// This is optional for performance reasons in cases where you trust the file system.
+	// ValidateFileAccess reports only files that can actually be opened.
+	// Off by default: it costs an open per file, and a caller that is about to
+	// read the files anyway learns the same thing from the read.
 	ValidateFileAccess bool
 }
 
@@ -64,78 +79,56 @@ type FileInfo struct {
 	Mode os.FileMode
 }
 
-// SecureDirectoryScanner provides secure, configurable directory scanning with
-// built-in protection against directory traversal and symlink attacks.
+// SecureDirectoryScanner walks a directory tree confined to an os.Root.
 //
-// The scanner operates within a security boundary defined by an os.Root,
-// preventing access to files outside the designated scan area. os.Root
-// resolves every name against an open handle on the scan root, so a symlink
-// leaving that root fails to resolve instead of being followed - the boundary
-// is enforced by the filesystem, not by comparing path strings.
+// The confinement is structural. Every name is resolved against an open handle
+// on the scan root rather than against a path string, so a symlink leaving the
+// root fails to resolve instead of being followed - there is no check to
+// forget, and no window between checking and using.
 //
 // Symlink policy:
 //   - A relative symlink resolving to a regular file inside the root is
 //     reported as a file, carrying its target's size and mode.
-//   - A symlink to a directory is not reported and not traversed. Refusing to
-//     traverse them is what makes the scan free of symlink loops by
-//     construction.
+//   - A symlink to a directory is not reported and not traversed. fs.WalkDir
+//     never descends a symlink, so the walk is free of symlink loops by
+//     construction rather than by loop detection.
 //   - A symlink that escapes the root, dangles, or is absolute is skipped.
 //     os.Root refuses absolute symlinks even when the target happens to sit
 //     inside the root, since an absolute link is only meaningful outside the
 //     root's frame of reference.
 type SecureDirectoryScanner struct {
-	// root defines the security boundary for scanning operations
+	// root is the boundary the walk runs inside.
 	root *os.Root
 
 	// opts contains the scanning configuration
 	opts *DirectoryScanOptions
-
-	// results stores discovered files during scanning
-	results []FileInfo
-
-	// visited tracks visited directories to prevent infinite loops
-	visited map[string]bool
-
-	// scanRoot stores the absolute path of the scan root for security validation
-	scanRoot string
 }
 
-// NewDirectoryScanner creates a new secure directory scanner for the given path.
+// NewDirectoryScanner creates a scanner confined to scanPath.
 //
-// Parameters:
-//   - scanPath: The directory path to scan (can be relative or absolute)
-//   - opts: Scanning options (if nil, sensible defaults are used)
+// scanPath may be relative or use "~"; it is expanded and made absolute, then
+// checked against rulem's storage policy (no traversal, not a reserved system
+// directory) before the boundary is opened. opts may be nil, in which case
+// getDefaultScanOptions applies.
 //
-// Returns:
-//   - *SecureDirectoryScanner: Configured scanner instance
-//   - error: Setup errors including path validation and access issues
-//
-// Security considerations:
-//   - Creates a secure root to prevent directory escapes
-//   - Validates the scan path before creating the scanner
-//   - Initializes loop detection to prevent symlink attacks
+// The caller owns the returned scanner and must Close it.
 //
 // Usage example:
 //
-//	opts := &fileops.DirectoryScanOptions{
-//	    MaxDepth: 10,
+//	scanner, err := fileops.NewDirectoryScanner("/project/src", &fileops.DirectoryScanOptions{
+//	    MaxDepth:      10,
 //	    IncludeHidden: false,
-//	    FileFilter: func(name string) bool {
-//	        return strings.HasSuffix(name, ".go")
-//	    },
-//	}
-//	scanner, err := fileops.NewDirectoryScanner("/project/src", opts)
+//	    FileFilter:    func(name string) bool { return strings.HasSuffix(name, ".go") },
+//	})
 //	if err != nil {
 //	    return fmt.Errorf("failed to create scanner: %w", err)
 //	}
 //	defer scanner.Close()
 func NewDirectoryScanner(scanPath string, opts *DirectoryScanOptions) (*SecureDirectoryScanner, error) {
-	// Apply default options if none provided
 	if opts == nil {
 		opts = getDefaultScanOptions()
 	}
 
-	// Validate the scan path
 	if strings.TrimSpace(scanPath) == "" {
 		return nil, fmt.Errorf("scan path cannot be empty")
 	}
@@ -147,7 +140,6 @@ func NewDirectoryScanner(scanPath string, opts *DirectoryScanOptions) (*SecureDi
 		return nil, fmt.Errorf("cannot resolve scan path: %w", err)
 	}
 
-	// Validate path security
 	if err := ValidatePathSecurity(absPath); err != nil {
 		return nil, fmt.Errorf("scan path security validation failed: %w", err)
 	}
@@ -157,7 +149,6 @@ func NewDirectoryScanner(scanPath string, opts *DirectoryScanOptions) (*SecureDi
 		return nil, fmt.Errorf("cannot scan reserved/system directory: %s", absPath)
 	}
 
-	// Check that the path exists and is a directory
 	info, err := os.Stat(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot access scan path: %w", err)
@@ -166,19 +157,12 @@ func NewDirectoryScanner(scanPath string, opts *DirectoryScanOptions) (*SecureDi
 		return nil, fmt.Errorf("scan path is not a directory: %s", absPath)
 	}
 
-	// Create secure root for the scan area
 	root, err := os.OpenRoot(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create secure scan root: %w", err)
 	}
 
-	return &SecureDirectoryScanner{
-		root:     root,
-		opts:     opts,
-		results:  []FileInfo{},
-		visited:  make(map[string]bool),
-		scanRoot: absPath,
-	}, nil
+	return &SecureDirectoryScanner{root: root, opts: opts}, nil
 }
 
 // getDefaultScanOptions returns sensible default scanning options.
@@ -211,8 +195,7 @@ func getDefaultSkipPatterns() []string {
 	}
 }
 
-// Close releases resources associated with the scanner.
-// This should be called when the scanner is no longer needed.
+// Close releases the scan root. It is safe to call more than once.
 func (s *SecureDirectoryScanner) Close() error {
 	if s.root != nil {
 		err := s.root.Close()
@@ -222,14 +205,10 @@ func (s *SecureDirectoryScanner) Close() error {
 	return nil
 }
 
-// ScanDirectory performs a recursive scan of the configured directory.
+// ScanDirectory walks the configured directory and returns the files it holds,
+// each with a Path relative to the scan root.
 //
-// Returns:
-//   - []FileInfo: List of discovered files matching the configured criteria
-//   - error: Scanning errors
-//
-// The scan respects all configured options including depth limits, skip patterns,
-// and file filters. The scan is performed securely within the root boundary.
+// The result is never nil: an empty tree yields an empty slice.
 //
 // Usage example:
 //
@@ -245,203 +224,154 @@ func (s *SecureDirectoryScanner) ScanDirectory() ([]FileInfo, error) {
 		return nil, fmt.Errorf("scanner has been closed")
 	}
 
-	// Reset state for new scan
-	s.results = []FileInfo{}
-	s.visited = make(map[string]bool)
-
-	// Start recursive scan from root
-	if err := s.scanRecursive(".", 1); err != nil {
+	files, err := walkFiles(s.root, s.opts)
+	if err != nil {
 		return nil, fmt.Errorf("directory scan failed: %w", err)
 	}
-
-	// Return a copy of results to prevent external modification
-	resultsCopy := make([]FileInfo, len(s.results))
-	copy(resultsCopy, s.results)
-	return resultsCopy, nil
+	return files, nil
 }
 
-// scanRecursive performs the actual recursive directory scanning.
-func (s *SecureDirectoryScanner) scanRecursive(relativePath string, depth int) error {
-	// Check depth limit
-	if depth > s.opts.MaxDepth {
-		return nil // Silently stop at max depth
+// walkFiles walks root with fs.WalkDir and collects the files it finds.
+//
+// Root.FS() exposes the boundary as an fs.FS, and fs.WalkDir never follows a
+// symlink: a link is handed to the walk function as a leaf, whatever it points
+// at. Those two facts together are the whole safety argument. Nothing here can
+// name a file outside root, and nothing here can be lured into a symlink loop,
+// so the walk itself contains no containment logic - only the caller's
+// preferences about what to report.
+//
+// A link is resolved deliberately, once, with fs.Stat: that follows it *inside
+// the boundary*, so a link to a file in the root is reported with the target's
+// size and mode, and a link that escapes, dangles or is absolute simply fails
+// to resolve and is dropped. Dropping it rather than failing the walk matters:
+// an out-of-root symlink is an ordinary thing to find on disk, and letting one
+// abort the scan would hand anyone who can write to the directory a way to
+// break scanning entirely.
+func walkFiles(root *os.Root, opts *DirectoryScanOptions) ([]FileInfo, error) {
+	if opts == nil {
+		opts = getDefaultScanOptions()
 	}
 
-	// Clean path and check for loops
-	cleanPath := filepath.Clean(relativePath)
-	if s.visited[cleanPath] {
-		return nil // Skip already visited directory (prevents symlink loops)
-	}
-	s.visited[cleanPath] = true
+	fsys := root.FS()
+	results := []FileInfo{}
 
-	// Check if directory should be skipped
-	dirName := filepath.Base(relativePath)
-	if s.shouldSkipDirectory(dirName) {
-		return nil
-	}
-
-	// Open directory within secure root
-	dir, err := s.root.Open(relativePath)
-	if err != nil {
-		if s.opts.SkipUnreadableDirs {
-			return nil // Skip unreadable directories
-		}
-		return fmt.Errorf("failed to open directory %s: %w", relativePath, err)
-	}
-	defer func() { _ = dir.Close() }()
-
-	// Read directory entries
-	entries, err := dir.ReadDir(-1)
-	if err != nil {
-		if s.opts.SkipUnreadableDirs {
-			return nil
-		}
-		return fmt.Errorf("failed to read directory %s: %w", relativePath, err)
-	}
-
-	// Process each entry
-	for _, entry := range entries {
-		entryPath := filepath.Join(relativePath, entry.Name())
-
-		// A DirEntry always describes the link itself, never its target: for a
-		// symlink IsDir() reports false and Type() reports ModeSymlink. Testing
-		// IsDir() first would classify a symlinked directory as a file.
-		if entry.Type()&os.ModeSymlink != 0 {
-			if err := s.addSymlink(entry, entryPath); err != nil {
-				return err
+	err := fs.WalkDir(fsys, ".", func(entryPath string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			// The directory at entryPath could not be read.
+			if opts.SkipUnreadableDirs {
+				return nil
 			}
-			continue
+			return fmt.Errorf("failed to read directory %s: %w", entryPath, err)
 		}
 
 		if entry.IsDir() {
-			if err := s.scanRecursive(entryPath, depth+1); err != nil {
-				return err
+			if skipDirectory(opts, entryPath, entry.Name()) {
+				return fs.SkipDir
 			}
-			continue
-		}
-
-		if !s.shouldIncludeFile(entry.Name()) {
-			continue
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			if s.opts.SkipUnreadableDirs {
-				continue // Skip files we can't stat
-			}
-			return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
-		}
-
-		fileInfo, err := s.createFileInfo(entry.Name(), entryPath, info)
-		if err != nil {
-			if s.opts.SkipUnreadableDirs {
-				continue
-			}
-			return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
-		}
-		s.results = append(s.results, fileInfo)
-	}
-
-	return nil
-}
-
-// addSymlink records a symlink that resolves to a regular file inside the scan
-// root, and ignores every other kind.
-//
-// Containment comes from the root itself: Root.Stat resolves the name against
-// the open scan-root handle, so a link pointing outside the scan area - or a
-// dangling one - fails here rather than being followed. Such a link is always
-// skipped, never turned into a scan error: an out-of-root symlink is an
-// ordinary thing to find on disk and simply isn't part of the scan area, so
-// letting one abort the whole scan would hand any writer of the directory a
-// way to break scanning entirely.
-func (s *SecureDirectoryScanner) addSymlink(entry os.DirEntry, entryPath string) error {
-	if !s.shouldIncludeFile(entry.Name()) {
-		return nil
-	}
-
-	info, err := s.root.Stat(entryPath)
-	if err != nil {
-		return nil // Escapes the scan root, is absolute, or dangles
-	}
-
-	// Links to directories are not traversed, which keeps the scan free of
-	// symlink loops by construction rather than by loop detection.
-	if info.IsDir() {
-		return nil
-	}
-
-	fileInfo, err := s.createFileInfo(entry.Name(), entryPath, info)
-	if err != nil {
-		if s.opts.SkipUnreadableDirs {
 			return nil
 		}
-		return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
-	}
-	s.results = append(s.results, fileInfo)
 
-	return nil
+		if !includeFile(opts, entry.Name()) {
+			return nil
+		}
+
+		info, err := statEntry(fsys, entryPath, entry)
+		if err != nil {
+			if opts.SkipUnreadableDirs {
+				return nil
+			}
+			return fmt.Errorf("failed to get file info for %s: %w", entryPath, err)
+		}
+		if info == nil {
+			return nil // A symlink that does not resolve inside the root.
+		}
+
+		if opts.ValidateFileAccess {
+			file, err := root.Open(entryPath)
+			if err != nil {
+				if opts.SkipUnreadableDirs {
+					return nil
+				}
+				return fmt.Errorf("file access validation failed: %w", err)
+			}
+			_ = file.Close()
+		}
+
+		results = append(results, FileInfo{
+			Name: entry.Name(),
+			// fs paths are always slash-separated; callers join this onto
+			// native paths, so hand it back in the native form.
+			Path:    filepath.FromSlash(entryPath),
+			IsDir:   info.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			Mode:    info.Mode(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
 
-// shouldSkipDirectory determines if a directory should be skipped based on configured rules.
-func (s *SecureDirectoryScanner) shouldSkipDirectory(dirName string) bool {
-	// Never skip current or parent directory references
-	if dirName == "." || dirName == ".." {
-		return false
+// statEntry returns the metadata to report for a non-directory entry, or a nil
+// FileInfo when the entry is a symlink that should not be reported at all.
+func statEntry(fsys fs.FS, entryPath string, entry fs.DirEntry) (fs.FileInfo, error) {
+	if entry.Type()&fs.ModeSymlink == 0 {
+		return entry.Info()
 	}
 
-	// Use custom directory filter if provided
-	if s.opts.DirFilter != nil {
-		return !s.opts.DirFilter(dirName)
+	// Resolving through fsys keeps the answer inside the boundary.
+	info, err := fs.Stat(fsys, entryPath)
+	if err != nil {
+		return nil, nil // Escapes the root, is absolute, or dangles.
+	}
+	if info.IsDir() {
+		return nil, nil // Not reported as a file; WalkDir has not descended it.
+	}
+	return info, nil
+}
+
+// skipDirectory reports whether a directory should not be descended.
+func skipDirectory(opts *DirectoryScanOptions, entryPath, dirName string) bool {
+	// The scan root is always descended - depth permitting.
+	if entryPath == "." {
+		return depthOf(entryPath) > opts.MaxDepth
 	}
 
-	// Skip hidden directories if not including hidden files
-	if !s.opts.IncludeHidden && strings.HasPrefix(dirName, ".") {
+	if depthOf(entryPath) > opts.MaxDepth {
 		return true
 	}
 
-	// Check against skip patterns
-	return slices.Contains(s.opts.SkipPatterns, dirName)
+	if opts.DirFilter != nil {
+		return !opts.DirFilter(dirName)
+	}
+
+	if !opts.IncludeHidden && strings.HasPrefix(dirName, ".") {
+		return true
+	}
+
+	return slices.Contains(opts.SkipPatterns, dirName)
 }
 
-// shouldIncludeFile determines if a file should be included based on configured rules.
-func (s *SecureDirectoryScanner) shouldIncludeFile(fileName string) bool {
-	// Skip hidden files if not including hidden files
-	if !s.opts.IncludeHidden && strings.HasPrefix(fileName, ".") {
+// depthOf converts a walk path into a 1-based directory level: the scan root
+// is level 1, its immediate subdirectories are level 2, and so on.
+func depthOf(entryPath string) int {
+	if entryPath == "." {
+		return 1
+	}
+	return strings.Count(entryPath, "/") + 2
+}
+
+// includeFile reports whether a file should appear in the results.
+func includeFile(opts *DirectoryScanOptions, fileName string) bool {
+	if !opts.IncludeHidden && strings.HasPrefix(fileName, ".") {
 		return false
 	}
-
-	// Apply custom file filter if provided
-	if s.opts.FileFilter != nil {
-		return s.opts.FileFilter(fileName)
+	if opts.FileFilter != nil {
+		return opts.FileFilter(fileName)
 	}
-
-	// Include all files by default
 	return true
-}
-
-// createFileInfo builds a FileInfo from an already-resolved stat result.
-//
-// Callers pass the info they obtained for the entry: entry.Info() for a plain
-// file, or Root.Stat for a symlink, so a symlinked file reports its target's
-// size and mode rather than the link's.
-func (s *SecureDirectoryScanner) createFileInfo(name, path string, info os.FileInfo) (FileInfo, error) {
-	// Optional file access validation for enhanced security
-	if s.opts.ValidateFileAccess && !info.IsDir() {
-		// Construct full path for validation (root.Open gives us a relative path)
-		// We use the scan root + relative path to get the full path
-		fullPath := filepath.Join(s.scanRoot, path)
-		if err := ValidateFileAccess(fullPath, false); err != nil {
-			return FileInfo{}, fmt.Errorf("file access validation failed: %w", err)
-		}
-	}
-
-	return FileInfo{
-		Name:    name,
-		Path:    path,
-		IsDir:   info.IsDir(),
-		Size:    info.Size(),
-		ModTime: info.ModTime(),
-		Mode:    info.Mode(),
-	}, nil
 }

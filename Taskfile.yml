@@ -17,15 +17,18 @@ tasks:
       - go test --cover ./...
 
   lint:
-    desc: Run golangci-lint on the codebase (installs if missing)
+    desc: Check formatting with gofmt and run go vet (no external tools)
     cmds:
       - |
-        if ! command -v golangci-lint >/dev/null 2>&1; then
-          echo 'golangci-lint not found. Installing...'
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          export PATH=$PATH:$(go env GOPATH)/bin
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "These files are not gofmt-formatted:"
+          echo "$unformatted"
+          echo "Run 'task format' to fix."
+          exit 1
         fi
-        golangci-lint run ./...
+        echo "All files are gofmt-formatted."
+      - go vet ./...
 
   vuln:
     desc: Scan for known vulnerabilities with govulncheck
@@ -38,11 +41,9 @@ tasks:
       - rm -f rulem
 
   format:
-    desc: Format code using gofmt and goimports
+    desc: Format code with gofmt
     cmds:
-      - go fmt ./...
-      - if ! command -v goimports >/dev/null 2>&1; then go install golang.org/x/tools/cmd/goimports@latest; fi
-      - goimports -w .
+      - gofmt -w .
 
   mcp:
     desc: Run the MCP server (Model Context Protocol) with debug enabled

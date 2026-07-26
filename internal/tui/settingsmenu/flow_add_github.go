@@ -98,7 +98,7 @@ func (m *SettingsModel) handleAddGitHubURLKeys(msg tea.KeyMsg) (*SettingsModel, 
 		}
 
 		// Check for duplicate URL
-		for _, repo := range m.currentConfig.Repositories {
+		for _, repo := range m.repositories() {
 			if repo.RemoteURL != nil && *repo.RemoteURL == input {
 				m.layout = m.layout.SetError(fmt.Errorf("GitHub URL already used by another repository"))
 				return m, nil
@@ -177,7 +177,7 @@ func (m *SettingsModel) handleAddGitHubPathKeys(msg tea.KeyMsg) (*SettingsModel,
 		}
 
 		// Check for duplicate path
-		for _, repo := range m.currentConfig.Repositories {
+		for _, repo := range m.repositories() {
 			if repo.Path == expandedPath {
 				m.layout = m.layout.SetError(fmt.Errorf("path already used by another repository"))
 				return m, nil

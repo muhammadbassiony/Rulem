@@ -80,7 +80,7 @@ func (m *SettingsModel) handleAddLocalPathKeys(msg tea.KeyMsg) (*SettingsModel, 
 		}
 
 		// Check for duplicate path
-		for _, repo := range m.currentConfig.Repositories {
+		for _, repo := range m.repositories() {
 			if repo.Path == expandedPath {
 				m.layout = m.layout.SetError(fmt.Errorf("path already used by another repository"))
 				return m, nil

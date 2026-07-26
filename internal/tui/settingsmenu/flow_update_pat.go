@@ -48,7 +48,7 @@ func (m *SettingsModel) handleUpdateGitHubPATKeys(msg tea.KeyMsg) (*SettingsMode
 
 		// Validate PAT against all GitHub repositories
 		ctx := context.Background()
-		if err := m.credManager.ValidateGitHubTokenForRepos(ctx, input, m.currentConfig.Repositories); err != nil {
+		if err := m.credManager.ValidateGitHubTokenForRepos(ctx, input, m.repositories()); err != nil {
 			m.logger.Warn("GitHub PAT repository validation failed", "error", err)
 			return m, func() tea.Msg {
 				return updatePATErrorMsg{err}
@@ -136,7 +136,7 @@ func (m *SettingsModel) updateGitHubPAT() error {
 		return fmt.Errorf("current config is nil")
 	}
 
-	if err := m.credManager.ValidateGitHubTokenForRepos(m.context, m.newGitHubPAT, m.currentConfig.Repositories); err != nil {
+	if err := m.credManager.ValidateGitHubTokenForRepos(m.context, m.newGitHubPAT, m.repositories()); err != nil {
 		return err
 	}
 
@@ -183,7 +183,7 @@ func (m *SettingsModel) viewUpdateGitHubPAT() string {
 	content.WriteString("\n\n")
 
 	// List affected GitHub repositories
-	githubRepos := getGitHubRepositories(m.currentConfig.Repositories)
+	githubRepos := getGitHubRepositories(m.repositories())
 	if len(githubRepos) > 0 {
 		content.WriteString(lipgloss.NewStyle().Faint(true).Render("Affected repositories:"))
 		content.WriteString("\n")
@@ -236,7 +236,7 @@ func (m *SettingsModel) viewUpdatePATConfirm() string {
 	content.WriteString("You are about to update the GitHub Personal Access Token.\n\n")
 
 	// Show affected repositories count
-	githubRepos := getGitHubRepositories(m.currentConfig.Repositories)
+	githubRepos := getGitHubRepositories(m.repositories())
 	repoCount := len(githubRepos)
 
 	if repoCount > 0 {

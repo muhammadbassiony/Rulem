@@ -88,6 +88,25 @@ type SaveRulesModel struct {
 	fileManager *filemanager.FileManager
 }
 
+// noUsableRepositoriesError builds the error shown when there is nowhere to
+// operate. Having zero repositories configured is a normal state — it is what
+// remains after deleting them all — so it gets an actionable message rather than
+// being conflated with repositories that exist but failed to prepare.
+func noUsableRepositoriesError(configured int, verb string) error {
+	if configured == 0 {
+		return fmt.Errorf("no repositories configured\n\nThere is nowhere to %s. Add a repository from the main menu:\n⚙️  Update settings → ➕ Add New Repository", verb)
+	}
+	return fmt.Errorf("none of your %d configured %s could be prepared\n\nTheir directories may have been moved or deleted. Review them in\n⚙️  Update settings", configured, pluralizeRepository(configured))
+}
+
+// pluralizeRepository returns "repository" or "repositories" for count.
+func pluralizeRepository(count int) string {
+	if count == 1 {
+		return "repository"
+	}
+	return "repositories"
+}
+
 func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	layout := components.NewLayout(components.LayoutConfig{
 		MarginX:  2,
@@ -149,7 +168,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 	}
 
 	if len(available) == 0 {
-		ctx.Logger.Error("No repositories configured")
+		ctx.Logger.Error("No usable repositories for saving rules", "configured", len(ctx.Config.Repositories))
 		return SaveRulesModel{
 			logger:           ctx.Logger,
 			windowWidth:      ctx.Width,
@@ -166,7 +185,7 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 			selectedFile:     filemanager.FileItem{},
 			newFileName:      "",
 			destinationPath:  "",
-			err:              fmt.Errorf("no repositories configured - please run setup first"),
+			err:              noUsableRepositoriesError(len(ctx.Config.Repositories), "save rules to"),
 			isOverwriteError: false,
 			fileManager:      nil,
 		}
@@ -232,6 +251,14 @@ func NewSaveRulesModel(ctx helpers.UIContext) SaveRulesModel {
 // For single repository, scanning starts immediately.
 // For multiple repositories, we scan first, then prompt for repository selection before saving.
 func (m SaveRulesModel) Init() tea.Cmd {
+	// If the constructor already put us in an error state (no repositories
+	// configured, or none of them could be prepared), keep its message. Falling
+	// through would replace it with the generic "FileManager not initialized"
+	// error, which says nothing about what the user needs to do.
+	if m.state == StateError {
+		return nil
+	}
+
 	// For multiple repos, we don't need FileManager until repository is selected
 	// We still scan current directory for markdown files first
 	if len(m.preparedRepos) > 1 {

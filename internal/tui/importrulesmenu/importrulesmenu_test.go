@@ -273,8 +273,8 @@ func TestImportRulesModel_Init_WithNoPreparedRepos(t *testing.T) {
 	if !ok {
 		t.Errorf("Expected ImportFileErrorMsg, got %T", msg)
 	}
-	if !strings.Contains(errorMsg.Err.Error(), "no repositories available") {
-		t.Errorf("Error message should mention no repositories available: %v", errorMsg.Err)
+	if !strings.Contains(errorMsg.Err.Error(), "no repositories configured") {
+		t.Errorf("Error message should mention no repositories configured: %v", errorMsg.Err)
 	}
 	if errorMsg.IsOverwriteError {
 		t.Error("Should not be an overwrite error")

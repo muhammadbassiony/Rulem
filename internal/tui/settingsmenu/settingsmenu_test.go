@@ -227,10 +227,21 @@ func TestGetMenuOptions_LocalRepo(t *testing.T) {
 
 	options := model.getMenuOptions()
 
-	// Local repo should have: change name, delete (if >1 repo), back
-	// Since we only have 1 repo in createLocalConfig, expect 2 options: change name + back
-	if len(options) != 2 {
-		t.Errorf("Expected 2 options for single local repo, got %d", len(options))
+	// Local repo has: change name, delete, back. Delete is offered even for the
+	// only configured repository so the config can be emptied and rebuilt.
+	if len(options) != 3 {
+		t.Errorf("Expected 3 options for single local repo, got %d", len(options))
+	}
+
+	hasDelete := false
+	for _, opt := range options {
+		if opt.Option == ChangeOptionDelete {
+			hasDelete = true
+			break
+		}
+	}
+	if !hasDelete {
+		t.Error("Delete should be offered for the last remaining repository")
 	}
 
 	// Check that change name is available
@@ -257,10 +268,9 @@ func TestGetMenuOptions_GitHubRepo(t *testing.T) {
 
 	options := model.getMenuOptions()
 
-	// GitHub repo should have: Branch, Path, Change Name, Manual Refresh, Delete (if >1 repo), Back
-	// Since we only have 1 repo, expect 5 options (no delete)
-	if len(options) != 5 {
-		t.Errorf("Expected 5 options for single GitHub repo, got %d", len(options))
+	// GitHub repo should have: Branch, Path, Manual Refresh, Change Name, Delete, Back
+	if len(options) != 6 {
+		t.Errorf("Expected 6 options for single GitHub repo, got %d", len(options))
 	}
 
 	// Verify all GitHub options are present

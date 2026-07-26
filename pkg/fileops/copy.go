@@ -59,7 +59,7 @@ func AtomicCopy(srcPath, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	srcInfo, err := srcFile.Stat()
 	if err != nil {
@@ -93,7 +93,7 @@ func AtomicCopy(srcPath, destPath string) error {
 
 	var renamed bool
 	defer func() {
-		tempFile.Close()
+		_ = tempFile.Close()
 		if !renamed {
 			_ = root.Remove(tempName) // Clean up on failure
 		}

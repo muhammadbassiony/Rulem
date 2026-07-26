@@ -69,13 +69,13 @@ func hasParentTraversal(path string) bool {
 // isContained reports whether relPath - as produced by filepath.Rel - stays
 // inside the directory it was computed against.
 //
-// filepath.IsLocal does the real work: it rejects absolute paths, ".."
-// escapes and (on Windows) reserved device names, without the false positives
-// of a strings.HasPrefix(relPath, "..") test, which also rejects a file simply
-// named "..notes.md". IsLocal reports false for "." even though it denotes the
-// directory itself, so that case is allowed explicitly.
+// filepath.IsLocal is exactly the predicate the old
+// strings.HasPrefix(relPath, "..") test was approximating: it rejects absolute
+// paths, ".." escapes and (on Windows) reserved device names, without also
+// rejecting a file simply named "..notes.md". It accepts ".", which is what
+// filepath.Rel returns when the two paths are the same directory.
 func isContained(relPath string) bool {
-	return relPath == "." || filepath.IsLocal(relPath)
+	return filepath.IsLocal(relPath)
 }
 
 // ValidateCWDPath validates that a destination path is safe relative to current working directory.

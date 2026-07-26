@@ -246,9 +246,13 @@ func SanitizeFilename(filename string) (string, error) {
 //   - Otherwise the path is split on "/" and each segment is validated and sanitized
 //     like an individual filename.
 //
-// Rules (all violations return an error):
+// Rules:
 //   - Empty or whitespace-only paths are rejected.
-//   - Absolute paths (leading "/" or filepath.IsAbs) are rejected.
+//   - A leading "/" is not an absolute filesystem path here: the result is always
+//     interpreted relative to a storage root, so "/backend/api.md" is accepted and
+//     normalized to "backend/api.md" (root of the storage directory).
+//   - Platform-absolute forms that survive that normalization (e.g. a Windows
+//     volume path like "C:/rules.md") are rejected.
 //   - Empty segments (e.g. "a//b.md" or a trailing "/") are rejected.
 //   - "." and ".." segments (path traversal) are rejected.
 //
@@ -265,22 +269,32 @@ func SanitizeFilename(filename string) (string, error) {
 //	}
 //	dest := filepath.Join(storageDir, rel)
 func SanitizeRelativePath(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
 		return "", fmt.Errorf("path cannot be empty")
 	}
 
-	// Reject absolute paths (both "/abs.md" and platform-absolute forms).
-	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
+	// A leading "/" means "root of the storage directory", not the filesystem
+	// root, so strip it rather than rejecting the path. The result is still
+	// validated segment by segment below and joined onto the storage root.
+	trimmed = strings.TrimLeft(trimmed, "/")
+	if trimmed == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	// Anything still absolute after that (e.g. a Windows volume path) cannot be
+	// contained inside the storage root.
+	if filepath.IsAbs(trimmed) {
 		return "", fmt.Errorf("path must be relative, not absolute: %q", path)
 	}
 
 	// Fast path: a bare filename with no separators must behave exactly like
 	// SanitizeFilename so existing behavior is preserved.
-	if !strings.Contains(path, "/") {
-		return SanitizeFilename(path)
+	if !strings.Contains(trimmed, "/") {
+		return SanitizeFilename(trimmed)
 	}
 
-	segments := strings.Split(path, "/")
+	segments := strings.Split(trimmed, "/")
 	cleaned := make([]string, 0, len(segments))
 	for _, seg := range segments {
 		if seg == "" {

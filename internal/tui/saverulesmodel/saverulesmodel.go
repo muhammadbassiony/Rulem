@@ -595,7 +595,7 @@ func (m SaveRulesModel) viewFileNameInput() string {
 	}
 
 	content := fmt.Sprintf("File will be saved to: %s\n\n", storageDir)
-	content += "Filename (use / to save into a subdirectory):\n"
+	content += "Filename (use / to save into a subdirectory, always relative to the repository root):\n"
 	content += m.nameInput.View()
 	content += "\n\n"
 	content += "Preview: " + m.nameInput.Value()

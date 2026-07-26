@@ -398,10 +398,40 @@ func TestSanitizeRelativePath(t *testing.T) {
 			errorText:   "traversal",
 		},
 		{
-			name:        "absolute path rejected",
+			name:        "leading slash treated as storage root",
 			path:        "/abs.md",
+			expected:    "abs.md",
+			expectError: false,
+		},
+		{
+			name:        "leading slash with subdirectories",
+			path:        "/backend/api-rules.md",
+			expected:    filepath.Join("backend", "api-rules.md"),
+			expectError: false,
+		},
+		{
+			name:        "repeated leading slashes collapsed",
+			path:        "//backend/api-rules.md",
+			expected:    filepath.Join("backend", "api-rules.md"),
+			expectError: false,
+		},
+		{
+			name:        "surrounding whitespace trimmed",
+			path:        "  /backend/api-rules.md  ",
+			expected:    filepath.Join("backend", "api-rules.md"),
+			expectError: false,
+		},
+		{
+			name:        "leading slash with traversal still rejected",
+			path:        "/backend/../../evil.md",
 			expectError: true,
-			errorText:   "relative",
+			errorText:   "traversal",
+		},
+		{
+			name:        "only slashes rejected",
+			path:        "///",
+			expectError: true,
+			errorText:   "empty",
 		},
 		{
 			name:        "double slash empty segment rejected",

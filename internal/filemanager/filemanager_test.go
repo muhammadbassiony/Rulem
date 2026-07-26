@@ -228,6 +228,33 @@ func TestCopyFileToStorageSubdirectories(t *testing.T) {
 		}
 	})
 
+	t.Run("leading slash is relative to storage root", func(t *testing.T) {
+		storageDir := createTempStorage(t)
+		defer os.RemoveAll(storageDir)
+
+		fm, err := NewFileManager(storageDir, logger)
+		if err != nil {
+			t.Fatalf("Failed to create FileManager: %v", err)
+		}
+
+		tempDir := createTempStorage(t)
+		defer os.RemoveAll(tempDir)
+		srcPath := createTestFile(t, tempDir, "source.md", testContent)
+
+		newName := "/backend/api-rules.md"
+		destPath, err := fm.CopyFileToStorage(srcPath, &newName, false)
+		if err != nil {
+			t.Fatalf("CopyFileToStorage failed: %v", err)
+		}
+		expectedDest := filepath.Join(storageDir, "backend", "api-rules.md")
+		if destPath != expectedDest {
+			t.Errorf("Expected dest path %s, got %s", expectedDest, destPath)
+		}
+		if !fileExists(destPath) {
+			t.Error("Destination file was not created")
+		}
+	})
+
 	t.Run("rejects unsafe subdirectory paths", func(t *testing.T) {
 		storageDir := createTempStorage(t)
 		defer os.RemoveAll(storageDir)
@@ -244,7 +271,7 @@ func TestCopyFileToStorageSubdirectories(t *testing.T) {
 		badNames := []string{
 			"../evil.md",
 			"backend/../../evil.md",
-			"/abs.md",
+			"/../evil.md",
 			"a//b.md",
 			"a/./b.md",
 		}

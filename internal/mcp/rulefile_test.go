@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"rulem/internal/filemanager"
 	"rulem/internal/logging"
 	"rulem/internal/repository"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -975,20 +977,32 @@ func TestValidateFrontmatter(t *testing.T) {
 			errorMsg:    "potentially malicious content",
 		},
 		{
-			name: "name with script injection",
+			// Frontmatter is text, not markup. The name field is defended by
+			// SanitizeIdentifier where the tool name is generated, which is the
+			// point at which the target context is actually known - see
+			// TestGenerateToolNameSanitizesMarkup.
+			name: "name containing markup is not rejected outright",
 			frontmatter: RuleFrontmatter{
 				Description: "Valid description",
 				Name:        "<script>alert('xss')</script>",
 			},
 			filename:    "test.md",
-			expectError: true,
-			errorMsg:    "invalid characters",
+			expectError: false,
 		},
 		{
-			name: "applyTo with javascript",
+			name: "applyTo mentioning a javascript url is not rejected outright",
 			frontmatter: RuleFrontmatter{
 				Description: "Valid description",
 				ApplyTo:     "javascript:alert('xss')",
+			},
+			filename:    "test.md",
+			expectError: false,
+		},
+		{
+			name: "applyTo with control characters",
+			frontmatter: RuleFrontmatter{
+				Description: "Valid description",
+				ApplyTo:     "glob\x07with bell",
 			},
 			filename:    "test.md",
 			expectError: true,
@@ -1323,21 +1337,40 @@ Content with suspicious description`,
 		t.Errorf("ProcessRuleFiles should not return error: %v", err)
 	}
 
-	// Should only process the valid file
-	if len(tools) != 1 {
-		t.Errorf("Expected 1 valid tool, got %d", len(tools))
+	// Only long-description.md is rejected, for exceeding the 500 character
+	// limit. The two files quoting markup are ordinary documents: the name
+	// field is made safe by sanitization at tool-name generation, not by
+	// refusing the file.
+	processed := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		processed[tool.RuleFile.FileName] = true
 	}
 
-	// Check that the valid tool was processed (iterate through map)
-	var foundValidTool bool
-	for _, tool := range tools {
-		if tool.RuleFile.FileName == "valid-rule.md" {
-			foundValidTool = true
-			break
+	for _, want := range []string{"valid-rule.md", "malicious-name.md", "suspicious-content.md"} {
+		if !processed[want] {
+			t.Errorf("Expected %s to be processed, got %v", want, slices.Sorted(maps.Keys(processed)))
 		}
 	}
-	if !foundValidTool {
-		t.Error("Expected valid-rule.md to be processed")
+	if processed["long-description.md"] {
+		t.Error("Expected long-description.md to be rejected for exceeding the description limit")
+	}
+}
+
+// TestGenerateToolNameSanitizesMarkup documents where markup in a frontmatter
+// name is actually defended against: the tool name is sanitized at the point
+// it is generated, rather than the whole rule file being rejected because its
+// text mentions "<script>".
+func TestGenerateToolNameSanitizesMarkup(t *testing.T) {
+	processor, tempDir, _ := createTestRuleFileProcessor(t)
+	defer os.RemoveAll(tempDir)
+
+	name := processor.generateToolName(&RuleFile{
+		FileName: "markup.md",
+		Name:     "<script>alert('xss')</script>",
+	})
+
+	if strings.ContainsAny(name, "<>()'\"/") {
+		t.Errorf("generateToolName() = %q, want markup characters stripped", name)
 	}
 }
 
@@ -1386,29 +1419,31 @@ This is clean content.`), 0644)
 			expectError: false,
 		},
 		{
-			name: "content with potential script injection",
+			// A rule file about web security legitimately quotes these
+			// tokens. Markdown is never rendered as HTML here, so blocking
+			// them only rejected valid documents.
+			name: "content discussing script tags is accepted",
 			content: `---
-description: "Malicious rule"
+description: "XSS rule"
 ---
 # Rule with Script
 <script>alert('xss')</script>
-This contains malicious content.`,
+This documents what not to write.`,
 			setupFunc: func() filemanager.FileItem {
-				filePath := filepath.Join(tempDir, "malicious-rule.md")
+				filePath := filepath.Join(tempDir, "xss-rule.md")
 				os.WriteFile(filePath, []byte(`---
-description: "Malicious rule"
+description: "XSS rule"
 ---
 # Rule with Script
 <script>alert('xss')</script>
-This contains malicious content.`), 0644)
+This documents what not to write.`), 0644)
 				return filemanager.FileItem{
-					Name:         "malicious-rule.md",
+					Name:         "xss-rule.md",
 					Path:         filePath, // Absolute path
 					RepositoryID: "test-repo-123",
 				}
 			},
-			expectError: true,
-			errorSubstr: "content security validation failed",
+			expectError: false,
 		},
 		{
 			name: "content with control characters",

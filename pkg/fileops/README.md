@@ -4,7 +4,7 @@ Secure file operations for Go applications with comprehensive validation pattern
 
 ## Overview
 
-The `fileops` package provides atomic file operations combined with defense-in-depth security validations. It prevents common security vulnerabilities like path traversal attacks, symlink exploits, content injection, and resource exhaustion.
+The `fileops` package provides atomic file operations combined with defense-in-depth security validations. It prevents common security vulnerabilities like path traversal attacks, symlink exploits, control-character injection, and resource exhaustion.
 
 ## Security-First Design
 
@@ -44,7 +44,7 @@ func validateAndProcessFile(filePath, baseDir string, maxSize int64) error {
         return fmt.Errorf("failed to read file: %w", err)
     }
 
-    // 6. Content security - prevent injection attacks
+    // 6. Content security - reject control characters
     if err := fileops.ValidateContentSecurity(string(content)); err != nil {
         return fmt.Errorf("content security validation failed: %w", err)
     }
@@ -76,7 +76,7 @@ This pattern is used in production code (see `internal/mcp/rulefile.go`) and pro
 
 - Path traversal attacks (`../../../etc/passwd`)
 - Symlink-based directory escapes
-- Content injection (script tags, eval, etc.)
+- Control characters in file content (terminal escapes, NUL truncation)
 - Resource exhaustion from large files
 - Access to unauthorized files
 
@@ -217,11 +217,16 @@ Symlinks can bypass security checks. Always:
 
 ### Content Security
 
-Use `ValidateContentSecurity()` on all user-provided content to prevent:
+Use `ValidateContentSecurity()` on user-provided content to reject control
+characters: NUL bytes, which truncate strings, and the rest of the C0 range
+including ESC, which lets content forge terminal output.
 
-- Script injection attacks
-- Code execution via `eval()` or `exec()`
-- Malicious protocol handlers (`javascript:`, `vbscript:`)
+It deliberately does **not** scan for `<script`, `javascript:` or `eval(`.
+Those are an HTML-context defense, and markdown is never rendered as HTML
+here - the check rejected legitimate rule files (any document about web
+security quotes exactly those tokens) while providing no real protection,
+since a substring blocklist is trivially evaded. Escape content where it
+enters an HTML context; that is the only place the context is known.
 
 ### Resource Limits
 

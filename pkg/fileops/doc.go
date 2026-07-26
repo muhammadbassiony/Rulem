@@ -1,7 +1,7 @@
 // Package fileops provides secure file operations with defense-in-depth validation patterns.
 //
 // This package implements atomic file operations combined with comprehensive security validations
-// to prevent common attacks like path traversal, symlink exploits, and content injection.
+// to prevent common attacks like path traversal, symlink exploits, and control-character injection.
 //
 // # Security Validation Patterns
 //
@@ -11,7 +11,7 @@
 // 2. **File Size**: ValidateFileSizeLimit() - Prevents resource exhaustion
 // 3. **File Access**: ValidateFileAccess() - Ensures file readability/writability
 // 4. **Directory Containment**: ValidateFileInDirectory() - Prevents directory escapes
-// 5. **Content Security**: ValidateContentSecurity() - Blocks malicious content
+// 5. **Content Security**: ValidateContentSecurity() - Rejects control characters
 // 6. **Symlink Handling**: Check IsSymlink(), ValidateSymlinkSecurity() - Prevents symlink attacks
 //
 // # Example: Secure File Processing

@@ -441,7 +441,7 @@ func TestSecureDirectoryScanner_SymlinkClassification(t *testing.T) {
 	}
 
 	tempDir := createTempDir(t)
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	root := filepath.Join(tempDir, "root")
 	realDir := filepath.Join(root, "real_dir")
@@ -478,7 +478,7 @@ func TestSecureDirectoryScanner_SymlinkClassification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create scanner: %v", err)
 	}
-	defer scanner.Close()
+	defer func() { _ = scanner.Close() }()
 
 	files, err := scanner.ScanDirectory()
 	if err != nil {

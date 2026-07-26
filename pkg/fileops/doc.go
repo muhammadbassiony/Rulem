@@ -49,6 +49,10 @@
 //	err := fileops.AtomicCopy(srcPath, destPath)
 //	// Destination appears atomically or remains unchanged on failure
 //
+// The copy runs through an os.Root scoped to the destination directory, so a
+// symlink planted there cannot redirect the write outside it, and the
+// destination inherits the source file's permission bits.
+//
 // # Directory Operations
 //
 // EnsureDirectoryExists() creates directories safely with proper permissions (0755).

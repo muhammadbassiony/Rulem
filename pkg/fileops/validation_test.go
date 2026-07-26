@@ -676,6 +676,28 @@ func TestValidateDirectoryWritable(t *testing.T) {
 	}
 }
 
+// TestValidateDirectoryWritableLeavesNoProbe verifies the write probe cleans up
+// after itself and does not reuse a predictable name that another process could
+// pre-create.
+func TestValidateDirectoryWritableLeavesNoProbe(t *testing.T) {
+	tempDir := createTempDir(t)
+	defer os.RemoveAll(tempDir)
+
+	for range 3 {
+		if err := ValidateDirectoryWritable(tempDir); err != nil {
+			t.Fatalf("ValidateDirectoryWritable failed: %v", err)
+		}
+	}
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Probe files left behind: %v", entries)
+	}
+}
+
 // Tests for ValidatePathInHome
 
 func TestValidatePathInHome(t *testing.T) {

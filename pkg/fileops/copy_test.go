@@ -3,7 +3,11 @@ package fileops
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -154,8 +158,8 @@ func TestAtomicCopyErrors(t *testing.T) {
 			t.Error("Expected error for non-existent destination directory")
 		}
 
-		if !strings.Contains(err.Error(), "failed to create temporary file") {
-			t.Errorf("Expected 'failed to create temporary file' error, got: %v", err)
+		if !strings.Contains(err.Error(), "failed to open destination directory") {
+			t.Errorf("Expected 'failed to open destination directory' error, got: %v", err)
 		}
 	})
 
@@ -169,6 +173,142 @@ func TestAtomicCopyErrors(t *testing.T) {
 			t.Error("Expected error when source is directory")
 		}
 	})
+
+	t.Run("destination path has no file name", func(t *testing.T) {
+		srcPath := createTestFile(t, srcDir, "named_source.txt", "content")
+
+		err := AtomicCopy(srcPath, destDir+string(os.PathSeparator))
+		if err == nil {
+			t.Fatal("Expected error for destination path without a file name")
+		}
+		if !strings.Contains(err.Error(), "no file name") {
+			t.Errorf("Expected 'no file name' error, got: %v", err)
+		}
+	})
+}
+
+// TestAtomicCopyPermissions verifies the destination inherits the source's
+// permission bits instead of being forced to a hardcoded, world-readable mode.
+func TestAtomicCopyPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not meaningful on Windows")
+	}
+
+	srcDir := createTempDir(t)
+	defer os.RemoveAll(srcDir)
+	destDir := createTempDir(t)
+	defer os.RemoveAll(destDir)
+
+	for _, mode := range []os.FileMode{0600, 0640, 0644} {
+		t.Run(mode.String(), func(t *testing.T) {
+			srcPath := filepath.Join(srcDir, "perm_"+mode.String()+".txt")
+			if err := os.WriteFile(srcPath, []byte("secret"), mode); err != nil {
+				t.Fatalf("Failed to create source file: %v", err)
+			}
+			// WriteFile is subject to umask, so assert against what landed on disk.
+			srcInfo, err := os.Stat(srcPath)
+			if err != nil {
+				t.Fatalf("Failed to stat source file: %v", err)
+			}
+
+			destPath := filepath.Join(destDir, "perm_"+mode.String()+".txt")
+			if err := AtomicCopy(srcPath, destPath); err != nil {
+				t.Fatalf("AtomicCopy failed: %v", err)
+			}
+
+			destInfo, err := os.Stat(destPath)
+			if err != nil {
+				t.Fatalf("Failed to stat destination file: %v", err)
+			}
+			if destInfo.Mode().Perm() != srcInfo.Mode().Perm() {
+				t.Errorf("Permissions not preserved. Source %v, destination %v",
+					srcInfo.Mode().Perm(), destInfo.Mode().Perm())
+			}
+		})
+	}
+}
+
+// TestAtomicCopySymlinkedTempPath covers the attack the fixed temporary-name
+// implementation allowed: an attacker who can write in the destination
+// directory pre-creates the predictable temp path as a symlink to a file
+// outside it, and the copy follows the link and truncates the victim.
+func TestAtomicCopySymlinkedTempPath(t *testing.T) {
+	srcDir := createTempDir(t)
+	defer os.RemoveAll(srcDir)
+	destDir := createTempDir(t)
+	defer os.RemoveAll(destDir)
+	victimDir := createTempDir(t)
+	defer os.RemoveAll(victimDir)
+
+	victimContent := "important victim data"
+	victimPath := createTestFile(t, victimDir, "victim.txt", victimContent)
+
+	srcPath := createTestFile(t, srcDir, "attacker.txt", "attacker controlled content")
+	destPath := filepath.Join(destDir, "dest.txt")
+
+	// The pre-1.0 implementation used exactly this path, without O_EXCL.
+	if err := os.Symlink(victimPath, destPath+".tmp"); err != nil {
+		t.Fatalf("Failed to plant symlink: %v", err)
+	}
+
+	if err := AtomicCopy(srcPath, destPath); err != nil {
+		t.Fatalf("AtomicCopy failed: %v", err)
+	}
+
+	if got := readFileContent(t, victimPath); got != victimContent {
+		t.Errorf("Victim file outside the destination directory was overwritten: %q", got)
+	}
+}
+
+// TestAtomicCopyConcurrent verifies that concurrent copies to the same
+// destination no longer share one temporary path and corrupt each other.
+func TestAtomicCopyConcurrent(t *testing.T) {
+	srcDir := createTempDir(t)
+	defer os.RemoveAll(srcDir)
+	destDir := createTempDir(t)
+	defer os.RemoveAll(destDir)
+
+	const copies = 8
+	contents := make([]string, copies)
+	sources := make([]string, copies)
+	for i := range copies {
+		contents[i] = strings.Repeat("content from source "+strconv.Itoa(i)+"\n", 2000)
+		sources[i] = createTestFile(t, srcDir, "src_"+strconv.Itoa(i)+".txt", contents[i])
+	}
+
+	destPath := filepath.Join(destDir, "contended.txt")
+
+	var wg sync.WaitGroup
+	errs := make([]error, copies)
+	for i := range copies {
+		wg.Go(func() {
+			errs[i] = AtomicCopy(sources[i], destPath)
+		})
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("Concurrent AtomicCopy %d failed: %v", i, err)
+		}
+	}
+
+	// Whichever copy won the race, the destination must be one intact source,
+	// never an interleaving of several.
+	got := readFileContent(t, destPath)
+	if !slices.Contains(contents, got) {
+		t.Errorf("Destination is not an intact copy of any source (%d bytes)", len(got))
+	}
+
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		t.Fatalf("Failed to read destination directory: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Errorf("Found leftover temp file after concurrent copies: %s", entry.Name())
+		}
+	}
 }
 
 func TestAtomicCopyAtomicity(t *testing.T) {

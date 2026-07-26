@@ -51,18 +51,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      # The codebase has pre-existing lint debt (tracked in ROADMAP.md), so
-      # lint only gates issues introduced by the change under review.
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: latest
-          only-new-issues: true
+      # gofmt ships with the Go toolchain, so this job installs nothing. The
+      # whole tree is already gofmt-clean, which lets this gate every file
+      # rather than only the lines a change touched.
+      #
+      # `go vet` runs in the test job above and catches the correctness issues
+      # gofmt cannot see.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            echo
+            gofmt -d .
+            echo "Run 'gofmt -w .' or 'task format' to fix."
+            exit 1
+          fi
+          echo "All files are gofmt-formatted."

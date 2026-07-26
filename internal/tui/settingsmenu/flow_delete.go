@@ -40,13 +40,14 @@ func (m *SettingsModel) handleDeleteErrorKeys(msg tea.KeyMsg) (*SettingsModel, t
 }
 
 // deleteRepository removes a repository from the configuration and reloads the list.
-// This function includes safety checks to prevent deletion of the last repository.
+// Any repository can be deleted, including the last one: an empty configuration is
+// a valid state that the rest of the application handles, and it is the only way to
+// start over from scratch.
 func (m *SettingsModel) deleteRepository() tea.Cmd {
 	return func() tea.Msg {
-		// Safety check: Prevent deletion of the last repository
-		if len(m.currentConfig.Repositories) <= 1 {
-			m.logger.Warn("Cannot delete last repository", "count", len(m.currentConfig.Repositories))
-			return deleteErrorMsg{fmt.Errorf("cannot delete the last repository.\n\nYou must have at least one repository configured.")}
+		if m.currentConfig == nil {
+			m.logger.Error("Cannot delete repository: configuration not loaded")
+			return deleteErrorMsg{fmt.Errorf("configuration is not loaded")}
 		}
 
 		// Find repository index
@@ -95,13 +96,19 @@ func (m *SettingsModel) deleteRepository() tea.Cmd {
 			// Continue anyway - the repository is deleted from config
 		}
 
-		// Rebuild list with action items
+		// Rebuild list with action items. The list shrank, so reset the cursor to
+		// keep it inside the new bounds instead of pointing past the last item.
 		items := BuildSettingsMainMenuItems(m.preparedRepos)
 		m.repoList.SetItems(items)
+		m.repoList.Select(0)
 
 		m.logger.Info("Repository deleted successfully",
 			"deleted", deletedRepo.Name,
 			"remaining_count", len(m.currentConfig.Repositories))
+
+		if len(m.currentConfig.Repositories) == 0 {
+			m.logger.Info("No repositories remain configured; add one from the settings menu to continue")
+		}
 
 		// Clear selection
 		m.selectedRepositoryID = ""
@@ -169,6 +176,14 @@ Are you sure you want to proceed? (y/N)`,
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ff5f5f")).Render(repoInfo),
 		lipgloss.NewStyle().Faint(true).Render(m.getCleanupWarning()))
 
+	// Deleting the last repository is allowed, but leaves saving and importing
+	// rules unusable until a new one is added, so call it out explicitly.
+	if m.isLastRepository() {
+		warningText = fmt.Sprintf("%s\n\n%s", warningText,
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#ff8700")).Render(
+				"ℹ️  This is your last repository. Saving and importing rules stay\nunavailable until you add a new one from ➕ Add New Repository."))
+	}
+
 	return m.layout.Render(warningText)
 }
 
@@ -196,7 +211,13 @@ func (m *SettingsModel) viewDeleteError() string {
 
 	content += "\n\n"
 	content += lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).
-		Render("💡 Common reasons:\n  - Cannot delete the last repository\n  - Repository not found\n  - Failed to save configuration")
+		Render("💡 Common reasons:\n  - Repository not found\n  - Failed to save configuration")
 
 	return m.layout.Render(content)
+}
+
+// isLastRepository reports whether the repository selected for deletion is the
+// only one left in the configuration.
+func (m *SettingsModel) isLastRepository() bool {
+	return m.currentConfig != nil && len(m.currentConfig.Repositories) == 1
 }

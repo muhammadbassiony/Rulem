@@ -110,7 +110,7 @@ func (m *SettingsModel) validateRepositoryNameUnique(name string) error {
 		return fmt.Errorf("configuration not loaded")
 	}
 
-	for _, repo := range m.currentConfig.Repositories {
+	for _, repo := range m.repositories() {
 		// Skip the repository being edited
 		if repo.ID == m.selectedRepositoryID {
 			continue

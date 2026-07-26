@@ -564,6 +564,61 @@ func TestNewSaveRulesModel(t *testing.T) {
 	if model.nameInput.CharLimit == 0 {
 		t.Error("Name input should be configured")
 	}
+
+	// With no repositories configured — the state left behind after deleting
+	// them all — there is nowhere to save, so the model must come up in an
+	// error state that names the problem and the fix.
+	t.Run("no repositories configured", func(t *testing.T) {
+		logger, _ := logging.NewTestLogger()
+		cfg := &config.Config{Repositories: []repository.RepositoryEntry{}}
+		empty := NewSaveRulesModel(helpers.NewUIContext(80, 24, cfg, logger))
+
+		if empty.state != StateError {
+			t.Fatalf("Expected StateError with no repositories, got %v", empty.state)
+		}
+		if empty.err == nil {
+			t.Fatal("Expected an error explaining there is nowhere to save")
+		}
+		if !strings.Contains(empty.err.Error(), "no repositories configured") {
+			t.Errorf("Expected the empty-config message, got %q", empty.err.Error())
+		}
+		if !strings.Contains(empty.err.Error(), "Add New Repository") {
+			t.Errorf("Expected the error to point at Add New Repository, got %q", empty.err.Error())
+		}
+
+		view := empty.View()
+		if view == "" {
+			t.Fatal("Expected the error view to render")
+		}
+		if strings.Contains(view, "FileManager not initialized") {
+			t.Errorf("Empty config should not surface the generic FileManager error, got:\n%s", view)
+		}
+	})
+}
+
+func TestNoUsableRepositoriesError(t *testing.T) {
+	// "Nothing configured" and "configured but unprepared" need different
+	// advice: the first is fixed by adding a repository, the second by
+	// repairing one that already exists.
+	empty := noUsableRepositoriesError(0, "save rules to").Error()
+	if !strings.Contains(empty, "no repositories configured") {
+		t.Errorf("Expected empty-config wording, got %q", empty)
+	}
+	if !strings.Contains(empty, "Add New Repository") {
+		t.Errorf("Expected the empty-config error to name the fix, got %q", empty)
+	}
+
+	broken := noUsableRepositoriesError(2, "save rules to").Error()
+	if strings.Contains(broken, "no repositories configured") {
+		t.Errorf("Configured-but-unavailable should not read as unconfigured, got %q", broken)
+	}
+	if !strings.Contains(broken, "2 configured repositories") {
+		t.Errorf("Expected the configured count, got %q", broken)
+	}
+
+	if single := noUsableRepositoriesError(1, "save rules to").Error(); !strings.Contains(single, "1 configured repository") {
+		t.Errorf("Expected singular wording for one repository, got %q", single)
+	}
 }
 
 func TestSaveRulesModel_Init(t *testing.T) {
@@ -598,6 +653,25 @@ func TestSaveRulesModel_Init(t *testing.T) {
 	if !strings.Contains(errorMsg.Err.Error(), "FileManager not initialized") {
 		t.Errorf("Expected 'FileManager not initialized' error, got: %v", errorMsg.Err)
 	}
+
+	// When the constructor already failed, Init must keep its error. Falling
+	// through would replace the actionable "no repositories configured" message
+	// with the generic FileManager one above.
+	t.Run("preserves constructor error state", func(t *testing.T) {
+		logger, _ := logging.NewTestLogger()
+		cfg := &config.Config{Repositories: []repository.RepositoryEntry{}}
+		empty := NewSaveRulesModel(helpers.NewUIContext(80, 24, cfg, logger))
+
+		if empty.state != StateError {
+			t.Fatalf("Expected StateError with no repositories, got %v", empty.state)
+		}
+		if cmd := empty.Init(); cmd != nil {
+			t.Error("Init should do nothing while in the error state")
+		}
+		if !strings.Contains(empty.err.Error(), "no repositories configured") {
+			t.Errorf("Init must not replace the constructor error, got %q", empty.err.Error())
+		}
+	})
 }
 
 // Message Handling Tests

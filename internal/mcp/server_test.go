@@ -157,6 +157,45 @@ func TestServer_Construction(t *testing.T) {
 			}
 		})
 	}
+
+	// A configuration the user has emptied by deleting every repository must
+	// still bring the server up, with no tools rather than a startup failure.
+	t.Run("no repositories configured", func(t *testing.T) {
+		logger, _ := logging.NewTestLogger()
+		cfg := &config.Config{Repositories: []repository.RepositoryEntry{}}
+
+		server := NewServer(cfg, logger)
+		if server == nil {
+			t.Fatal("NewServer returned nil for an empty configuration")
+		}
+
+		prepared, err := repository.PrepareAllRepositories(t.Context(), cfg.Repositories, logger)
+		if err != nil {
+			t.Fatalf("Preparing zero repositories should succeed, got: %v", err)
+		}
+		if len(prepared) != 0 {
+			t.Fatalf("Expected 0 prepared repositories, got %d", len(prepared))
+		}
+
+		// Mirror what Start() wires up before registering tools.
+		server.preparedRepositories = prepared
+		server.ruleProcessor = NewRuleFileProcessor(logger, map[string]string{}, 5*1024*1024)
+
+		files, err := server.getRepoFiles()
+		if err != nil {
+			t.Fatalf("Scanning zero repositories should succeed, got: %v", err)
+		}
+		if len(files) != 0 {
+			t.Fatalf("Expected 0 files, got %d", len(files))
+		}
+
+		if err := server.RegisterRuleFileTools(); err != nil {
+			t.Fatalf("Registering tools with no repositories should succeed, got: %v", err)
+		}
+		if len(server.toolRegistry) != 0 {
+			t.Fatalf("Expected no registered tools, got %d", len(server.toolRegistry))
+		}
+	})
 }
 
 func TestServer_ComponentInitialization(t *testing.T) {

@@ -137,14 +137,13 @@ func (m *SettingsModel) getMenuOptions() []ChangeOptionInfo {
 		Description: "Update the display name for this repository",
 	})
 
-	// Delete option (always available if >1 repo)
-	if len(m.currentConfig.Repositories) > 1 {
-		options = append(options, ChangeOptionInfo{
-			Option:      ChangeOptionDelete,
-			Title:       "🗑️  Delete Repository",
-			Description: "Remove this repository from configuration",
-		})
-	}
+	// Delete option. Offered for every repository including the last one, so a
+	// configuration can always be emptied and rebuilt from scratch.
+	options = append(options, ChangeOptionInfo{
+		Option:      ChangeOptionDelete,
+		Title:       "🗑️  Delete Repository",
+		Description: "Remove this repository from configuration",
+	})
 
 	// Back option
 	options = append(options, ChangeOptionInfo{

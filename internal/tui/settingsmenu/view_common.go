@@ -82,12 +82,12 @@ func (m *SettingsModel) formatCurrentConfig() string {
 
 	content.WriteString(lipgloss.NewStyle().Bold(true).Render("Current Configuration\n\n"))
 
-	if len(m.currentConfig.Repositories) == 0 {
+	if !m.currentConfig.HasRepositories() {
 		content.WriteString(lipgloss.NewStyle().Faint(true).Render("No repositories configured"))
 		return content.String()
 	}
 
-	for i, repo := range m.currentConfig.Repositories {
+	for i, repo := range m.repositories() {
 		// Repository name and type
 		content.WriteString(fmt.Sprintf("%d. %s (%s)\n",
 			i+1,
@@ -111,7 +111,7 @@ func (m *SettingsModel) formatCurrentConfig() string {
 		}
 
 		// Add spacing between repositories
-		if i < len(m.currentConfig.Repositories)-1 {
+		if i < len(m.repositories())-1 {
 			content.WriteString("\n")
 		}
 	}

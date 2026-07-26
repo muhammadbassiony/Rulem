@@ -115,6 +115,21 @@ type ImportRulesModel struct {
 	err error
 }
 
+// noUsableRepositoriesError builds the error shown when there is nothing to
+// import from. Having zero repositories configured is a normal state — it is
+// what remains after deleting them all — so it gets an actionable message rather
+// than being conflated with repositories that exist but failed to prepare.
+func noUsableRepositoriesError(configured int) error {
+	if configured == 0 {
+		return fmt.Errorf("no repositories configured\n\nThere is nothing to import from. Add a repository from the main menu:\n⚙️  Update settings → ➕ Add New Repository")
+	}
+	noun := "repositories"
+	if configured == 1 {
+		noun = "repository"
+	}
+	return fmt.Errorf("none of your %d configured %s could be prepared\n\nTheir directories may have been moved or deleted. Review them in\n⚙️  Update settings", configured, noun)
+}
+
 func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	// Initialize editors list (this will be constant)
 	editorsSlice := editors.GetAllEditorRuleConfigs()
@@ -195,7 +210,7 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 	}
 
 	if len(available) == 0 {
-		ctx.Logger.Error("No repositories configured")
+		ctx.Logger.Error("No usable repositories to import from", "configured", len(ctx.Config.Repositories))
 		return &ImportRulesModel{
 			logger:           ctx.Logger,
 			windowWidth:      ctx.Width,
@@ -210,7 +225,7 @@ func NewImportRulesModel(ctx helpers.UIContext) *ImportRulesModel {
 			ruleFiles:        nil,
 			selectedFile:     filemanager.FileItem{},
 			isOverwriteError: false,
-			err:              fmt.Errorf("no repositories configured - please run setup first"),
+			err:              noUsableRepositoriesError(len(ctx.Config.Repositories)),
 		}
 	}
 
@@ -256,7 +271,7 @@ func (m *ImportRulesModel) Init() tea.Cmd {
 	if len(m.preparedRepos) == 0 {
 		return func() tea.Msg {
 			return ImportFileErrorMsg{
-				Err:              fmt.Errorf("no repositories available - please run setup first"),
+				Err:              noUsableRepositoriesError(0),
 				IsOverwriteError: false,
 			}
 		}

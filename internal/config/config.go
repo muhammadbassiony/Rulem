@@ -181,6 +181,14 @@ func DefaultConfig() Config {
 	return cfg
 }
 
+// HasRepositories reports whether at least one repository is configured.
+// A configuration with no repositories is a valid state: it is what remains
+// after deleting every repository, and what a fresh config starts as.
+// Nil-safe so callers can use it before a config has finished loading.
+func (c *Config) HasRepositories() bool {
+	return c != nil && len(c.Repositories) > 0
+}
+
 // FindRepositoryByID searches for a repository by its unique ID.
 // Uses linear search which is acceptable for the expected scale (≤10 repositories).
 //
@@ -191,6 +199,9 @@ func DefaultConfig() Config {
 //   - *repository.RepositoryEntry: Pointer to the found repository entry
 //   - error: Error if repository is not found
 func (c *Config) FindRepositoryByID(id string) (*repository.RepositoryEntry, error) {
+	if c == nil {
+		return nil, fmt.Errorf("repository not found: %s (no configuration loaded)", id)
+	}
 	for i := range c.Repositories {
 		if c.Repositories[i].ID == id {
 			return &c.Repositories[i], nil
@@ -209,6 +220,9 @@ func (c *Config) FindRepositoryByID(id string) (*repository.RepositoryEntry, err
 //   - *repository.RepositoryEntry: Pointer to the found repository entry
 //   - error: Error if repository is not found
 func (c *Config) FindRepositoryByName(name string) (*repository.RepositoryEntry, error) {
+	if c == nil {
+		return nil, fmt.Errorf("repository not found: %s (no configuration loaded)", name)
+	}
 	lowerName := strings.ToLower(name)
 	for i := range c.Repositories {
 		if strings.ToLower(c.Repositories[i].Name) == lowerName {

@@ -51,7 +51,7 @@ func (m *SettingsModel) handleUpdateGitHubPathKeys(msg tea.KeyMsg) (*SettingsMod
 
 		// Check for duplicate paths across repositories
 		expandedPath := fileops.ExpandPath(input)
-		for _, repo := range m.currentConfig.Repositories {
+		for _, repo := range m.repositories() {
 			if repo.ID != m.selectedRepositoryID && repo.Path == expandedPath {
 				err := fmt.Errorf("path already used by repository '%s'", repo.Name)
 				m.logger.Warn("Duplicate path detected", "error", err, "path", expandedPath)

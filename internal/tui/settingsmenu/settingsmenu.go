@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Type definitions have been moved to types.go for better organization.
@@ -543,6 +544,16 @@ func (m *SettingsModel) resetTemporaryChanges() {
 	m.hasChanges = false
 }
 
+// repositories returns the configured repositories, nil-safe. The config can be
+// nil when loading failed, and empty once the user has deleted every repository;
+// both are states the views must render rather than crash on.
+func (m *SettingsModel) repositories() []repository.RepositoryEntry {
+	if m.currentConfig == nil {
+		return nil
+	}
+	return m.currentConfig.Repositories
+}
+
 // isGitHubRepo returns true if current configuration is a GitHub repository.
 func (m *SettingsModel) isGitHubRepo() bool {
 	if m.currentConfig == nil {
@@ -737,13 +748,26 @@ func (m *SettingsModel) View() string {
 // - Select a repository to manage
 // - Add a new repository (Local or GitHub)
 func (m *SettingsModel) viewMainMenu() string {
+	subtitle := "Manage your rule repositories"
+	if !m.currentConfig.HasRepositories() {
+		subtitle = "No repositories configured"
+	}
+
 	m.layout = m.layout.SetConfig(components.LayoutConfig{
 		Title:    "⚙️  Settings - Repositories",
-		Subtitle: "Manage your rule repositories",
+		Subtitle: subtitle,
 		HelpText: "↑/↓ to navigate • Enter to select • Esc to go back",
 	})
 
 	var content strings.Builder
+
+	// With no repositories the list shows only action items, which reads as an
+	// empty screen. Say what happened and what to do next.
+	if !m.currentConfig.HasRepositories() {
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render(
+			"You have no repositories configured. Saving and importing rules are\nunavailable until you add one with ➕ Add New Repository below."))
+		content.WriteString("\n\n")
+	}
 
 	// Render repository list (includes "Add Repository" action item)
 	content.WriteString(m.repoList.View())

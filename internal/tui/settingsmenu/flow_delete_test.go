@@ -2,6 +2,7 @@
 package settingsmenu
 
 import (
+	"rulem/internal/config"
 	"rulem/internal/repository"
 	"strings"
 	"testing"
@@ -202,8 +203,10 @@ func TestIntegration_DeleteRepositoryCancelWithEsc(t *testing.T) {
 	}
 }
 
-// TestIntegration_DeleteLastRepositoryError tests error when trying to delete last repository
-func TestIntegration_DeleteLastRepositoryError(t *testing.T) {
+// TestIntegration_DeleteLastRepository verifies the last repository can be
+// deleted, leaving an empty configuration. This is the only way to start over
+// from scratch, and it used to be blocked outright.
+func TestIntegration_DeleteLastRepository(t *testing.T) {
 	configPath, cleanup := SetTestConfigPath(t)
 	defer cleanup()
 
@@ -223,14 +226,106 @@ func TestIntegration_DeleteLastRepositoryError(t *testing.T) {
 	m.selectedRepositoryID = "only-repo"
 	m.state = SettingsStateConfirmDelete
 
-	// Try to confirm deletion
+	// Confirm deletion
 	m, cmd := m.handleConfirmDeleteKeys(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	if cmd == nil {
 		t.Fatalf("should return command")
 	}
 
-	// Execute delete command (should return error)
 	msg := cmd()
+	if errMsg, ok := msg.(deleteErrorMsg); ok {
+		t.Fatalf("deleting the last repository should succeed, got error: %v", errMsg.err)
+	}
+	if _, ok := msg.(settingsCompleteMsg); !ok {
+		t.Fatalf("expected settingsCompleteMsg, got %T", msg)
+	}
+
+	// Verify the repository was deleted, leaving an empty configuration
+	if len(m.currentConfig.Repositories) != 0 {
+		t.Fatalf("expected 0 repositories after deleting the last one, got %d", len(m.currentConfig.Repositories))
+	}
+	if m.state != SettingsStateMainMenu {
+		t.Fatalf("expected state %v, got %v", SettingsStateMainMenu, m.state)
+	}
+	if m.selectedRepositoryID != "" {
+		t.Fatalf("expected selectedRepositoryID to be cleared, got %q", m.selectedRepositoryID)
+	}
+
+	// The empty configuration must be persisted, not just held in memory:
+	// re-reading it is what the user sees when they return to settings.
+	saved, err := config.LoadFrom(configPath)
+	if err != nil {
+		t.Fatalf("failed to load saved config: %v", err)
+	}
+	if len(saved.Repositories) != 0 {
+		t.Fatalf("expected 0 repositories persisted to disk, got %d", len(saved.Repositories))
+	}
+}
+
+// TestIntegration_DeleteAllRepositoriesThenAddNew walks the full recovery path
+// the user cares about: empty the configuration one repository at a time, then
+// register a fresh one.
+func TestIntegration_DeleteAllRepositoriesThenAddNew(t *testing.T) {
+	configPath, cleanup := SetTestConfigPath(t)
+	defer cleanup()
+
+	m := createTestModel(t)
+
+	m.currentConfig.Repositories = []repository.RepositoryEntry{
+		{ID: "repo-1", Name: "Repo 1", Type: repository.RepositoryTypeLocal, Path: t.TempDir()},
+		{ID: "repo-2", Name: "Repo 2", Type: repository.RepositoryTypeLocal, Path: t.TempDir()},
+	}
+
+	for _, id := range []string{"repo-1", "repo-2"} {
+		m.selectedRepositoryID = id
+		m.state = SettingsStateConfirmDelete
+
+		var cmd tea.Cmd
+		m, cmd = m.handleConfirmDeleteKeys(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		if cmd == nil {
+			t.Fatalf("deleting %s should return a command", id)
+		}
+		if msg := cmd(); !isSettingsComplete(msg) {
+			t.Fatalf("deleting %s should succeed, got %T (%v)", id, msg, msg)
+		}
+	}
+
+	if len(m.currentConfig.Repositories) != 0 {
+		t.Fatalf("expected all repositories deleted, got %d", len(m.currentConfig.Repositories))
+	}
+
+	// Now register a new repository from scratch against the empty config.
+	m.addRepositoryName = "Fresh Start"
+	m.addRepositoryPath = t.TempDir()
+	msg := m.createLocalRepository()()
+	if errMsg, ok := msg.(addLocalErrorMsg); ok {
+		t.Fatalf("adding a repository to an empty config should succeed, got: %v", errMsg.err)
+	}
+
+	if len(m.currentConfig.Repositories) != 1 {
+		t.Fatalf("expected 1 repository after adding, got %d", len(m.currentConfig.Repositories))
+	}
+	if m.currentConfig.Repositories[0].Name != "Fresh Start" {
+		t.Fatalf("expected the new repository, got %q", m.currentConfig.Repositories[0].Name)
+	}
+
+	saved, err := config.LoadFrom(configPath)
+	if err != nil {
+		t.Fatalf("failed to load saved config: %v", err)
+	}
+	if len(saved.Repositories) != 1 || saved.Repositories[0].Name != "Fresh Start" {
+		t.Fatalf("expected the new repository persisted, got %+v", saved.Repositories)
+	}
+}
+
+// TestDeleteRepository_NilConfig verifies deletion reports an error rather than
+// panicking when the configuration failed to load.
+func TestDeleteRepository_NilConfig(t *testing.T) {
+	m := createTestModel(t)
+	m.currentConfig = nil
+	m.selectedRepositoryID = "anything"
+
+	msg := m.deleteRepository()()
 	errMsg, ok := msg.(deleteErrorMsg)
 	if !ok {
 		t.Fatalf("expected deleteErrorMsg, got %T", msg)
@@ -238,19 +333,35 @@ func TestIntegration_DeleteLastRepositoryError(t *testing.T) {
 	if errMsg.err == nil {
 		t.Fatalf("expected an error in deleteErrorMsg")
 	}
-	if !strings.Contains(errMsg.err.Error(), "last repository") {
-		t.Fatalf("expected error to mention last repository, got %q", errMsg.err.Error())
+}
+
+// TestViewConfirmDelete_LastRepositoryWarning verifies the confirmation screen
+// tells the user what an empty configuration means before they commit to it.
+func TestViewConfirmDelete_LastRepositoryWarning(t *testing.T) {
+	m := createTestModelWithConfig(t, createLocalConfig(t.TempDir()))
+	m.selectedRepositoryID = "test-local-1"
+
+	view := m.viewConfirmDelete()
+	if !strings.Contains(view, "last repository") {
+		t.Errorf("expected last-repository warning in confirmation view, got:\n%s", view)
 	}
 
-	// Verify repository was NOT deleted
-	if len(m.currentConfig.Repositories) != 1 {
-		t.Fatalf("should still have 1 repository, got %d", len(m.currentConfig.Repositories))
+	// With a second repository present the warning must not appear.
+	m.currentConfig.Repositories = append(m.currentConfig.Repositories, repository.RepositoryEntry{
+		ID:   "test-local-2",
+		Name: "Second",
+		Type: repository.RepositoryTypeLocal,
+		Path: t.TempDir(),
+	})
+	if view := m.viewConfirmDelete(); strings.Contains(view, "last repository") {
+		t.Errorf("did not expect last-repository warning with 2 repositories, got:\n%s", view)
 	}
-	if m.currentConfig.Repositories[0].ID != "only-repo" {
-		t.Fatalf("expected repo ID %q, got %q", "only-repo", m.currentConfig.Repositories[0].ID)
-	}
+}
 
-	_ = configPath
+// isSettingsComplete reports whether msg signals a successful settings change.
+func isSettingsComplete(msg tea.Msg) bool {
+	_, ok := msg.(settingsCompleteMsg)
+	return ok
 }
 
 // TestIntegration_DeleteRepositoryNotFound tests error when repository ID not found

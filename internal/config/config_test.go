@@ -206,6 +206,64 @@ func TestConfigWithEmptyRepositories(t *testing.T) {
 	if len(loaded.Repositories) != 0 {
 		t.Errorf("Expected 0 repositories, got %d", len(loaded.Repositories))
 	}
+	if loaded.HasRepositories() {
+		t.Error("Expected HasRepositories() to be false for an empty array")
+	}
+
+	// The same must hold when the user empties a populated config by deleting
+	// their last repository, which is how this state is normally reached.
+	populated := Config{
+		Version:  "1.0",
+		InitTime: time.Now().Unix(),
+		Repositories: []repository.RepositoryEntry{
+			{ID: "only-repo", Name: "Only", Type: repository.RepositoryTypeLocal, Path: t.TempDir()},
+		},
+	}
+	if err := populated.SaveTo(configPath); err != nil {
+		t.Fatalf("Failed to save populated config: %v", err)
+	}
+
+	populated.Repositories = populated.Repositories[:0]
+	if err := populated.SaveTo(configPath); err != nil {
+		t.Fatalf("Saving an emptied repository list must succeed: %v", err)
+	}
+
+	reloaded, err := LoadFrom(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load the emptied config: %v", err)
+	}
+	if len(reloaded.Repositories) != 0 {
+		t.Errorf("Expected 0 repositories after emptying, got %d", len(reloaded.Repositories))
+	}
+
+	// The file must survive, so the emptied config does not read as a first run
+	// and send the user to a setup wizard instead of their settings menu.
+	if _, err := os.Stat(configPath); err != nil {
+		t.Errorf("Config file should still exist after emptying it: %v", err)
+	}
+}
+
+func TestHasRepositories(t *testing.T) {
+	t.Log("Testing HasRepositories")
+
+	tests := []struct {
+		name string
+		cfg  *Config
+		want bool
+	}{
+		{"nil config", nil, false},
+		{"nil slice", &Config{}, false},
+		{"empty slice", &Config{Repositories: []repository.RepositoryEntry{}}, false},
+		{"one repository", &Config{Repositories: []repository.RepositoryEntry{{ID: "a"}}}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.HasRepositories(); got != tt.want {
+				t.Errorf("HasRepositories() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestConfigInitTime(t *testing.T) {
@@ -305,6 +363,22 @@ func TestFindRepositoryByID(t *testing.T) {
 			}
 		})
 	}
+
+	// Lookups happen from views that may run before the config has loaded, and
+	// after the user has deleted every repository. Neither may panic.
+	t.Run("nil config", func(t *testing.T) {
+		var nilCfg *Config
+		if _, err := nilCfg.FindRepositoryByID("anything"); err == nil {
+			t.Error("Expected error looking up an ID on a nil config")
+		}
+	})
+
+	t.Run("no repositories configured", func(t *testing.T) {
+		empty := &Config{Repositories: []repository.RepositoryEntry{}}
+		if _, err := empty.FindRepositoryByID("gone"); err == nil {
+			t.Error("Expected error looking up an ID with no repositories")
+		}
+	})
 }
 
 func TestFindRepositoryByName(t *testing.T) {
@@ -362,6 +436,20 @@ func TestFindRepositoryByName(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil config", func(t *testing.T) {
+		var nilCfg *Config
+		if _, err := nilCfg.FindRepositoryByName("anything"); err == nil {
+			t.Error("Expected error looking up a name on a nil config")
+		}
+	})
+
+	t.Run("no repositories configured", func(t *testing.T) {
+		empty := &Config{Repositories: []repository.RepositoryEntry{}}
+		if _, err := empty.FindRepositoryByName("gone"); err == nil {
+			t.Error("Expected error looking up a name with no repositories")
+		}
+	})
 }
 
 func TestDefaultConfig(t *testing.T) {

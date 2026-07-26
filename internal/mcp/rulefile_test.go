@@ -1362,7 +1362,7 @@ Content with suspicious description`,
 // text mentions "<script>".
 func TestGenerateToolNameSanitizesMarkup(t *testing.T) {
 	processor, tempDir, _ := createTestRuleFileProcessor(t)
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	name := processor.generateToolName(&RuleFile{
 		FileName: "markup.md",

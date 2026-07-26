@@ -31,7 +31,7 @@ func TestExpandPath(t *testing.T) {
 		{
 			name:     "just tilde",
 			input:    "~",
-			expected: "~",
+			expected: home,
 		},
 		{
 			name:     "tilde not at start",

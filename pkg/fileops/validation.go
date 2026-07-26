@@ -375,7 +375,7 @@ func ValidateFileAccess(filePath string, requireWrite bool) error {
 	if err != nil {
 		return fmt.Errorf("file is not readable: %w", err)
 	}
-	file.Close()
+	_ = file.Close()
 
 	// Test write access if required
 	if requireWrite {
@@ -383,7 +383,7 @@ func ValidateFileAccess(filePath string, requireWrite bool) error {
 		if err != nil {
 			return fmt.Errorf("file is not writable: %w", err)
 		}
-		file.Close()
+		_ = file.Close()
 	}
 
 	return nil
@@ -465,7 +465,7 @@ func IsReservedDirectory(path string) bool {
 		if strings.EqualFold(absPath, reserved) {
 			return true
 		}
-		if hasPathPrefix(absPath, reserved) && !isUserTempDirectory(absPath) {
+		if hasPathPrefix(absPath, reserved) && !isUserTempDirectory(absPath, reserved) {
 			return true
 		}
 	}
@@ -582,40 +582,55 @@ func getReservedDirectories() []string {
 	return reservedDirs
 }
 
-// isUserTempDirectory detects legitimate user temp directories
-func isUserTempDirectory(path string) bool {
-	// macOS: /var/folders/xx/yyyy/T/ are user temp dirs
-	if runtime.GOOS == "darwin" {
-		if strings.Contains(path, "/var/folders/") {
-			return true
-		}
-	}
-
-	// Linux: /tmp is usually safe, /var/tmp may be safe
-	if runtime.GOOS == "linux" {
-		if strings.HasPrefix(path, "/tmp/") || path == "/tmp" {
-			return true
-		}
-	}
-
-	// Windows: temp directories under user profile
-	if runtime.GOOS == "windows" {
-		if strings.Contains(strings.ToLower(path), "\\temp\\") ||
-			strings.Contains(strings.ToLower(path), "\\tmp\\") {
-			return true
-		}
-	}
-
-	// Check if path is under system temp directory
-	systemTemp := os.TempDir()
-	cleanSystemTemp := filepath.Clean(systemTemp)
+// isUserTempDirectory reports whether path sits inside a legitimate temporary
+// directory that is itself nested strictly inside reservedDir.
+//
+// This is the allow-list exception inside IsReservedDirectory: the path is
+// already known to be under reservedDir, and this function decides whether to
+// wave it through anyway. It is the one place where matching too loosely
+// *weakens* a guard instead of tightening it, so both halves are exact.
+//
+//   - The temp root must be a whole-component prefix of path (hasPathPrefix),
+//     not a substring: the old bare strings.HasPrefix let "/tmpfoo" pass as
+//     "/tmp", and the old Windows strings.Contains(path, `\temp\`) exempted any
+//     reserved path with a directory named "temp" at any depth.
+//   - The temp root must itself be strictly below reservedDir. os.TempDir reads
+//     the user-controlled $TMPDIR, so without this a TMPDIR at or above a
+//     reserved directory - TMPDIR=/var against /var/log - would exempt the
+//     entire reserved tree. A temp root nested inside the reserved directory
+//     only carves out that one hole, which is what the exception is for.
+func isUserTempDirectory(path, reservedDir string) bool {
 	cleanPath := filepath.Clean(path)
 
-	if strings.HasPrefix(cleanPath, cleanSystemTemp) {
-		return true
+	for _, tempRoot := range userTempRoots() {
+		if !hasPathPrefix(tempRoot, reservedDir) {
+			continue
+		}
+		if strings.EqualFold(cleanPath, tempRoot) || hasPathPrefix(cleanPath, tempRoot) {
+			return true
+		}
 	}
 
 	return false
+}
+
+// userTempRoots returns the directories that legitimately hold per-user
+// temporary files on this platform, canonicalized.
+//
+// os.TempDir covers the configured location on every OS, including Windows,
+// where it reads %TMP%/%TEMP% under the user profile. The extra entries are the
+// well-known defaults that remain valid even when $TMPDIR points somewhere else.
+func userTempRoots() []string {
+	roots := []string{filepath.Clean(os.TempDir())}
+
+	switch runtime.GOOS {
+	case "darwin":
+		roots = append(roots, "/var/folders", "/private/var/folders")
+	case "linux":
+		roots = append(roots, "/tmp", "/var/tmp")
+	}
+
+	return roots
 }
 
 // ValidateDirectoryWritable tests if a directory is writable by creating a test file.
@@ -968,7 +983,7 @@ func IsDirEmpty(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, err = f.Readdirnames(1)
 	if err == io.EOF {

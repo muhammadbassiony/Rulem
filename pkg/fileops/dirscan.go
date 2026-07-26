@@ -288,7 +288,7 @@ func (s *SecureDirectoryScanner) scanRecursive(relativePath string, depth int) e
 		}
 		return fmt.Errorf("failed to open directory %s: %w", relativePath, err)
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 
 	// Read directory entries
 	entries, err := dir.ReadDir(-1)

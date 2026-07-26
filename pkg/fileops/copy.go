@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -86,6 +87,19 @@ func AtomicCopy(srcPath, destPath string) error {
 	}
 	defer func() { _ = root.Close() }()
 
+	return atomicCopyInto(root, destName, srcFile, srcInfo.Mode().Perm())
+}
+
+// atomicCopyInto is the body of AtomicCopy once both ends have been reduced to
+// what the copy actually needs: an open source, the permissions to give the
+// destination, and a root to write inside. destName must name a file directly
+// in root.
+//
+// Splitting it out this way lets a caller that already holds a confined handle
+// - a Dir - reuse the copy without handing over a path string for os.OpenRoot
+// to re-resolve. Re-resolving is precisely the step where a symlinked
+// subdirectory could redirect the write out of the tree.
+func atomicCopyInto(root *os.Root, destName string, src io.Reader, perm fs.FileMode) error {
 	tempName, tempFile, err := createTempFile(root)
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %w", err)
@@ -101,11 +115,11 @@ func AtomicCopy(srcPath, destPath string) error {
 
 	// Match the source permissions. Chmod on the open handle is used because
 	// the O_CREATE mode above is masked by umask.
-	if err := tempFile.Chmod(srcInfo.Mode().Perm()); err != nil {
+	if err := tempFile.Chmod(perm); err != nil {
 		return fmt.Errorf("failed to set file permissions: %w", err)
 	}
 
-	if _, err := io.Copy(tempFile, srcFile); err != nil {
+	if _, err := io.Copy(tempFile, src); err != nil {
 		return fmt.Errorf("failed to copy file contents: %w", err)
 	}
 

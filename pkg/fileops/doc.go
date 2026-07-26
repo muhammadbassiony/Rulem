@@ -1,59 +1,64 @@
-// Package fileops provides secure file operations with defense-in-depth validation patterns.
+// Package fileops is rulem's storage-policy module: where the application may
+// keep files, what those files may be called, and how bytes get moved between
+// them safely.
 //
-// This package implements atomic file operations combined with comprehensive security validations
-// to prevent common attacks like path traversal, symlink exploits, and control-character injection.
+// # The model: a confined handle, not a validated string
 //
-// # Security Validation Patterns
+// The centre of the package is [Dir], a handle on a directory that rulem is
+// allowed to use. Open it once from a user-supplied path with [OpenDir], then
+// address everything inside it by a relative name:
 //
-// For maximum security, combine validation functions in this order:
-//
-// 1. **Path Security**: ValidatePathSecurity() - Prevents path traversal attacks
-// 2. **File Size**: ValidateFileSizeLimit() - Prevents resource exhaustion
-// 3. **File Access**: ValidateFileAccess() - Ensures file readability/writability
-// 4. **Directory Containment**: ValidateFileInDirectory() - Prevents directory escapes
-// 5. **Content Security**: ValidateContentSecurity() - Rejects control characters
-// 6. **Symlink Handling**: Check IsSymlink(), ValidateSymlinkSecurity() - Prevents symlink attacks
-//
-// # Example: Secure File Processing
-//
-//	// Comprehensive file validation before processing
-//	if err := fileops.ValidatePathSecurity(filePath); err != nil {
-//	    return fmt.Errorf("path security: %w", err)
+//	dir, err := fileops.OpenDir("~/rules")
+//	if err != nil {
+//	    return err
 //	}
-//	if err := fileops.ValidateFileSizeLimit(filePath, 10*1024*1024); err != nil {
-//	    return fmt.Errorf("file size: %w", err)
-//	}
-//	if err := fileops.ValidateFileAccess(filePath, false); err != nil {
-//	    return fmt.Errorf("file access: %w", err)
-//	}
-//	if err := fileops.ValidateFileInDirectory(filePath, baseDir); err != nil {
-//	    return fmt.Errorf("directory containment: %w", err)
-//	}
+//	defer dir.Close()
 //
-//	content, _ := os.ReadFile(filePath)
-//	if err := fileops.ValidateContentSecurity(string(content)); err != nil {
-//	    return fmt.Errorf("content security: %w", err)
-//	}
+//	files, err := dir.Scan(nil)             // walk it
+//	content, err := dir.ReadFile("api.md")  // read one file
+//	err = dir.CopyFrom(picked, "api.md")    // copy one in, atomically
 //
-//	// Handle symlinks securely
-//	if isLink, _ := fileops.IsSymlink(filePath); isLink {
-//	    if err := fileops.ValidateSymlinkSecurity(filePath, []string{baseDir}); err != nil {
-//	        return fmt.Errorf("symlink security: %w", err)
-//	    }
-//	}
+// A Dir wraps an [os.Root]. Names are resolved against an open directory
+// handle, one component at a time, so a path that would leave the tree fails
+// at the syscall itself. Confinement is *held*, not re-proved: there is no
+// separate check that could be forgotten, go stale, or turn out to be
+// unreachable, because there is no separate check.
 //
-// # Atomic Operations
+// This is why the package no longer offers a "combine these validators in this
+// order" recipe. That recipe existed to close the gap between proving
+// something about a path string and then acting on that string; holding the
+// boundary open removes the gap instead of policing it.
 //
-// Use AtomicCopy() for reliable file transfers that prevent partial writes:
+// The one discipline the type system cannot enforce: [Dir.Path] and
+// [Dir.DisplayPath] return ordinary strings for showing to a user. Never feed
+// one back into an operation.
 //
-//	err := fileops.AtomicCopy(srcPath, destPath)
-//	// Destination appears atomically or remains unchanged on failure
+// # What else is here
 //
-// The copy runs through an os.Root scoped to the destination directory, so a
-// symlink planted there cannot redirect the write outside it, and the
-// destination inherits the source file's permission bits.
+// Everything that is genuinely rulem's policy rather than the standard
+// library's job:
 //
-// # Directory Operations
+//   - Storage policy - [ValidateStoragePath], [IsReservedDirectory] and the
+//     per-OS lists of directories an application has no business writing to.
+//   - Name sanitizers - [SanitizeFilename] and [SanitizeRelativePath] for the
+//     filesystem, [SanitizeIdentifier] for protocol identifiers.
+//   - [AtomicCopy] - unguessable temporary name, O_EXCL, source permissions
+//     preserved, fsync, atomic rename, cleanup on every failure path. The
+//     destination either appears complete or is not touched.
+//   - Content and size limits - [ValidateContentSecurity] rejects control
+//     characters, [ValidateFileSizeLimit] caps a read.
+//   - Confined walking - [Dir.Scan] over [fs.WalkDir]; the caller supplies the
+//     filter.
 //
-// EnsureDirectoryExists() creates directories safely with proper permissions (0755).
+// # Scope
+//
+// This package deals in directories, names, bytes and permissions. It has no
+// notion of what any file *means* - which files are interesting is expressed
+// by the caller as a func(name string) bool, and decisions like "may this be
+// overwritten?" or "what should the destination be called?" belong to the
+// caller. Domain vocabulary stays out of this package entirely.
+//
+// It is not a security library. [os.Root] is, and its limits are its own: it
+// does not defend against mount points, bind mounts, /proc special files or
+// device nodes, and Chmod/Chown/Chtimes race on Unix.
 package fileops

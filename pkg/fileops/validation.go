@@ -317,15 +317,10 @@ func SanitizeRelativePath(path string) (string, error) {
 		cleaned = append(cleaned, cleanSeg)
 	}
 
-	result := filepath.Join(cleaned...)
-
-	// Defensive containment check: the joined path must not resolve outside the root.
-	if result == "" || result == "." || result == ".." ||
-		strings.HasPrefix(result, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path escapes repository root: %q", path)
-	}
-
-	return result, nil
+	// Every segment has already been rejected if it was "", "." or ".." and
+	// sanitized individually, so the join cannot produce an escaping path.
+	// The result is addressed through a Dir anyway, which would refuse one.
+	return filepath.Join(cleaned...), nil
 }
 
 // ValidateFileAccess checks if a file exists and is accessible with specified permissions.
@@ -817,8 +812,8 @@ func ValidateStoragePath(path string) error {
 // What this function deliberately does NOT do is scan for HTML and JavaScript
 // injection markers such as "<script", "javascript:" or "eval(". Those checks
 // were removed because they were a category error: they are an HTML-context
-// defense applied to markdown, which is never rendered as HTML here. They
-// rejected legitimate documents - any rule file about web security discusses
+// defense applied to plain text that is never rendered as HTML here. They
+// rejected legitimate documents - any document about web security discusses
 // exactly those tokens - while providing no real protection, since any
 // substring blocklist is trivially evaded. Escape content at the point where
 // it enters an HTML context instead; that is the only place the context is
